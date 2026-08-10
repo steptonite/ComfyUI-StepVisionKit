@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.pt
+*.onnx
+*.mov
+*.mp4
+*.png
+*.jpg
+.DS_Store
+.venv/

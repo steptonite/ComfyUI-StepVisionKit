@@ -1,0 +1,15 @@
+[project]
+name = "comfyui-stepvisionkit"
+description = "Detection, ByteTrack tracking, HUD compositing and depth curves for video in ComfyUI. Mac/MPS and CUDA."
+version = "1.0.0"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = ["numpy", "opencv-python", "ultralytics"]
+
+[project.urls]
+Repository = "https://github.com/steptonite/ComfyUI-StepVisionKit"
+
+[tool.comfy]
+PublisherId = "steptonite"
+DisplayName = "StepVisionKit"
+Icon = ""
