@@ -92,6 +92,43 @@ def _jitter(frames_small, bw):
     return 1000.0 * float(np.median(vals)) if vals else 0.0
 
 
+# ───────────────────────── живий прев'ю ─────────────────────────
+
+_PCT_LO = np.arange(0.0, 20.0001, 0.5)
+_PCT_HI = np.arange(80.0, 100.0001, 0.5)
+
+
+def _qtable(x):
+    flat = x.reshape(-1)
+    if flat.size > 200_000:
+        flat = flat[np.random.default_rng(0).integers(0, flat.size, 200_000)]
+    return ([float(v) for v in np.percentile(flat, _PCT_LO)],
+            [float(v) for v in np.percentile(flat, _PCT_HI)])
+
+
+def _preview_payload(x, side=384):
+    """Мініатюра СИРОГО депсу (до грейду) для браузера: далі він грейдить сам, без Run.
+
+    Шлемо саме вхід x, а не готовий результат — тоді depth_is, trim, рівні й крива
+    перераховуються в браузері миттєво. Таблиці квантилів — для кліпу й для кадру,
+    бо рівні можуть рахуватись і так, і так (levels_scope).
+    """
+    import base64
+    import cv2
+
+    f = x[0]
+    h, w = f.shape
+    s = min(1.0, side / float(max(h, w)))
+    sm = cv2.resize(f, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA)
+    x0, x1 = float(sm.min()), float(sm.max())
+    enc = np.round((sm - x0) / max(x1 - x0, 1e-9) * 65535.0).astype("<u2")
+    clo, chi = _qtable(x)
+    flo, fhi = _qtable(x[0])
+    return {"w": int(sm.shape[1]), "h": int(sm.shape[0]), "x0": x0, "x1": x1,
+            "data": base64.b64encode(enc.tobytes()).decode("ascii"),
+            "clip_lo": clo, "clip_hi": chi, "frame_lo": flo, "frame_hi": fhi, "frames": int(x.shape[0])}
+
+
 # ───────────────────────── нода ─────────────────────────
 
 class SVKDepthGrade:
@@ -164,6 +201,7 @@ class SVKDepthGrade:
             x = x[..., :3].mean(axis=3)
         n, h, w = x.shape
         video = n > 1
+        preview = _preview_payload(x)
 
         # 1) ВІДСТАНЬ: 0 = найближче
         dist = (1.0 - x) if depth_is == "near is white" else x
@@ -281,4 +319,5 @@ class SVKDepthGrade:
         print(f"[DepthGrade] плани 0.0→1.0: |{bars}|  (hero_plane став на горб героя)")
 
         tt = torch.from_numpy(np.ascontiguousarray(out, dtype=np.float32))
-        return (tt.unsqueeze(-1).repeat(1, 1, 1, 3), tt, info)
+        return {"ui": {"svk_depth_preview": [preview]},
+                "result": (tt.unsqueeze(-1).repeat(1, 1, 1, 3), tt, info)}
