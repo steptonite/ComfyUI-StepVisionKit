@@ -16,6 +16,34 @@ import torch
 from .boxes import any_type, _to_xyxy_frames, lab_text
 
 
+def _put_text_f32(dst_rgb, dst_a, txt, org, font, fs, color, thick):
+    """Підпис на float32-полотні.
+
+    🔴 cv2.putText з OpenCV 5 приймає ТІЛЬКИ CV_8U (`img.depth() == CV_8U`);
+    4.x мовчки їв float32, тому на Маку працювало, а на орендованій машині
+    з opencv 5.0 нода падала. Малюємо штамп у uint8-ROI і змішуємо як альфу —
+    згладжування лишається, від версії OpenCV більше не залежимо.
+    """
+    import cv2
+
+    (tw, th), bl = cv2.getTextSize(txt, font, fs, thick)
+    pad = thick + 2
+    x0 = max(0, org[0] - pad)
+    y0 = max(0, org[1] - th - pad)
+    x1 = min(dst_rgb.shape[1], org[0] + tw + pad)
+    y1 = min(dst_rgb.shape[0], org[1] + bl + pad)
+    if x1 <= x0 or y1 <= y0:
+        return
+    stamp = np.zeros((y1 - y0, x1 - x0), np.uint8)
+    cv2.putText(stamp, txt, (org[0] - x0, org[1] - y0), font, fs, 255, thick, cv2.LINE_AA)
+    a = (stamp.astype(np.float32) / 255.0)[:, :, None]
+    roi = dst_rgb[y0:y1, x0:x1]
+    roi *= 1.0 - a
+    roi += a * np.asarray(color, np.float32)
+    da = dst_a[y0:y1, x0:x1]
+    np.maximum(da, a[:, :, 0], out=da)
+
+
 def _resize_9slice(img, tw, th, corner):
     """Ресайз із збереженням кутів. corner=0 -> звичайний ресайз."""
     import cv2
@@ -317,8 +345,7 @@ class LexHUDSprite:
                     if want_hud:
                         targets.append((hud_only, hud_only_a))
                     for dst_rgb, dst_a in targets:
-                        cv2.putText(dst_rgb, txt, org, _FONT, fs, tcol, th_, cv2.LINE_AA)
-                        cv2.putText(dst_a, txt, org, _FONT, fs, 1.0, th_, cv2.LINE_AA)
+                        _put_text_f32(dst_rgb, dst_a, txt, org, _FONT, fs, tcol, th_)
 
             if want_comp:
                 comp[i] = torch.from_numpy(np.clip(base, 0, 1, out=base))
