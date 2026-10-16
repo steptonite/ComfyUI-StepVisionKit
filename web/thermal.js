@@ -155,13 +155,13 @@ function render() {
     const fresh = coolingInfo && Date.now() - coolingInfo.at < COOL_HOLD_MS;
     if (fresh) {
         e.style.color = "#d9a441";
-        e.textContent = `Охолодження ${fmtT(coolingInfo.t)} → ${fmtT(coolingInfo.resume_at)} · ${Math.round(coolingInfo.since)} с`;
+        e.textContent = `Охолодження ${srcT(coolingInfo.src, coolingInfo.t)} → ${fmtT(coolingInfo.resume_at)} · ${Math.round(coolingInfo.since)} с`;
     } else if (server.state === "frozen") {
         e.style.color = "#e0857c";
-        e.textContent = `ComfyUI заморожено · SoC ${fmtT(server.t)}`;
+        e.textContent = `ComfyUI заморожено · ${srcT(server.src, server.t)}`;
     } else if (server.reader_ok) {
         e.style.color = "#8a8a93";
-        e.textContent = `SoC ${fmtT(server.t)}` + statsTail();
+        e.textContent = srcT(server.src, server.t) + statsTail();
     } else {
         e.style.color = "#8a8a93";
         e.textContent = "SoC: датчик недоступний";
@@ -181,10 +181,15 @@ function fmtT(t) {
     return (t === null || t === undefined) ? "—" : `${Math.round(t)}°C`;
 }
 
+// «GPU 78°C» / «CPU 71°C» / «SoC 62°C» — звідки взято найгарячіший сенсор (src з сервера).
+function srcT(src, t) {
+    return `${src || "SoC"} ${fmtT(t)}`;
+}
+
 function onEvent(d) {
     if (!d) return;
     if (d.state === "cooling") {
-        coolingInfo = { t: d.t, resume_at: d.resume_at, since: d.since, at: Date.now() };
+        coolingInfo = { t: d.t, src: d.src, resume_at: d.resume_at, since: d.since, at: Date.now() };
         render();
     } else if (d.state === "ok") {
         coolingInfo = null;

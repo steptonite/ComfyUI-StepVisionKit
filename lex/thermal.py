@@ -4,9 +4,11 @@
 (пасивне охолодження). Рятує лише підставка, Катя генерує без неї. Коли SoC гарячий,
 генерація ПАУЗИТЬСЯ до охолодження і сама продовжується. Задачу НІКОЛИ не вбиваємо.
 
-ЧИТАЧ: чистий ctypes, без pyobjc (у venv ComfyUI його нема). Логіка та сама, що в
-~/.claude/tools/thermal.py: IOHIDEventSystem, сенсори температури SoC, без sudo.
-Один клієнт на процес: кожен новий клієнт — зʼєднання з WindowServer (див. issue 26.09.2026).
+ЧИТАЧ: чистий ctypes, без pyobjc (у venv ComfyUI його нема). Два джерела, поріг — по
+НАЙГАРЯЧІШОМУ з них: IOHIDEventSystem (PMU tdie*, усереднене по кластеру) і AppleSMC
+(ключі Tg* = GPU, Tp*/Te* = CPU — ті самі числа, що в меню Stats; issue 11.09.2026:
+пороги мусять бути в тій самій шкалі, що бачить людина). Без sudo.
+Один клієнт IOHID на процес: кожен новий клієнт — зʼєднання з WindowServer (див. issue 26.09.2026).
 
 ПОРТАТИВНІСТЬ: не macOS, не Apple Silicon, помилка ctypes → read_max_c() повертає None.
 Сторож тоді тихо вимкнений, ComfyUI працює як завжди.
@@ -20,6 +22,7 @@ import ctypes.util
 import json
 import math
 import os
+import struct
 import sys
 import threading
 import time
@@ -143,6 +146,40 @@ _cache_ts = None
 _cache_val = None
 _hid_read = None                        # callable -> float|None, або None
 _hid_dead = False                       # читач не зібрався — більше не пробуємо
+_SMC_OK = (10.0, 130.0)                 # SMC: 0 і -127 — непідключений сенсор, не температура
+# Префікс ключа → джерело для позначки. Решта префіксів «Tf»/«Ts» — SoC.
+_SMC_PREFIX = (("Tg", "GPU"), ("Tp", "CPU"), ("Te", "CPU"), ("Tf", "SoC"), ("Ts", "SoC"))
+_smc = None                             # (call, [(name, src, size)]) після успішного скану
+_smc_dead = False                       # AppleSMC не відкрився або ключів нема — більше не пробуємо
+
+
+# Структури AppleSMC з smc.h. Розмір SMCKeyData має бути рівно 80 байт (перевірка в тестах).
+class _SMCVersion(ctypes.Structure):
+    _fields_ = [("major", ctypes.c_ubyte), ("minor", ctypes.c_ubyte), ("build", ctypes.c_ubyte),
+                ("reserved", ctypes.c_ubyte), ("release", ctypes.c_ushort)]
+
+
+class _SMCPLimitData(ctypes.Structure):
+    _fields_ = [("version", ctypes.c_ushort), ("length", ctypes.c_ushort),
+                ("cpuPLimit", ctypes.c_uint32), ("gpuPLimit", ctypes.c_uint32),
+                ("memPLimit", ctypes.c_uint32)]
+
+
+class _SMCKeyInfo(ctypes.Structure):
+    _fields_ = [("dataSize", ctypes.c_uint32), ("dataType", ctypes.c_uint32),
+                ("dataAttributes", ctypes.c_ubyte)]
+
+
+class _SMCKeyData(ctypes.Structure):
+    _fields_ = [("key", ctypes.c_uint32), ("vers", _SMCVersion), ("pLimitData", _SMCPLimitData),
+                ("keyInfo", _SMCKeyInfo), ("result", ctypes.c_ubyte), ("status", ctypes.c_ubyte),
+                ("data8", ctypes.c_ubyte), ("data32", ctypes.c_uint32),
+                ("bytes", ctypes.c_ubyte * 32)]
+
+
+_SMC_CMD_READ_BYTES = 5                 # data8 у KeyData
+_SMC_CMD_READ_INDEX = 8
+_SMC_CMD_READ_KEYINFO = 9
 
 
 def _make_hid_reader():
@@ -248,14 +285,158 @@ def _read_fake(path):
     return v if math.isfinite(v) and _TEMP_OK[0] < v <= _TEMP_OK[1] else None
 
 
-def read_max_c():
-    """Найгарячіший сенсор SoC, °C, кеш CACHE_S секунд. None — прочитати неможливо."""
+def _smc_key(name):
+    return int.from_bytes(name.encode("ascii"), "big")
+
+
+def _smc_name(num):
+    return num.to_bytes(4, "big").decode("ascii", errors="replace")
+
+
+def _smc_open():
+    """Відкриває AppleSMC один раз на процес. Повертає call(payload) -> _SMCKeyData | None."""
+    if sys.platform != "darwin":
+        raise OSError("не macOS")
+    iokit = ctypes.CDLL(ctypes.util.find_library("IOKit"))
+    libc = ctypes.CDLL(ctypes.util.find_library("c"))
+    iokit.IOServiceMatching.restype = ctypes.c_void_p
+    iokit.IOServiceMatching.argtypes = [ctypes.c_char_p]
+    iokit.IOServiceGetMatchingService.restype = ctypes.c_uint
+    iokit.IOServiceGetMatchingService.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+    iokit.IOServiceOpen.restype = ctypes.c_int
+    iokit.IOServiceOpen.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_uint,
+                                    ctypes.POINTER(ctypes.c_uint)]
+    iokit.IOConnectCallStructMethod.restype = ctypes.c_int
+    iokit.IOConnectCallStructMethod.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p,
+                                                ctypes.c_size_t, ctypes.c_void_p,
+                                                ctypes.POINTER(ctypes.c_size_t)]
+    libc.mach_task_self.restype = ctypes.c_uint
+
+    service = iokit.IOServiceGetMatchingService(0, iokit.IOServiceMatching(b"AppleSMC"))
+    if not service:
+        raise RuntimeError("AppleSMC не знайдено")
+    conn = ctypes.c_uint(0)
+    if iokit.IOServiceOpen(service, libc.mach_task_self(), 0, ctypes.byref(conn)) != 0:
+        raise RuntimeError("IOServiceOpen(AppleSMC) не спрацював")
+
+    def call(payload):
+        out = _SMCKeyData()
+        size = ctypes.c_size_t(ctypes.sizeof(_SMCKeyData))
+        rc = iokit.IOConnectCallStructMethod(conn, 2,            # KERNEL_INDEX_SMC
+                                             ctypes.byref(payload), ctypes.sizeof(_SMCKeyData),
+                                             ctypes.byref(out), ctypes.byref(size))
+        return out if rc == 0 and out.result == 0 else None
+
+    return call
+
+
+def _smc_keyinfo(call, name):
+    """(dataSize, dataType) ключа або None."""
+    p = _SMCKeyData()
+    p.key, p.data8 = _smc_key(name), _SMC_CMD_READ_KEYINFO
+    got = call(p)
+    if got is None:
+        return None
+    return got.keyInfo.dataSize, _smc_name(got.keyInfo.dataType)
+
+
+def _smc_scan(call):
+    """Один раз на процес: перелік ключів Tg/Tp/Te/Tf/Ts з типом flt. [(name, src, size)]."""
+    ki = _smc_keyinfo(call, "#KEY")
+    if ki is None:
+        raise RuntimeError("#KEY недоступний")
+    p = _SMCKeyData()
+    p.key, p.data8, p.keyInfo.dataSize = _smc_key("#KEY"), _SMC_CMD_READ_BYTES, ki[0]
+    got = call(p)
+    if got is None:
+        raise RuntimeError("#KEY не читається")
+    total = int.from_bytes(bytes(got.bytes[:4]), "big")
+    keys = []
+    for i in range(total):
+        p = _SMCKeyData()
+        p.data8, p.data32 = _SMC_CMD_READ_INDEX, i
+        got = call(p)
+        if got is None:
+            continue
+        name = _smc_name(got.key)
+        src = next((s for pre, s in _SMC_PREFIX if name.startswith(pre)), None)
+        if src is None:
+            continue
+        info = _smc_keyinfo(call, name)
+        if info is None or info[1] != "flt " or info[0] != 4:
+            continue
+        keys.append((name, src, info[0]))
+    return keys
+
+
+def _read_smc():
+    """{'GPU'|'CPU'|'SoC': максимум °C} з SMC. None — SMC недоступний (тоді тихо лише IOHID)."""
+    global _smc, _smc_dead
+    if _smc_dead:
+        return None
+    if _smc is None:
+        try:
+            call = _smc_open()
+            keys = _smc_scan(call)
+        except Exception:
+            _smc_dead = True
+            return None
+        if not keys:
+            _smc_dead = True
+            return None
+        _smc = (call, keys)
+    call, keys = _smc
+    best = {}
+    for name, src, size in keys:
+        try:
+            p = _SMCKeyData()
+            p.key, p.data8, p.keyInfo.dataSize = _smc_key(name), _SMC_CMD_READ_BYTES, size
+            got = call(p)
+            v = struct.unpack("<f", bytes(got.bytes[:4]))[0] if got is not None else None
+        except Exception:
+            v = None
+        if v is not None and math.isfinite(v) and _SMC_OK[0] <= v <= _SMC_OK[1]:
+            best[src] = v if src not in best else max(best[src], v)
+    return best
+
+
+def _combine(hid, smc):
+    """Найгарячіший з усіх сенсорів. Позначка джерела — звідки взято максимум."""
+    smc = smc or {}
+    cands = [(hid, "SoC"), (smc.get("GPU"), "GPU"), (smc.get("CPU"), "CPU"), (smc.get("SoC"), "SoC")]
+    cands = [(v, s) for v, s in cands if v is not None]
+    if not cands:
+        return None
+    t, src = max(cands, key=lambda c: c[0])
+    return {"t": round(t, 1), "src": src, "hid": hid,
+            "smc_gpu": None if smc.get("GPU") is None else round(smc["GPU"], 1),
+            "smc_cpu": None if smc.get("CPU") is None else round(smc["CPU"], 1),
+            "smc_soc": None if smc.get("SoC") is None else round(smc["SoC"], 1)}
+
+
+def read_detail():
+    """Найгарячіший сенсор з IOHID і SMC, кеш CACHE_S секунд. None — прочитати неможливо.
+
+    {"t": °C, "src": "GPU"|"CPU"|"SoC", "hid": °C|None, "smc_gpu": °C|None,
+     "smc_cpu": °C|None, "smc_soc": °C|None}
+    """
     global _cache_ts, _cache_val
     with _lock:
         now = time.monotonic()
         if _cache_ts is not None and now - _cache_ts < CACHE_S:
             return _cache_val
         fake = os.environ.get("SVK_THERMAL_FAKE", "")
-        val = _read_fake(fake) if fake else _read_hid()
+        if fake:
+            v = _read_fake(fake)
+            val = None if v is None else {"t": v, "src": "SoC", "hid": v, "smc_gpu": None,
+                                          "smc_cpu": None, "smc_soc": None}
+        else:
+            val = _combine(_read_hid(), _read_smc())
         _cache_ts, _cache_val = now, val
         return val
+
+
+def read_max_c():
+    """Найгарячіший сенсор, °C (IOHID + SMC), кеш CACHE_S секунд. None — прочитати неможливо."""
+    d = read_detail()
+    return None if d is None else d["t"]

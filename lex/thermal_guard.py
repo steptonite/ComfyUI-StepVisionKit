@@ -91,27 +91,28 @@ def maybe_cool():
         if _last_check is not None and now - _last_check < cfg["poll_s"]:
             return
         _last_check = now
-    t = thermal.read_max_c()
+    d = thermal.read_detail()
+    t = None if d is None else d["t"]
     _peak(t)
     if t is None or t < cfg["pause_at"]:
         return
-    _pause(t, cfg)
+    _pause(t, cfg, d["src"])
 
 
-def _pause(t, cfg):
+def _pause(t, cfg, src="SoC"):
     global _pausing
     import comfy.model_management as mm
 
     resume_at = cfg["resume_at"]
     start = time.monotonic()
-    _log("%.0f°C ≥ %.0f — пауза до %.0f°C" % (t, cfg["pause_at"], resume_at))
+    _log("%.0f°C (%s) ≥ %.0f — пауза до %.0f°C" % (t, src, cfg["pause_at"], resume_at))
     interrupted = False
     last_t = now_t = t
     with _lock:
         _pausing += 1
     try:
         while True:
-            _send("cooling", t=last_t, resume_at=resume_at,
+            _send("cooling", t=last_t, src=src, resume_at=resume_at,
                   since=round(time.monotonic() - start, 1))
             end = time.monotonic() + COOL_STEP_S
             while time.monotonic() < end:
@@ -121,10 +122,11 @@ def _pause(t, cfg):
                 time.sleep(0.2)
             if interrupted:
                 break
-            now_t = thermal.read_max_c()
+            now_d = thermal.read_detail()
+            now_t = None if now_d is None else now_d["t"]
             if now_t is None:           # датчик зник посеред паузи — не блокуємо назавжди
                 break
-            last_t = now_t
+            last_t, src = now_t, now_d["src"]
             if now_t <= resume_at:
                 break
     finally:
@@ -139,7 +141,7 @@ def _pause(t, cfg):
         _log("температуру не прочитати під час паузи — продовжую (пауза %.0f с)" % paused_s)
         _send("ok", t=last_t, paused_s=paused_s)
     else:
-        _log("%.0f°C — продовжую (пауза %s)" % (last_t, _fmt_s(paused_s)))
+        _log("%.0f°C (%s) — продовжую (пауза %s)" % (last_t, src, _fmt_s(paused_s)))
         _send("ok", t=last_t, paused_s=paused_s)
 
 
@@ -151,14 +153,16 @@ def _job_line(d, head):
 
 def _job_begin():
     global _job
-    t = thermal.read_max_c()
+    d = thermal.read_detail()
+    t = None if d is None else d["t"]
+    src = None if d is None else d["src"]
     with _lock:
         _job = {"pauses": 0, "paused_s": 0.0, "freezes": 0, "frozen_s": 0.0,
                 "peak": t, "start": time.monotonic(), "beat": time.monotonic()}
         _total["jobs"] += 1
     cfg = _cfg
     _log("задача почалась · %s · пауза з %.0f°C, продовжити з %.0f°C, заморозка з %.0f°C" % (
-        "—" if t is None else "%.0f°C" % t, cfg["pause_at"], cfg["resume_at"], cfg["hard_at"]))
+        "—" if t is None else "%.0f°C (%s)" % (t, src), cfg["pause_at"], cfg["resume_at"], cfg["hard_at"]))
 
 
 def _job_end():
@@ -292,7 +296,8 @@ def _apply(cfg):
 
 def status():
     cfg = _cfg
-    t = thermal.read_max_c()
+    d = thermal.read_detail() or {}
+    t = d.get("t")
     st = thermal.read_state() or {}
     frozen = bool(st.get("stopped")) and _watch_alive()
     if not cfg["enabled"]:
@@ -303,7 +308,8 @@ def status():
         state = "frozen"
     else:
         state = "ok"
-    return {"enabled": cfg["enabled"], "t": t, "state": state,
+    return {"enabled": cfg["enabled"], "t": t, "src": d.get("src"), "state": state,
+            "gpu": d.get("smc_gpu"), "cpu": d.get("smc_cpu"),
             "pause_at": cfg["pause_at"], "resume_at": cfg["resume_at"],
             "hard_at": cfg["hard_at"], "profile": cfg["profile"],
             "profile_title": thermal.PROFILE_TITLES.get(cfg["profile"], cfg["profile"]),
