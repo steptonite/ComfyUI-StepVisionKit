@@ -17,6 +17,7 @@ install() викликається один раз з __init__.py. Усе обг
 щоб UI міг увімкнути гейт.
 """
 
+import logging
 import os
 import sys
 import threading
@@ -34,10 +35,39 @@ _active = False             # обгортки стоять і сторож за
 _installed = False
 _last_check = None          # monotonic: останній замір для тротла poll_s
 _pausing = 0                # скільки потоків зараз у паузі
+HEARTBEAT_S = 60.0          # рядок у консоль під час задачі: видно, що сторож живий
+
+# Лічильники: за весь запуск ComfyUI і за поточну задачу (черга виконує по одній).
+_total = {"jobs": 0, "pauses": 0, "paused_s": 0.0, "freezes": 0, "frozen_s": 0.0, "peak": None}
+_job = None                 # None — задачі нема; інакше dict як _total + start
 
 
 def _log(msg):
-    print("[Термо-сторож] " + msg, file=sys.stderr, flush=True)
+    # logging, а не print: так рядок потрапляє і в консоль ComfyUI (панель LOGS), і в comfyui.log
+    logging.info("[Термо-сторож] " + msg)
+
+
+def _fmt_s(s):
+    s = int(round(s))
+    return "%d с" % s if s < 60 else "%d хв %02d с" % (s // 60, s % 60)
+
+
+def _peak(t):
+    if t is None:
+        return
+    for d in (_total, _job):
+        if d is not None and (d["peak"] is None or t > d["peak"]):
+            d["peak"] = t
+
+
+def _count(kind, seconds):
+    """kind: pauses | freezes. Додає подію і час у лічильники запуску й поточної задачі."""
+    key_s = "paused_s" if kind == "pauses" else "frozen_s"
+    with _lock:
+        for d in (_total, _job):
+            if d is not None:
+                d[kind] += 1
+                d[key_s] += seconds
 
 
 def _send(state, **data):
@@ -62,6 +92,7 @@ def maybe_cool():
             return
         _last_check = now
     t = thermal.read_max_c()
+    _peak(t)
     if t is None or t < cfg["pause_at"]:
         return
     _pause(t, cfg)
@@ -100,6 +131,7 @@ def _pause(t, cfg):
         with _lock:
             _pausing -= 1
     paused_s = round(time.monotonic() - start, 1)
+    _count("pauses", paused_s)
     if interrupted:
         _log("пауза перервана скасуванням після %.0f с" % paused_s)
         _send("ok", t=last_t, paused_s=paused_s, interrupted=True)
@@ -107,8 +139,35 @@ def _pause(t, cfg):
         _log("температуру не прочитати під час паузи — продовжую (пауза %.0f с)" % paused_s)
         _send("ok", t=last_t, paused_s=paused_s)
     else:
-        _log("%.0f°C — продовжую (пауза %.0f с)" % (last_t, paused_s))
+        _log("%.0f°C — продовжую (пауза %s)" % (last_t, _fmt_s(paused_s)))
         _send("ok", t=last_t, paused_s=paused_s)
+
+
+def _job_line(d, head):
+    pk = "—" if d["peak"] is None else "%.0f°C" % d["peak"]
+    return "%s: пік %s · пауз %d (%s) · заморозок %d (%s)" % (
+        head, pk, d["pauses"], _fmt_s(d["paused_s"]), d["freezes"], _fmt_s(d["frozen_s"]))
+
+
+def _job_begin():
+    global _job
+    t = thermal.read_max_c()
+    with _lock:
+        _job = {"pauses": 0, "paused_s": 0.0, "freezes": 0, "frozen_s": 0.0,
+                "peak": t, "start": time.monotonic(), "beat": time.monotonic()}
+        _total["jobs"] += 1
+    cfg = _cfg
+    _log("задача почалась · %s · пауза з %.0f°C, продовжити з %.0f°C, заморозка з %.0f°C" % (
+        "—" if t is None else "%.0f°C" % t, cfg["pause_at"], cfg["resume_at"], cfg["hard_at"]))
+
+
+def _job_end():
+    global _job
+    with _lock:
+        d, _job = _job, None
+    if d is None:
+        return
+    _log(_job_line(d, "задача завершена за %s" % _fmt_s(time.monotonic() - d["start"])))
 
 
 def _patch():
@@ -133,6 +192,29 @@ def _patch():
         throw_exception_if_processing_interrupted._svk_thermal = True
         mm.throw_exception_if_processing_interrupted = throw_exception_if_processing_interrupted
 
+    # Початок/кінець задачі — для рядків у консоль і підсумку. Сам execute не змінюється.
+    try:
+        import execution
+        PE = execution.PromptExecutor
+        orig_exe = PE.execute
+        if not getattr(orig_exe, "_svk_thermal", False):
+            def execute(self, *args, **kwargs):
+                try:
+                    _job_begin()
+                except Exception:
+                    pass
+                try:
+                    return orig_exe(self, *args, **kwargs)
+                finally:
+                    try:
+                        _job_end()
+                    except Exception:
+                        pass
+            execute._svk_thermal = True
+            PE.execute = execute
+    except Exception as e:
+        _log("підсумок задач вимкнено: %s" % e)
+
 
 # ───────────────────────── фоновий звіт для UI ─────────────────────────
 
@@ -141,13 +223,29 @@ def _reporter_loop(seen):
     while True:
         time.sleep(2.0)
         try:
+            # пік і пульс під час задачі: ноди без прогрес-бару сторож інакше не бачить
+            d = _job
+            if d is not None and _cfg["enabled"]:
+                t = thermal.read_max_c()
+                _peak(t)
+                now = time.monotonic()
+                if now - d["beat"] >= HEARTBEAT_S and _pausing == 0:
+                    d["beat"] = now
+                    _log("%s · пік %s · задача йде %s · пауз %d, заморозок %d" % (
+                        "—" if t is None else "%.0f°C" % t,
+                        "—" if d["peak"] is None else "%.0f°C" % d["peak"],
+                        _fmt_s(now - d["start"]), d["pauses"], d["freezes"]))
             st = thermal.read_state()
             if not st or st.get("stopped"):
                 continue
             seq = int(st.get("seq", 0) or 0)
             if seq > seen and st.get("last_stop_s") is not None:
                 seen = seq
-                _send("was_frozen", seconds=float(st["last_stop_s"]), t=st.get("t"))
+                secs = float(st["last_stop_s"])
+                _count("freezes", secs)
+                _log("ComfyUI був заморожений на %s (SoC %s ≥ межі %.0f°C), продовжено" % (
+                    _fmt_s(secs), "—" if st.get("t") is None else "%.0f°C" % st["t"], _cfg["hard_at"]))
+                _send("was_frozen", seconds=secs, t=st.get("t"))
         except Exception:
             pass
 
@@ -175,6 +273,12 @@ def _activate():
     thermal_watch.start(thermal.CONFIG_PATH, thermal.STATE_PATH)
     threading.Thread(target=_reporter_loop, args=(seen,), daemon=True,
                      name="svk-thermal-reporter").start()
+    cfg, t = _cfg, thermal.read_max_c()
+    _log("увімкнено · SoC %s · профіль «%s»: пауза з %.0f°C, продовжити з %.0f°C, заморозка з %.0f°C · наглядач %s" % (
+        "—" if t is None else "%.0f°C" % t,
+        thermal.PROFILE_TITLES.get(cfg["profile"], cfg["profile"]),
+        cfg["pause_at"], cfg["resume_at"], cfg["hard_at"],
+        "працює" if _watch_alive() else "НЕ запущено"))
     return True
 
 
@@ -204,7 +308,9 @@ def status():
             "hard_at": cfg["hard_at"], "profile": cfg["profile"],
             "profile_title": thermal.PROFILE_TITLES.get(cfg["profile"], cfg["profile"]),
             "poll_s": cfg["poll_s"], "reader_ok": t is not None,
-            "active": _active, "watch": _watch_alive()}
+            "active": _active, "watch": _watch_alive(),
+            "total": {k: _total[k] for k in ("jobs", "pauses", "paused_s", "freezes", "frozen_s", "peak")},
+            "job": None if _job is None else {k: _job[k] for k in ("pauses", "paused_s", "freezes", "frozen_s", "peak")}}
 
 
 def _register_routes():

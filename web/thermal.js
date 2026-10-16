@@ -83,7 +83,6 @@ const SETTINGS = [
     {
         id: "StepVisionKit.Thermal.Enabled", name: "Пауза при перегріві SoC",
         category: [CAT, SUB, "Увімкнено"], type: "boolean", defaultValue: true,
-        tooltip: "Коли SoC гарячий, генерація ставиться на паузу до охолодження і сама продовжується. Задачу не вбиває.",
         onChange: (v) => pushSetting("enabled", !!v),
     },
     {
@@ -112,7 +111,6 @@ const SETTINGS = [
         id: "StepVisionKit.Thermal.HardAt", name: "Жорстка межа, °C",
         category: [CAT, SUB, "Жорстка межа, °C"], type: "number", defaultValue: 100,
         attrs: { min: 30, max: 100, step: 1 },
-        tooltip: "Вище цієї межі наглядач заморожує процес ComfyUI (для нод без прогрес-бару). Понад 100 °C не ставиться.",
         onChange: (v) => pushSetting("hard_at", Number(v)),
     },
 ];
@@ -163,11 +161,20 @@ function render() {
         e.textContent = `ComfyUI заморожено · SoC ${fmtT(server.t)}`;
     } else if (server.reader_ok) {
         e.style.color = "#8a8a93";
-        e.textContent = `SoC ${fmtT(server.t)}`;
+        e.textContent = `SoC ${fmtT(server.t)}` + statsTail();
     } else {
         e.style.color = "#8a8a93";
         e.textContent = "SoC: датчик недоступний";
     }
+}
+
+// Скільки разів сторож уже спрацьовував за цей запуск ComfyUI (видно без консолі).
+function statsTail() {
+    const tot = server && server.total;
+    if (!tot || (!tot.pauses && !tot.freezes)) return "";
+    let s = ` · пауз ${tot.pauses}`;
+    if (tot.freezes) s += ` · заморозок ${tot.freezes}`;
+    return s;
 }
 
 function fmtT(t) {
