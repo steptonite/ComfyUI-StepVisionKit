@@ -160,6 +160,36 @@ def _note_api(ct):
         _log("працює API-нода %s — паузу й заморозку пропускаю, щоб не обірвати запит" % ct)
 
 
+_api_warned = False     # у цій задачі вже сказали в UI, що паузу пропущено
+_api_last_t = None      # monotonic: останній замір під час API-ноди
+
+
+def _api_guard(ct):
+    """Працює API-нода: не паузимо, тримаємо наглядача, а якщо вже гаряче — раз на задачу кажемо в UI."""
+    global _api_warned, _api_last_t
+    _note_api(ct)
+    _hold(ct)
+    if _api_warned:
+        return
+    now = time.monotonic()
+    if _api_last_t is not None and now - _api_last_t < _cfg["poll_s"]:
+        return
+    _api_last_t = now
+    d = thermal.read_detail()
+    if d is None or d["t"] is None or d["t"] < _cfg["pause_at"]:
+        return
+    _api_warned = True
+    _log("%.0f°C ≥ %.0f°C, але працює партнерська нода %s — паузу не ставлю, поки вона не відповість" % (
+        d["t"], _cfg["pause_at"], ct))
+    _send("api_hold", t=d["t"], src=d["src"], node=ct, pause_at=_cfg["pause_at"])
+
+
+def _api_reset():
+    global _api_warned, _api_last_t
+    _api_warned = False
+    _api_last_t = None
+
+
 def _hold(ct):
     """Сказати наглядачу (окремий процес): не заморожувати ще 10 с."""
     try:
@@ -185,8 +215,7 @@ def maybe_cool():
         return
     api = _current_api()
     if api:
-        _note_api(api)
-        _hold(api)
+        _api_guard(api)
         return
     now = time.monotonic()
     with _lock:
@@ -317,6 +346,7 @@ def _patch():
                 finally:
                     _prompt = None
                     _api_pending.clear()
+                    _api_reset()
                     _unhold()
                     try:
                         _job_end()
@@ -375,8 +405,7 @@ def _reporter_loop(seen):
             if d is not None and _cfg["enabled"]:
                 api = _current_api()
                 if api:                 # API-нода без прогрес-бару теж має бути під захистом
-                    _note_api(api)
-                    _hold(api)
+                    _api_guard(api)
                 t = thermal.read_max_c()
                 _peak(t)
                 now = time.monotonic()

@@ -283,6 +283,8 @@ function onEvent(d) {
         const sec = Math.round(Number(d.seconds) || 0);
         const hot = (d.t !== null && d.t !== undefined) ? ` через ${fmtT(d.t)}` : "";
         toast(`ComfyUI був заморожений на ${sec} с${hot}. Задача продовжилась після охолодження.`);
+    } else if (d.state === "api_hold") {
+        toast(`${srcT(d.src, d.t)} — пора б охолонути, але працює партнерська нода ${d.node || ""}. Паузу не ставлю, щоб не обірвати запит; повернеться, щойно вона відповість.`, false, 9000);
     }
 }
 
