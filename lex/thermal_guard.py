@@ -277,8 +277,9 @@ def _activate():
     thermal_watch.start(thermal.CONFIG_PATH, thermal.STATE_PATH)
     threading.Thread(target=_reporter_loop, args=(seen,), daemon=True,
                      name="svk-thermal-reporter").start()
-    cfg, t = _cfg, thermal.read_max_c()
-    _log("увімкнено · SoC %s · профіль «%s»: пауза з %.0f°C, продовжити з %.0f°C, заморозка з %.0f°C · наглядач %s" % (
+    cfg, det = _cfg, thermal.read_detail()
+    t = None if det is None else det["t"]
+    _log("увімкнено · " + ("—" if det is None else det["src"]) + " %s · профіль «%s»: пауза з %.0f°C, продовжити з %.0f°C, заморозка з %.0f°C · наглядач %s" % (
         "—" if t is None else "%.0f°C" % t,
         thermal.PROFILE_TITLES.get(cfg["profile"], cfg["profile"]),
         cfg["pause_at"], cfg["resume_at"], cfg["hard_at"],
