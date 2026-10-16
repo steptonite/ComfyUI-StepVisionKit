@@ -25,10 +25,10 @@ function xq(lo, hi, p) {
 
 // Межі нормалізації відстані — як _lohi(dist, trim_near, 100 - trim_far) у Python.
 // Для «near is white» dist = 1 - x, тож квантиль дзеркалиться: q_dist(p) = 1 - q_x(100 - p).
-export function distRange(prev, w) {
+export function distRange(prev, w, key = prev.keys[0]) {
     const clip = w.levels_scope === "whole clip" && prev.frames > 1;
-    const lo = clip ? prev.clip_lo : prev.frame_lo;
-    const hi = clip ? prev.clip_hi : prev.frame_hi;
+    const lo = clip ? prev.clip_lo : key.frame_lo;
+    const hi = clip ? prev.clip_hi : key.frame_hi;
     const near = w.depth_is === "near is white";
     const q = (p) => (near ? 1 - xq(lo, hi, 100 - p) : xq(lo, hi, p));
     return [q(w.trim_near), q(100 - w.trim_far)];
@@ -113,32 +113,36 @@ export function invert(f, target) {
     return (a + b) / 2;
 }
 
-// Розкодувати мініатюру з Python: uint16 LE у [x0, x1]
+// Розкодувати мініатюри з Python: кожен ключовий кадр — uint16 LE у [x0, x1]
 export function decodePreview(payload) {
-    const bin = atob(payload.data);
     const n = payload.w * payload.h;
-    const x = new Float32Array(n);
-    const span = payload.x1 - payload.x0;
-    for (let i = 0; i < n; i++) {
-        const u = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
-        x[i] = payload.x0 + (u / 65535) * span;
-    }
-    return { ...payload, x };
+    const keys = payload.keys.map((k) => {
+        const bin = atob(k.data);
+        const x = new Float32Array(n);
+        const span = k.x1 - k.x0;
+        for (let i = 0; i < n; i++) {
+            const u = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
+            x[i] = k.x0 + (u / 65535) * span;
+        }
+        return { ...k, data: null, x };
+    });
+    return { ...payload, keys };
 }
 
 // Повний прохід: сирий x → v (після об'єму) і вихід 0…1
-export function grade(prev, w) {
+export function grade(prev, w, ki = 0) {
     const P = params(w);
-    const [lo, hi] = distRange(prev, w);
+    const key = prev.keys[Math.min(ki, prev.keys.length - 1)];
+    const [lo, hi] = distRange(prev, w, key);
     const near = w.depth_is === "near is white";
-    const n = prev.x.length;
+    const x = key.x, n = x.length;
     const v = new Float32Array(n);
     const out = new Float32Array(n);
     const lut = buildLUT(P);
     const L = lut.length - 1;
     const span = Math.max(hi - lo, 1e-6);
     for (let i = 0; i < n; i++) {
-        const dist = near ? 1 - prev.x[i] : prev.x[i];
+        const dist = near ? 1 - x[i] : x[i];
         const vi = volume(clamp01((dist - lo) / span), P);
         v[i] = vi;
         out[i] = lut[Math.round(vi * L)];

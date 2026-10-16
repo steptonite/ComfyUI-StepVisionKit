@@ -106,27 +106,35 @@ def _qtable(x):
             [float(v) for v in np.percentile(flat, _PCT_HI)])
 
 
-def _preview_payload(x, side=384):
-    """Мініатюра СИРОГО депсу (до грейду) для браузера: далі він грейдить сам, без Run.
+def _preview_payload(x, side=384, max_keys=8):
+    """Мініатюри СИРОГО депсу (до грейду) для браузера: далі він грейдить сам, без Run.
 
     Шлемо саме вхід x, а не готовий результат — тоді depth_is, trim, рівні й крива
-    перераховуються в браузері миттєво. Таблиці квантилів — для кліпу й для кадру,
-    бо рівні можуть рахуватись і так, і так (levels_scope).
+    перераховуються в браузері миттєво. Для відео — до max_keys рівномірних кадрів
+    (менших, щоб повідомлення лишалось ~1 МБ), кожен зі своїми квантилями для
+    levels_scope = per frame; таблиці кліпу — спільні.
     """
     import base64
     import cv2
 
-    f = x[0]
-    h, w = f.shape
-    s = min(1.0, side / float(max(h, w)))
-    sm = cv2.resize(f, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA)
-    x0, x1 = float(sm.min()), float(sm.max())
-    enc = np.round((sm - x0) / max(x1 - x0, 1e-9) * 65535.0).astype("<u2")
+    n = int(x.shape[0])
+    idx = sorted(set(np.linspace(0, n - 1, min(n, max_keys)).round().astype(int).tolist()))
+    if n > 1:
+        side = min(side, 320)
+    keys = []
+    for i in idx:
+        f = x[i]
+        h, w = f.shape
+        s = min(1.0, side / float(max(h, w)))
+        sm = cv2.resize(f, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA)
+        x0, x1 = float(sm.min()), float(sm.max())
+        enc = np.round((sm - x0) / max(x1 - x0, 1e-9) * 65535.0).astype("<u2")
+        flo, fhi = _qtable(f)
+        keys.append({"i": int(i), "x0": x0, "x1": x1, "frame_lo": flo, "frame_hi": fhi,
+                     "data": base64.b64encode(enc.tobytes()).decode("ascii")})
     clo, chi = _qtable(x)
-    flo, fhi = _qtable(x[0])
-    return {"w": int(sm.shape[1]), "h": int(sm.shape[0]), "x0": x0, "x1": x1,
-            "data": base64.b64encode(enc.tobytes()).decode("ascii"),
-            "clip_lo": clo, "clip_hi": chi, "frame_lo": flo, "frame_hi": fhi, "frames": int(x.shape[0])}
+    return {"w": int(sm.shape[1]), "h": int(sm.shape[0]), "frames": n,
+            "clip_lo": clo, "clip_hi": chi, "keys": keys}
 
 
 # ───────────────────────── нода ─────────────────────────
@@ -321,3 +329,10 @@ class SVKDepthGrade:
         tt = torch.from_numpy(np.ascontiguousarray(out, dtype=np.float32))
         return {"ui": {"svk_depth_preview": [preview]},
                 "result": (tt.unsqueeze(-1).repeat(1, 1, 1, 3), tt, info)}
+
+
+class SVKDepthGradeLive(SVKDepthGrade):
+    """Те саме, що Depth Grade, але з пультом: прев'ю, піпетки й криві крутяться
+    наживо в браузері, а тонові повзунки сховані (кнопка «Повзунки» їх показує)."""
+    DESCRIPTION = ("Depth Grade з живим пультом: натисни Run один раз, далі піпетки й "
+                   "маркери на кривій міняють тон миттєво, без перегенерації.")

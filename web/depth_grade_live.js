@@ -8,8 +8,14 @@ import * as M from "./depth_grade_math.js";
 // депсу, далі тон рахується в браузері (depth_grade_math.js) — миттєво.
 // Повзунки лишаються джерелом правди: маркери й піпетки пишуть у них, тому воркфлоу
 // зберігається як завжди, а без цього js нода повністю робоча.
+// Пульт живе в окремій ноді SVKDepthGradeLive (Льоша: «задовга») — там тонові
+// повзунки сховані; у звичайній SVKDepthGrade лишились повзунки + «Скинути».
 
 const NODE = "SVKDepthGrade";
+const LIVE = "SVKDepthGradeLive";
+// повзунки, які в Live-ноді замінює пульт (кнопка «Повзунки» показує їх назад)
+const HIDE_KEYS = ["blacks", "whites", "midtones", "foreground_ceiling", "ceiling_from",
+    "hero_plane", "hero_pop", "trim_far", "trim_near", "banding_edge", "motion_guard"];
 const TONE_KEYS = ["depth_is", "look", "foreground_pop", "blacks", "whites", "midtones",
     "foreground_ceiling", "ceiling_from", "hero_plane", "hero_pop",
     "trim_far", "trim_near", "flip", "levels_scope"];
@@ -35,7 +41,7 @@ function h(tag, css = "", text) {
 }
 
 const BTN = `font:500 11px/1 system-ui,sans-serif;color:${C.text};background:${C.panel};
-    border:1px solid ${C.line};border-radius:6px;padding:6px 9px;cursor:pointer;
+    border:1px solid ${C.line};border-radius:6px;padding:5px 7px;cursor:pointer;
     transition:transform .12s cubic-bezier(.16,1,.3,1),border-color .15s;user-select:none`;
 
 class LivePanel {
@@ -50,8 +56,12 @@ class LivePanel {
 
         this.root = h("div", `display:flex;flex-direction:column;gap:6px;padding:6px 2px 2px;
             box-sizing:border-box;width:100%;color:${C.text};font:12px system-ui,sans-serif`);
-        this.root.addEventListener("pointerdown", (e) => e.stopPropagation());   // не тягати вузол замість маркера
-        this.root.addEventListener("wheel", (e) => e.stopPropagation(), { passive: true });
+        // не тягати вузол замість маркера; колесо не чіпаємо — полотно має зумитись
+        for (const ev of ["pointerdown", "pointerup", "click", "dblclick"])
+            this.root.addEventListener(ev, (e) => e.stopPropagation());
+        this.defaults = {};
+        this.ki = 0;
+        this.showSliders = false;
 
         // ── інструменти
         const bar = h("div", "display:flex;gap:4px;flex-wrap:wrap;align-items:center");
@@ -71,6 +81,9 @@ class LivePanel {
         const off = () => { this.compare = false; this.schedule(); };
         cmp.onpointerdown = on; cmp.onpointerup = off; cmp.onpointerleave = off;
         bar.append(cmp);
+        // «Скинути все» — кнопка-віджет ноди над пультом; тут лише перемикач точних повзунків
+        this.slBtn = h("button", BTN + ";align-self:flex-start", "Показати точні повзунки");
+        this.slBtn.onclick = () => this.toggleSliders();
 
         // ── прев'ю
         this.stage = h("div", `position:relative;border-radius:8px;overflow:hidden;background:${C.bg};
@@ -87,6 +100,13 @@ class LivePanel {
         this.view.addEventListener("pointerleave", () => { this.hover = null; this.readout.style.display = "none"; this.schedule(); });
         this.view.addEventListener("click", (e) => this.onPick(e));
 
+        this.scrub = h("div", "display:none;align-items:center;gap:8px");
+        this.scrubIn = h("input", `flex:1;accent-color:${C.accent}`);
+        this.scrubIn.type = "range"; this.scrubIn.min = 0; this.scrubIn.step = 1; this.scrubIn.value = 0;
+        this.scrubLbl = h("span", `font:11px ${MONO};color:${C.dim};min-width:96px;text-align:right`);
+        this.scrubIn.oninput = () => { this.ki = +this.scrubIn.value; this.schedule(); };
+        this.scrub.append(this.scrubIn, this.scrubLbl);
+
         // ── криві
         this.curve = h("canvas", `display:block;width:100%;height:150px;border-radius:8px;
             background:${C.bg};border:1px solid ${C.line};touch-action:none;cursor:default`);
@@ -94,13 +114,16 @@ class LivePanel {
         this.curve.addEventListener("pointermove", (e) => this.onCurveMove(e));
         this.curve.addEventListener("pointerup", (e) => this.onCurveUp(e));
         this.curve.addEventListener("pointercancel", (e) => this.onCurveUp(e));
+        this.curve.addEventListener("dblclick", (e) => this.onCurveDbl(e));
 
         this.legend = h("div", `color:${C.dim};font-size:11px;line-height:1.45`);
         this.legend.innerHTML =
-            "Ч / Б — що піде в чорне й біле · <b style='color:" + C.accent + "'>Г</b> — герой (тягни вгору — сильніше) · " +
-            "С — звідки пригашувати, повзунок справа — наскільки. Clarity, texture, смуги й deflicker видно після Run.";
+            "Тягни: Ч / Б — чорне й біле · <b style='color:" + C.accent + "'>Г</b> — герой (вгору — сильніше) · " +
+            "С — звідки пригашувати, кружок справа — наскільки · порожнє місце вгору/вниз — середні тони. " +
+            "Подвійний клік — скинути. Clarity, texture, смуги й deflicker — після Run.";
 
-        this.root.append(bar, this.empty, this.stage, this.curve, this.legend);
+        this.root.append(bar, this.empty, this.stage, this.scrub, this.curve, this.legend, this.slBtn);
+        for (const c of this.root.children) c.style.flexShrink = "0";   // інакше низ прев'ю обрізається
         new ResizeObserver(() => this.schedule()).observe(this.curve);
     }
 
@@ -143,8 +166,25 @@ class LivePanel {
         this.view.style.cursor = id ? "crosshair" : "default";
     }
 
+    reset(names) {
+        for (const n of names) if (n in this.defaults) this.set(n, this.defaults[n]);
+        this.schedule();
+    }
+
+    resetAll() { this.reset(TONE_KEYS); }
+
+    toggleSliders(force) {
+        this.showSliders = force ?? !this.showSliders;
+        setHidden(this.node, HIDE_KEYS, !this.showSliders);
+        this.slBtn.textContent = this.showSliders ? "Сховати точні повзунки" : "Показати точні повзунки";
+    }
+
     load(payload) {
         this.prev = M.decodePreview(payload);
+        const nk = this.prev.keys.length;
+        this.ki = Math.min(this.ki, nk - 1);
+        this.scrub.style.display = nk > 1 ? "flex" : "none";
+        this.scrubIn.max = nk - 1; this.scrubIn.value = this.ki;
         this.view.width = this.prev.w;
         this.view.height = this.prev.h;
         this.empty.style.display = "none";
@@ -163,7 +203,11 @@ class LivePanel {
     minHeight() {
         const wpx = Math.max(240, (this.node.size?.[0] || 340) - 20);
         const img = this.prev ? (wpx * this.prev.h) / this.prev.w : 80;
-        return 34 + Math.min(img, 520) + 160 + 44;
+        const scrub = this.prev && this.prev.keys.length > 1 ? 28 : 0;
+        // висота ВМІСТУ (не scrollHeight: він росте разом із віджетом — нода пухла б без кінця)
+        let content = 0, shown = 0;
+        for (const c of this.root.children) if (c.offsetParent !== null) { content += c.offsetHeight; shown++; }
+        return content ? content + 6 * shown + 10 : 34 + Math.min(img, 520) + scrub + 160 + 100;
     }
 
     schedule() {
@@ -175,16 +219,19 @@ class LivePanel {
     draw() {
         if (!this.prev) { this.drawCurve(null); return; }
         const w = this.values();
-        const g = M.grade(this.prev, w);
+        const g = M.grade(this.prev, w, this.ki);
+        const key = this.prev.keys[this.ki];
+        if (this.prev.keys.length > 1)
+            this.scrubLbl.textContent = `кадр ${key.i + 1} з ${this.prev.frames}`;
         this.last = g;
         const { w: W, h: H } = this.prev;
         const ctx = this.view.getContext("2d");
         const img = ctx.createImageData(W, H);
         const src = this.compare ? null : g.out;
         let xmin = Infinity, xmax = -Infinity;
-        if (this.compare) for (const v of this.prev.x) { if (v < xmin) xmin = v; if (v > xmax) xmax = v; }
+        if (this.compare) for (const v of key.x) { if (v < xmin) xmin = v; if (v > xmax) xmax = v; }
         for (let i = 0; i < W * H; i++) {
-            const v = src ? src[i] : (this.prev.x[i] - xmin) / Math.max(xmax - xmin, 1e-9);
+            const v = src ? src[i] : (key.x[i] - xmin) / Math.max(xmax - xmin, 1e-9);
             const b = v * 255;
             img.data[4 * i] = img.data[4 * i + 1] = img.data[4 * i + 2] = b;
             img.data[4 * i + 3] = 255;
@@ -321,8 +368,11 @@ class LivePanel {
                 if (d < best) { best = d; pick = { id: m.id }; }
             }
         }
+        if (!pick && p.x > G.x0 && p.x < G.x1 && p.y > G.y1 && p.y < G.y0) pick = { id: "mid" };
         if (!pick) return;
+        e.stopPropagation();
         pick.y = p.y;
+        pick.mid = this.widget("midtones")?.value || 0;
         pick.pop = this.widget("hero_pop")?.value || 0;
         this.drag = pick;
         this.curve.setPointerCapture(e.pointerId);
@@ -358,7 +408,22 @@ class LivePanel {
             d.tip = `пригашувати від ${k.toFixed(2)}`;
         }
         if (d.id === "ceil") { this.set("foreground_ceiling", o); d.tip = `стеля ${o.toFixed(2)}`; }
+        if (d.id === "mid") {
+            const m = Math.min(2, Math.max(-2, d.mid + (d.y - p.y) / 60));
+            this.set("midtones", m);
+            d.tip = `середні тони ${m >= 0 ? "+" : ""}${m.toFixed(2)}`;
+        }
         this.schedule();
+    }
+
+    onCurveDbl(e) {
+        const G = this.geom(), p = this.pos(e);
+        const X = (v) => G.x0 + v * (G.x1 - G.x0);
+        const groups = { black: ["blacks"], white: ["whites"], hero: ["hero_plane", "hero_pop"],
+            from: ["ceiling_from", "foreground_ceiling"] };
+        if (Math.abs(p.x - (G.x1 + 14)) < 12) return this.reset(["foreground_ceiling", "ceiling_from"]);
+        for (const m of this.hs || []) if (Math.abs(p.x - X(m.v)) < 12 && p.y > G.y0 - 30) return this.reset(groups[m.id]);
+        this.reset(["midtones"]);
     }
 
     onCurveUp(e) {
@@ -397,9 +462,12 @@ class LivePanel {
             if ((this.widget("hero_pop")?.value || 0) < 1) this.set("hero_pop", 6);
         }
         if (this.tool === "dim") {
-            const k = Math.max(0.05, M.hero(M.levels(s.v, P), P) - 0.04);
+            // клікнуте стає ~80% своєї яскравості, усе ближче — не світліше за нього;
+            // далі кружком справа можна відпустити чи притиснути сильніше
+            const t0 = M.hero(M.levels(s.v, P), P);
+            const k = Math.max(0.05, 0.75 * t0);
             this.set("ceiling_from", k);
-            this.set("foreground_ceiling", k + 0.3 * (1 - k));
+            this.set("foreground_ceiling", Math.max(k + 0.02, 0.8 * t0));
         }
         if (this.tool === "black") this.set("blacks", Math.min(s.v, P.wp - 0.02));
         if (this.tool === "white") this.set("whites", 1 - Math.max(s.v, P.bp + 0.02));
@@ -407,45 +475,105 @@ class LivePanel {
     }
 }
 
+// сховати / показати віджети так само, як це робить сам фронтенд (hidden + options.hidden)
+function setHidden(node, names, hidden) {
+    for (const w of node.widgets || []) {
+        if (!names.includes(w.name)) continue;
+        w.hidden = hidden;
+        if (w.options) w.options.hidden = hidden;
+    }
+    const sz = node.computeSize?.();
+    if (sz) node.setSize([node.size[0], sz[1]]);
+    app.graph?.setDirtyCanvas(true, true);
+}
+
+// стандартні значення з опису ноди — для «Скинути»
+function readDefaults(nodeData) {
+    const d = {};
+    for (const [name, spec] of Object.entries(nodeData?.input?.required || {})) {
+        const def = spec?.[1]?.default ?? (Array.isArray(spec?.[0]) ? spec[0][0] : undefined);
+        if (def !== undefined) d[name] = def;
+    }
+    return d;
+}
+
+function resetWidget(node, w, value) {
+    const old = w.value;
+    w.value = value;
+    w.callback?.(value, app.canvas, node);
+    node.onWidgetChanged?.(w.name, value, old, w);
+    app.graph?.setDirtyCanvas(true, true);
+}
+
 app.registerExtension({
     name: "StepVisionKit.DepthGradeLive",
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData?.name !== NODE) return;
+        const name = nodeData?.name;
+        if (name !== NODE && name !== LIVE) return;
+        const live = name === LIVE;
+        const defaults = readDefaults(nodeData);
+        const resetAll = (node) => {
+            for (const w of node.widgets || []) if (w.name in defaults && w.value !== defaults[w.name]) resetWidget(node, w, defaults[w.name]);
+            node.__svkLive?.schedule();
+        };
 
         const onCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function () {
             const r = onCreated?.apply(this, arguments);
-            const panel = new LivePanel(this);
-            this.__svkLive = panel;
-            this.addDOMWidget("live", "svk_depth_live", panel.root, {
-                serialize: false,
-                hideOnZoom: false,
-                getMinHeight: () => panel.minHeight(),
-            });
-            // будь-яка зміна тонового повзунка — перемалювати прев'ю
-            for (const w of this.widgets || []) {
-                if (!TONE_KEYS.includes(w.name)) continue;
-                const cb = w.callback;
-                w.callback = function () {
-                    const out = cb?.apply(this, arguments);
-                    panel.schedule();
-                    return out;
-                };
+            const rb = this.addWidget("button", "↺ Скинути все до стандартних", null, () => resetAll(this));
+            rb.serialize = false;
+            if (live) {
+                const panel = new LivePanel(this);
+                panel.defaults = defaults;
+                this.__svkLive = panel;
+                this.addDOMWidget("live", "svk_depth_live", panel.root, {
+                    serialize: false,
+                    hideOnZoom: false,
+                    getMinHeight: () => panel.minHeight(),
+                });
+                // будь-яка зміна тонового повзунка — перемалювати прев'ю
+                for (const w of this.widgets || []) {
+                    if (!TONE_KEYS.includes(w.name)) continue;
+                    const cb = w.callback;
+                    w.callback = function () {
+                        const out = cb?.apply(this, arguments);
+                        panel.schedule();
+                        return out;
+                    };
+                }
+                panel.toggleSliders(false);
+                this.setSize([Math.max(this.size[0], 380), this.computeSize()[1]]);
             }
-            this.setSize([Math.max(this.size[0], 360), this.computeSize()[1]]);
             return r;
         };
+
+        // права кнопка по ноді: скинути все або один змінений повзунок
+        const extra = nodeType.prototype.getExtraMenuOptions;
+        nodeType.prototype.getExtraMenuOptions = function (canvas, options) {
+            const r = extra?.apply(this, arguments);
+            const changed = (this.widgets || []).filter((w) => w.name in defaults && w.value !== defaults[w.name]);
+            options.push(null, { content: "↺ Скинути все до стандартних", callback: () => resetAll(this) });
+            for (const w of changed) {
+                const cur = typeof w.value === "number" ? +w.value.toFixed(3) : w.value;
+                options.push({ content: `↺ ${w.name}: ${cur} → ${defaults[w.name]}`,
+                    callback: () => { resetWidget(this, w, defaults[w.name]); this.__svkLive?.schedule(); } });
+            }
+            return r;
+        };
+
+        if (!live) return;
 
         const onExecuted = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (message) {
             onExecuted?.apply(this, arguments);
             const p = message?.svk_depth_preview?.[0];
-            if (p && this.__svkLive) this.__svkLive.load(p);
+            if (p?.keys && this.__svkLive) this.__svkLive.load(p);
         };
 
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
             const r = onConfigure?.apply(this, arguments);
+            this.__svkLive?.toggleSliders(this.__svkLive.showSliders);
             this.__svkLive?.schedule();
             return r;
         };
