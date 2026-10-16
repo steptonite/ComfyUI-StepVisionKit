@@ -79,7 +79,29 @@ function pushSetting(key, v) {
     postConfig(patch).then((j) => { if (j) { reflect(j); render(); } });
 }
 
+// Показ плашки — суто справа цього браузера: на сервер не йде, сторож працює й без неї.
+const BADGE_SETTING = "StepVisionKit.Thermal.ShowBadge";
+
+let showBadge = null;            // останнє значення з onChange (сховище оновлюється вже після нього)
+
+function badgeWanted() {
+    if (showBadge !== null) return showBadge;
+    try {
+        const s = app.extensionManager?.setting;
+        const v = s?.get ? s.get(BADGE_SETTING) : app.ui.settings.getSettingValue(BADGE_SETTING);
+        return v !== false;
+    } catch (_) {
+        return true;
+    }
+}
+
 const SETTINGS = [
+    {
+        id: BADGE_SETTING, name: "Показувати плашку температури",
+        category: [CAT, SUB, "Плашка"], type: "boolean", defaultValue: true,
+        tooltip: "Лише показ у куті екрана. Пауза при перегріві працює й без плашки.",
+        onChange: (v) => { showBadge = v !== false; render(); },
+    },
     {
         id: "StepVisionKit.Thermal.Enabled", name: "Пауза при перегріві SoC",
         category: [CAT, SUB, "Увімкнено"], type: "boolean", defaultValue: true,
@@ -207,7 +229,7 @@ function toast(text, isErr = false, ms = TOAST_MS) {
 
 function render() {
     const e = ensureBadge();
-    if (!server) { e.style.display = "none"; return; }
+    if (!server || !badgeWanted()) { e.style.display = "none"; return; }
     e.style.display = "block";
     if (!e._svkPlaced) { e._svkPlaced = true; const p = loadPos(); if (p) placeBadge(e, p); }
     if (!server.enabled) {
