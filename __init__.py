@@ -21,6 +21,14 @@ from .lex.depth_curve import LexDepthCurve
 from .lex.depth_grade import SVKDepthGrade, SVKDepthGradeLive, SVKDepthGradeView, SVKDepthGradeVideoView
 from .lex.hud_sprite import LexHUDSprite
 
+# Термо-сторож: пауза при перегріві SoC (м'яка — всередині процесу, жорстка — окремий наглядач).
+# Помилка сторожа не має ламати пакет: install() сам ловить усе, це страховка на імпорт.
+try:
+    from .lex import thermal_guard as _svk_thermal_guard
+    _svk_thermal_guard.install()
+except Exception as _e:
+    print(f"[Термо-сторож] не запущено: {_e}")
+
 from .vk.nodes_boxes import NODES as VK_BOX, DISPLAY as VKD_BOX
 from .vk.nodes_detect import NODES as VK_DET, DISPLAY as VKD_DET
 from .vk.nodes_draw import NODES as VK_DRAW, DISPLAY as VKD_DRAW

@@ -8,3 +8,7 @@ __pycache__/
 *.jpg
 .DS_Store
 .venv/
+thermal_config.json
+.thermal_state.json
+.thermal_state.json.*.tmp
+thermal_config.json.*.tmp
