@@ -149,6 +149,35 @@ _hid_dead = False                       # читач не зібрався — �
 _SMC_OK = (10.0, 130.0)                 # SMC: 0 і -127 — непідключений сенсор, не температура
 # Префікс ключа → джерело для позначки. Решта префіксів «Tf»/«Ts» — SoC.
 _SMC_PREFIX = (("Tg", "GPU"), ("Tp", "CPU"), ("Te", "CPU"), ("Tf", "SoC"), ("Ts", "SoC"))
+# Ключі, які показує Stats (ядра CPU і GPU) — по чипу. Інші T-ключі SMC мають невідомий зміст:
+# на M2 Air частина Tp* (Tp0o, Tp0A, Tp0g, Tp02) тримає 96–100 °C, коли ядра Stats ~86 °C,
+# і по них сторож заморожував би генерацію без причини. Тому беремо лише ключі Stats.
+_STATS_KEYS = {
+    "M1": {"CPU": "Tp09 Tp0T Tp01 Tp05 Tp0D Tp0H Tp0L Tp0P Tp0X Tp0b",
+           "GPU": "Tg05 Tg0D Tg0L Tg0T"},
+    "M2": {"CPU": "Tp1h Tp1t Tp1p Tp1l Tp01 Tp05 Tp09 Tp0D Tp0X Tp0b Tp0f Tp0j",
+           "GPU": "Tg0f Tg0j"},
+    "M3": {"CPU": "Te05 Te0L Te0P Te0S Tf04 Tf09 Tf0A Tf0B Tf0D Tf0E Tf44 Tf49 Tf4A Tf4B Tf4D Tf4E",
+           "GPU": "Tf14 Tf18 Tf19 Tf1A Tf24 Tf28 Tf29 Tf2A"},
+    "M4": {"CPU": "Te05 Te09 Te0H Te0S Tp01 Tp05 Tp09 Tp0D Tp0V Tp0Y Tp0b Tp0e",
+           "GPU": "Tg0G Tg0H Tg1U Tg1k Tg0K Tg0L Tg0d Tg0e Tg0j Tg0k"},
+}
+
+
+def _stats_keys():
+    """{ключ: 'CPU'|'GPU'} для цього чипа або None (невідомий чип — тоді лише Tp*/Tg* зі скану)."""
+    try:
+        import subprocess
+        brand = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"], capture_output=True,
+                               text=True, timeout=2).stdout
+    except Exception:
+        return None
+    for chip, fam in _STATS_KEYS.items():
+        if ("Apple " + chip) in brand:
+            return {k: src for src, ks in fam.items() for k in ks.split()}
+    return None
+
+
 _smc = None                             # (call, [(name, src, size)]) після успішного скану
 _smc_dead = False                       # AppleSMC не відкрився або ключів нема — більше не пробуємо
 
@@ -366,7 +395,13 @@ def _smc_scan(call):
         if info is None or info[1] != "flt " or info[0] != 4:
             continue
         keys.append((name, src, info[0]))
-    return keys
+    wl = _stats_keys()
+    if wl:
+        picked = [(n, wl[n], sz) for n, _s, sz in keys if n in wl]
+        if picked:
+            return picked
+    # невідомий чип або жодного ключа Stats: лише ядра і GPU, без Tf/Ts невідомого змісту
+    return [k for k in keys if k[0][:2] in ("Tp", "Te", "Tg")]
 
 
 def _read_smc():
