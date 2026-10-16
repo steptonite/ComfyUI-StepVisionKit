@@ -80,11 +80,87 @@ def _send(state, **data):
 
 # ───────────────────────── м'яка пауза ─────────────────────────
 
+# ───────────────────────── API-ноди (партнерські, віддалені) ─────────────────────────
+# API-нода чекає відповіді сервера (генерація оплачена). Пауза sleep-ом блокує той самий цикл,
+# у якому крутяться її запити, а заморозка SIGSTOP рве відкриті з'єднання тайм-аутом.
+# Локально вона Мак майже не гріє — тож на час її роботи сторож нічого не робить.
+
+_prompt = None          # граф поточної задачі: id ноди → {"class_type": …}
+_api_cache = {}         # class_type → чи це API-нода
+_api_noted = None       # про яку ноду вже написали в консоль
+HOLD_PATH = os.path.join(os.path.dirname(thermal.STATE_PATH), ".thermal_hold.json")
+
+
+def _is_api_class(ct):
+    if ct in _api_cache:
+        return _api_cache[ct]
+    api = False
+    try:
+        import nodes
+        cls = nodes.NODE_CLASS_MAPPINGS.get(ct)
+        if cls is not None:
+            api = bool(getattr(cls, "API_NODE", False)) or "api_nodes" in (getattr(cls, "__module__", "") or "")
+    except Exception:
+        api = False
+    _api_cache[ct] = api
+    return api
+
+
+def _current_api():
+    """class_type API-ноди, що виконується зараз, або None."""
+    pr = _prompt
+    if not pr:
+        return None
+    try:
+        from server import PromptServer
+        nid = PromptServer.instance.last_node_id
+    except Exception:
+        return None
+    if nid is None:
+        return None
+    nid = str(nid)
+    for k in (nid, nid.split(".")[0], nid.split(":")[0]):
+        node = pr.get(k)
+        if isinstance(node, dict):
+            ct = node.get("class_type")
+            return ct if ct and _is_api_class(ct) else None
+    return None
+
+
+def _note_api(ct):
+    global _api_noted
+    if _api_noted != ct:
+        _api_noted = ct
+        _log("працює API-нода %s — паузу й заморозку пропускаю, щоб не обірвати запит" % ct)
+
+
+def _hold(ct):
+    """Сказати наглядачу (окремий процес): не заморожувати ще 10 с."""
+    try:
+        thermal.write_state({"until": time.time() + 10.0, "node": ct}, HOLD_PATH)
+    except Exception:
+        pass
+
+
+def _unhold():
+    global _api_noted
+    _api_noted = None
+    try:
+        os.remove(HOLD_PATH)
+    except OSError:
+        pass
+
+
 def maybe_cool():
     """Викликається перед кожним кроком. Тротл poll_s; при гарячому SoC блокує потік до охолодження."""
     global _last_check
     cfg = _cfg
     if not _active or not cfg["enabled"]:
+        return
+    api = _current_api()
+    if api:
+        _note_api(api)
+        _hold(api)
         return
     now = time.monotonic()
     with _lock:
@@ -203,6 +279,9 @@ def _patch():
         orig_exe = PE.execute
         if not getattr(orig_exe, "_svk_thermal", False):
             def execute(self, *args, **kwargs):
+                global _prompt
+                pr = args[0] if args else kwargs.get("prompt")
+                _prompt = pr if isinstance(pr, dict) else None
                 try:
                     _job_begin()
                 except Exception:
@@ -210,6 +289,8 @@ def _patch():
                 try:
                     return orig_exe(self, *args, **kwargs)
                 finally:
+                    _prompt = None
+                    _unhold()
                     try:
                         _job_end()
                     except Exception:
@@ -230,6 +311,10 @@ def _reporter_loop(seen):
             # пік і пульс під час задачі: ноди без прогрес-бару сторож інакше не бачить
             d = _job
             if d is not None and _cfg["enabled"]:
+                api = _current_api()
+                if api:                 # API-нода без прогрес-бару теж має бути під захистом
+                    _note_api(api)
+                    _hold(api)
                 t = thermal.read_max_c()
                 _peak(t)
                 now = time.monotonic()

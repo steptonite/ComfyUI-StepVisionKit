@@ -59,6 +59,8 @@ class _Watch:
         self.cap_latch = False
         self.t_freeze = None
         self.seq = int((th.read_state(state_path) or {}).get("seq", 0) or 0)
+        self.hold_path = os.path.join(os.path.dirname(state_path), ".thermal_hold.json")
+        self.hold_noted = None
 
     # ── процес-ціль ──
 
@@ -135,6 +137,15 @@ class _Watch:
                 self.cap_latch = False
             return
         if t >= cfg["hard_at"]:
+            # API-нода чекає відповіді сервера: SIGSTOP обірвав би запит (і оплачену генерацію)
+            hold = self.th.read_state(self.hold_path) or {}
+            if float(hold.get("until", 0) or 0) > time.time():
+                if self.hold_noted != hold.get("node"):
+                    self.hold_noted = hold.get("node")
+                    _log("%.0f°C ≥ %.0f, але працює API-нода %s — заморозку пропускаю"
+                         % (t, cfg["hard_at"], self.hold_noted))
+                return
+            self.hold_noted = None
             self._freeze(t)
 
     def run(self):

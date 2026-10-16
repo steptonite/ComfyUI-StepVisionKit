@@ -12,3 +12,5 @@ thermal_config.json
 .thermal_state.json
 .thermal_state.json.*.tmp
 thermal_config.json.*.tmp
+.thermal_hold.json
+.thermal_hold.json.*.tmp
