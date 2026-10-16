@@ -113,6 +113,13 @@ def _qtable(x):
             [float(v) for v in np.percentile(flat, _PCT_HI)])
 
 
+def _encode_u16(sm):
+    """Кадр → (x0, x1, base64 uint16). Один формат для _preview_payload і _frame_job."""
+    x0, x1 = float(sm.min()), float(sm.max())
+    enc = np.round((sm - x0) / max(x1 - x0, 1e-9) * 65535.0).astype("<u2")
+    return x0, x1, base64.b64encode(enc.tobytes()).decode("ascii")
+
+
 def _preview_payload(x, side=384, max_keys=8):
     """Мініатюри СИРОГО депсу (до грейду) для браузера: далі він грейдить сам, без Run.
 
@@ -121,7 +128,6 @@ def _preview_payload(x, side=384, max_keys=8):
     (менших, щоб повідомлення лишалось ~1 МБ), кожен зі своїми квантилями для
     levels_scope = per frame; таблиці кліпу — спільні.
     """
-    import base64
     import cv2
 
     n = int(x.shape[0])
@@ -134,11 +140,10 @@ def _preview_payload(x, side=384, max_keys=8):
         h, w = f.shape
         s = min(1.0, side / float(max(h, w)))
         sm = cv2.resize(f, (max(1, int(w * s)), max(1, int(h * s))), interpolation=cv2.INTER_AREA)
-        x0, x1 = float(sm.min()), float(sm.max())
-        enc = np.round((sm - x0) / max(x1 - x0, 1e-9) * 65535.0).astype("<u2")
+        x0, x1, data = _encode_u16(sm)
         flo, fhi = _qtable(f)
         keys.append({"i": int(i), "x0": x0, "x1": x1, "frame_lo": flo, "frame_hi": fhi,
-                     "data": base64.b64encode(enc.tobytes()).decode("ascii")})
+                     "data": data})
     clo, chi = _qtable(x)
     return {"w": int(sm.shape[1]), "h": int(sm.shape[0]), "frames": n,
             "clip_lo": clo, "clip_hi": chi, "keys": keys}
@@ -317,6 +322,7 @@ _CACHE = OrderedDict()                # ключ ноди → (x16, motion16 | N
 _CACHE_MAX = 2                        # скільки ключів тримаємо
 _CACHE_SIDE = 768                     # довша сторона кешу
 _CACHE_BYTES = 250 * 1024 * 1024      # більше — беремо кожен stride-й кадр
+_CLIP_Q = {}                          # ключ → (entry, clip_lo, clip_hi): квантилі всього кешу, раз на запис
 _LATEST = {}                          # ключ → (gen, monotonic час запиту)
 _LOCK = threading.Lock()
 _STALE_SEC = 60.0                     # після такої паузи gen можна починати з нуля (перезавантажили сторінку)
@@ -348,9 +354,11 @@ def _cache_put(key, x, motion, n):
     with _LOCK:
         _CACHE[key] = (xs, ms, int(n), int(stride))
         _CACHE.move_to_end(key)
+        _CLIP_Q.pop(key, None)
         while len(_CACHE) > _CACHE_MAX:
             old, _ = _CACHE.popitem(last=False)
             _LATEST.pop(old, None)
+            _CLIP_Q.pop(old, None)
 
 
 def _cache_clip_lohi(x16, p):
@@ -361,6 +369,22 @@ def _cache_clip_lohi(x16, p):
     flat = flat.astype(np.float32)
     dist = (1.0 - flat) if p["depth_is"] == "near is white" else flat
     return _lohi(dist, p["trim_near"], 100.0 - p["trim_far"])
+
+
+def _clip_qtable(key, entry, x16):
+    """Квантилі всього кешу для браузера (Статика, levels_scope = whole clip). Рахуємо раз на запис кешу."""
+    with _LOCK:
+        cq = _CLIP_Q.get(key)
+    if cq is not None and cq[0] is entry:
+        return cq[1], cq[2]
+    flat = x16.reshape(-1)
+    if flat.size > 200_000:
+        flat = flat[np.random.default_rng(0).integers(0, flat.size, 200_000)]
+    clo, chi = _qtable(flat.astype(np.float32))
+    with _LOCK:
+        if _CACHE.get(key) is entry:
+            _CLIP_Q[key] = (entry, clo, chi)
+    return clo, chi
 
 
 def _is_superseded(key, gen):
@@ -643,6 +667,47 @@ def _preview_job(body):
         return fail("error", str(e) or type(e).__name__)
 
 
+def _frame_job(body):
+    """Один кадр для режиму «Статика»: кадр кешу → uint16, без грейду. Тон рахує браузер.
+
+    i — оригінальний індекс кадру (затискається в межі кліпу). Відповідь має формат _preview_payload
+    з одним ключем, тож браузер розкодує її тим самим M.decodePreview. Викликається в executor.
+    """
+    try:
+        key = str(body.get("key", ""))
+        i = int(body.get("i", 0))
+        size = int(body.get("size", 384))
+    except Exception as e:
+        return {"ok": False, "reason": "error", "message": f"key/i/size: {e}"}
+
+    try:
+        if size not in _PREVIEW_SIZES:
+            return {"ok": False, "reason": "error", "message": "size має бути 256, 384, 512 або 768"}
+        with _LOCK:
+            entry = _CACHE.get(key)
+            if entry is not None:
+                _CACHE.move_to_end(key)
+        if entry is None:
+            return {"ok": False, "reason": "no_cache",
+                    "message": "немає кадрів у кеші: натисни Run на Depth Grade один раз"}
+
+        x16, _m16, n_orig, stride = entry
+        nc = int(x16.shape[0])
+        i = min(max(i, 0), n_orig - 1)
+        ci = min(max(i // stride, 0), nc - 1)
+        f = x16[ci].astype(np.float32)
+        sm = _resize_stack(f[None], size)[0]
+        flo, fhi = _qtable(f)
+        clo, chi = _clip_qtable(key, entry, x16)
+        x0, x1, data = _encode_u16(sm)
+        return {"ok": True, "w": int(sm.shape[1]), "h": int(sm.shape[0]), "frames": int(n_orig),
+                "clip_lo": clo, "clip_hi": chi,
+                "keys": [{"i": int(ci * stride), "x0": x0, "x1": x1,
+                          "frame_lo": flo, "frame_hi": fhi, "data": data}]}
+    except Exception as e:
+        return {"ok": False, "reason": "error", "message": str(e) or type(e).__name__}
+
+
 # ───────────────────────── маршрут ─────────────────────────
 
 try:
@@ -659,5 +724,16 @@ try:
             return _web.json_response({"ok": False, "gen": 0, "reason": "error", "message": str(e)})
         loop = asyncio.get_running_loop()
         return _web.json_response(await loop.run_in_executor(None, _preview_job, body))
+
+    @PromptServer.instance.routes.post("/svk/depth_grade/frame")
+    async def _svk_depth_grade_frame(request):
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("тіло запиту має бути обʼєктом")
+        except Exception as e:
+            return _web.json_response({"ok": False, "reason": "error", "message": str(e)})
+        loop = asyncio.get_running_loop()
+        return _web.json_response(await loop.run_in_executor(None, _frame_job, body))
 except Exception as _e:
     print(f"[DepthGrade] маршрут живого прев'ю не зареєстровано: {_e}")

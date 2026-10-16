@@ -73,7 +73,7 @@ class ViewPanel {
         this.root = h("div", `position:relative;display:block;width:100%;height:100%;box-sizing:border-box;
             overflow:hidden;color:${C.text};font:12px system-ui,sans-serif`);
         // не тягати вузол замість маркера; колесо не чіпаємо — полотно має зумитись
-        for (const ev of ["pointerdown", "pointerup", "click", "dblclick"])
+        for (const ev of ["pointerdown", "click", "dblclick"])
             this.root.addEventListener(ev, (e) => e.stopPropagation());
 
         // ── рядок 1: піпетки ліворуч, «До/після», «Криві», «Скинути» — іконками праворуч

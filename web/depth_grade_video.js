@@ -1,21 +1,26 @@
-// Depth Grade View · відео (живе прев'ю).
-// Під'єднай вхід depth до виходу depth ноди Depth Grade і натисни Run один раз. Далі кожна зміна
-// повзунків Depth Grade сама перераховує фрагмент кліпу на сервері (POST /svk/depth_grade/preview)
-// і показує його по колу — без Run. Порядок: зміна → 250 мс тиші → запит; відповідь зі старішим
-// gen ігнорується. Вигляд і спільні кнопки — з depth_grade_ui.js.
+// Depth Grade View · відео. Два режими перемикача «Статика | Програвання».
+//  • Статика (за замовчуванням): один вибраний кадр. Тон рахується в браузері миттєво на кожну зміну
+//    повзунка (M.grade, як у View кадр). Сервер смикаємо лише при зміні кадру чи розміру
+//    (POST /svk/depth_grade/frame). Clarity, texture, banding і deflicker тут не видно.
+//  • Програвання: фрагмент кліпу рахує сервер (POST /svk/depth_grade/preview) — Пуск/Пауза, fps,
+//    До/після з сервера. Зміна → 250 мс тиші → запит; відповідь зі старішим gen ігнорується.
+// Вигляд і спільні кнопки — з depth_grade_ui.js, тонова математика — з depth_grade_math.js.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import * as M from "./depth_grade_math.js";
 import {
-    VIDEO, C, GAP, CTRL_H, MONO, ensureStyles, h, place, setText, icon, setIcon,
-    presetRow, findSource, rawOf, paramValues, widgetOf, registerPanel, unregisterPanel,
+    VIDEO, C, GAP, CTRL_H, MONO, TONE_KEYS, ensureStyles, h, place, setText, icon, btn, setIcon,
+    presetRow, findSource, rawOf, paramValues, widgetOf, toneSig, registerPanel, unregisterPanel,
 } from "./depth_grade_ui.js";
 
 const ROUTE = "/svk/depth_grade/preview";
+const FRAME_ROUTE = "/svk/depth_grade/frame";
 const SIZES = [256, 384, 512, 768];
 const FRAGMENTS = [24, 48, 96];
 const DEFAULT_SIZE = 384;
 const DEFAULT_FRAGMENT = 48;
 const DEBOUNCE_MS = 250;
+const STILL_DEBOUNCE_MS = 150;
 const POLL_MS = 120;
 const MIN_PIC_H = 160;   // мінімальна висота картинки (для getMinHeight), px
 const AUTO_MAXH = 480;   // одноразове авто-розміру ноди: картинка не вища за це, px
@@ -26,8 +31,9 @@ const BAR_H = 2 * CTRL_H + 6;
 const ERR = C.err;
 const PLAY_TITLE = "Відтворити фрагмент по колу (швидкість — fps ноди)";
 const HINT = "Clarity / texture / смуги на малому прев'ю видно слабше — точно покаже Run.";
+const STILL_HINT = "Статика показує тон: рівні, криву, hero, стелю. Clarity, texture, smooth banding і deflicker видно в Програванні.";
 const EMPTY_NO_SRC = "Під'єднай depth від ноди Depth Grade";
-const EMPTY_NO_RUN = "Натисни Run один раз — далі прев'ю відео рахується саме, без Run.";
+const EMPTY_NO_RUN = "Натисни Run один раз — далі прев'ю рахується саме, без Run.";
 
 function clampStart(s, total, count) {
     return Math.max(0, Math.min(Math.floor(s) || 0, Math.max(0, total - count)));
@@ -63,6 +69,18 @@ function hintNeeded(A) {
     return ["clarity", "texture", "smooth_banding"].some((k) => Number(widgetOf(A, k)?.value) > 0);
 }
 
+// у Статиці підказка показується й тоді, коли ввімкнений deflicker (він не видно без Програвання)
+function hintOn(A, still) {
+    return hintNeeded(A) || (still && Number(widgetOf(A, "deflicker")?.value) > 0);
+}
+
+// тонові повзунки Depth Grade у формі, яку читає M.grade
+function toneValues(A) {
+    const o = {};
+    for (const k of TONE_KEYS) o[k] = widgetOf(A, k)?.value;
+    return o;
+}
+
 class VideoPanel {
     constructor(node) {
         ensureStyles();
@@ -70,17 +88,24 @@ class VideoPanel {
         this.A = null;           // нода Depth Grade за входом depth
         this.raw = null;         // payload превью (cache_key, frames_total, …) — ідентичність
         this.rawSeq = 0;         // лічильник появ payload (входить у підпис)
-        this.sig = "";           // підпис усього, що впливає на кадри
-        this.reqSig = "";        // підпис останнього поставленого в чергу запиту
-        this.gen = Date.now();   // лічильник запитів: монотонний і між перезавантаженнями сторінки
-        this.appliedGen = 0;     // останній застосований gen
-        this.busy = false;
+        this.sig = "";           // Програвання: підпис усього, що впливає на фрагмент
+        this.reqSig = "";        // Програвання: підпис останнього поставленого в чергу запиту
+        this.gen = Date.now();   // лічильник запитів фрагмента: монотонний і між перезавантаженнями сторінки
+        this.appliedGen = 0;     // останній застосований gen фрагмента
+        this.busy = false;       // Програвання: запит фрагмента в роботі
+        this.stillGen = 0;       // Статика: лічильник запитів кадру
+        this.stillBusy = false;  // Статика: запит кадру в роботі
         this.noCache = false;    // сервер: кеш цього Run вже немає
         this.errMsg = "";
-        this.meta = null;        // { w, h, start, count, total, ms } останнього застосованого набору
-        this.after = [];         // Image[] результату
-        this.before = [];        // Image[] сирого депсу (для До/після)
-        this.vi = 0;             // індекс кадру у фрагменті
+        this.meta = null;        // { w, h, start, count, total, ms } того, що зараз на екрані
+        this.playMeta = null;    // meta фрагмента Програвання
+        this.stillMeta = null;   // meta кадру Статики
+        this.after = [];         // Програвання: Image[] результату
+        this.before = [];        // Програвання: Image[] сирого депсу
+        this.still = null;       // Статика: розкодований кадр (M.decodePreview), один ключ
+        this.stillSig = "";      // підпис (rawSeq, розмір, кадр) завантаженого кадру
+        this.stillReqSig = "";   // підпис останнього кадру, поставленого в чергу
+        this.vi = 0;             // індекс кадру у фрагменті (у Статиці завжди 0)
         this.wantVi = null;      // куди стати після переходу до нового фрагмента
         this.playing = false;
         this.playRaf = 0;
@@ -90,18 +115,29 @@ class VideoPanel {
         this.dragSplit = false;
         this.dragTrack = false;
         this.iconState = "";
+        this.toneKey = "";       // підпис тонів (і ноди) — зміна → presets і перемальовка Статики
+        this.paintSig = "";      // підпис стану для перемальовки DOM
+        this.metaSeq = 0;        // змінюється з кожним новим результатом
         this.dbT = 0;
+        this.stillT = 0;
         this.timer = 0;
         this.disposed = false;
 
         this.root = h("div", `position:relative;display:flex;flex-direction:column;gap:${GAP}px;width:100%;height:100%;box-sizing:border-box;overflow:hidden;color:${C.text};font:12px system-ui,sans-serif`);
         // не тягати вузол замість маркера; колесо не чіпаємо
-        for (const ev of ["pointerdown", "pointerup", "click", "dblclick"])
+        for (const ev of ["pointerdown", "click", "dblclick"])
             this.root.addEventListener(ev, (e) => e.stopPropagation());
 
-        // ── рядок 1: Пуск/Пауза і лічильник ліворуч; До/після, розмір, фрагмент праворуч
+        // ── рядок 1: перемикач режимів, Пуск/Пауза і лічильник; До/після, розмір, фрагмент праворуч
         const r1 = h("div");
         r1.className = "svk-row";
+        this.modeStill = btn("Статика", "Один кадр: тон рахується миттєво в браузері, без запитів на кожен повзунок",
+            () => this.setMode("still"));
+        this.modePlay = btn("Програвання", "Фрагмент кліпу рахує сервер: Пуск/Пауза, швидкість — fps ноди",
+            () => this.setMode("play"));
+        const modeSeg = h("div");
+        modeSeg.className = "svk-seg";
+        modeSeg.append(this.modeStill, this.modePlay);
         this.playBtn = icon("play", PLAY_TITLE, () => this.togglePlay());
         this.counter = h("span");
         this.counter.className = "svk-num";
@@ -113,7 +149,7 @@ class VideoPanel {
         this.fragSel = makeSelect(FRAGMENTS.map((n) => [String(n), `${n} кадрів`]), "Скільки кадрів у фрагменті",
             (v) => { this.setProp("svkFragment", +v); this.queue(); });
         end.append(this.cmp, this.sizeSel, this.fragSel);
-        r1.append(this.playBtn, this.counter, end);
+        r1.append(modeSeg, this.playBtn, this.counter, end);
 
         // ── рядок 2: пресети кривої
         this.presets = presetRow(() => this.A);
@@ -145,7 +181,7 @@ class VideoPanel {
         this.divider.addEventListener("pointerup", endSplit);
         this.divider.addEventListener("pointercancel", endSplit);
 
-        // ── доріжка всього кліпу: підсвічений фрагмент, поточний кадр
+        // ── доріжка всього кліпу: у Статиці клік = кадр; у Програванні — підсвічений фрагмент і поточний кадр
         this.trackWrap = h("div", `position:relative;flex:none;height:${TRACK_H}px;cursor:pointer;touch-action:none;display:none`);
         const base = h("div", `position:absolute;left:0;right:0;top:6px;height:4px;border-radius:2px;background:${C.line}`);
         this.trackSeg = h("div", `position:absolute;top:4px;height:8px;border-radius:3px;background:${C.accentDim};box-shadow:0 0 0 1px ${C.accent}`);
@@ -174,15 +210,28 @@ class VideoPanel {
         this.paint();
     }
 
+    // відкладене опитування (після зміни тонів або завантаження конфігу); кілька викликів = один кадр
+    schedule() {
+        if (this.schedRaf || this.disposed) return;
+        this.schedRaf = requestAnimationFrame(() => {
+            this.schedRaf = 0;
+            if (!this.disposed) this.tick();
+        });
+    }
+
     dispose() {
         this.disposed = true;
         clearInterval(this.timer);
+        if (this.schedRaf) cancelAnimationFrame(this.schedRaf);
+        this.schedRaf = 0;
         clearTimeout(this.dbT);
+        clearTimeout(this.stillT);
         this.ro?.disconnect();
         unregisterPanel(this);
         this.pause();
         this.after = [];
         this.before = [];
+        this.still = null;
     }
 
     // ── налаштування, що живуть у properties ноди (зберігаються у граф)
@@ -196,6 +245,10 @@ class VideoPanel {
         this.node.properties[name] = v;
     }
 
+    mode() { return this.prop("svkVidMode", "still") === "play" ? "play" : "still"; }
+
+    isStill() { return this.mode() === "still"; }
+
     size() {
         const s = +this.prop("svkPreviewSize", DEFAULT_SIZE);
         return SIZES.includes(s) ? s : DEFAULT_SIZE;
@@ -208,6 +261,8 @@ class VideoPanel {
 
     start() { return Math.max(0, Math.floor(+this.prop("svkStart", 0)) || 0); }
 
+    frame() { return Math.max(0, Math.floor(+this.prop("svkFrame", 0)) || 0); }
+
     splitPos() { return Math.min(1, Math.max(0, +this.prop("svkSplit", 0.5))); }
 
     fps() {
@@ -215,9 +270,20 @@ class VideoPanel {
         return v > 0 ? Math.min(120, v) : 24;
     }
 
-    // ── опитування: джерело, payload, підпис → запит (після паузи)
-    schedule() { this.tick(); }
+    // загальна кількість кадрів кліпу (з payload або з того, що вже показано)
+    total() { return +this.raw?.frames_total || this.stillMeta?.total || this.playMeta?.total || 0; }
 
+    busyNow() { return this.isStill() ? this.stillBusy : this.busy; }
+
+    hasImage() { return !!this.meta && (this.isStill() ? !!this.still : this.after.length > 0); }
+
+    // кадр, що зараз на екрані (або вибраний) — переноситься при перемиканні режиму
+    curFrame() {
+        if (this.meta && this.hasImage()) return this.meta.start + (this.isStill() ? 0 : this.vi);
+        return this.frame();
+    }
+
+    // ── опитування: джерело, payload, тони → режим; перемальовка DOM лише при зміні підпису
     tick() {
         const A = findSource(this.node);
         const raw = A ? rawOf(A) : null;
@@ -229,6 +295,42 @@ class VideoPanel {
         }
         this.A = A;
         const ready = !!A && !!raw?.cache_key;
+        const tk = A ? `${A.id}|${toneSig(A)}` : "";
+        if (tk !== this.toneKey) {
+            this.toneKey = tk;
+            this.presets.refresh();
+            if (this.isStill() && this.still) this.drawStill();
+        }
+        if (this.isStill()) this.tickStill(ready);
+        else this.tickPlay(ready);
+        const pk = this.paintKey();
+        if (pk !== this.paintSig) {
+            this.paintSig = pk;
+            this.paint();
+        }
+    }
+
+    paintKey() {
+        return JSON.stringify([this.mode(), !!this.A, !!this.raw?.cache_key, this.noCache, this.errMsg,
+            this.busyNow(), this.playing, this.compare, this.hasImage(), this.size(), this.count(),
+            this.meta?.total || 0, this.metaSeq, this.after.length, hintOn(this.A, this.isStill())]);
+    }
+
+    // Статика: запит кадру лише при зміні кадру/розміру/рівня; тони → миттєвий перерахунок у браузері
+    tickStill(ready) {
+        if (!ready) return;
+        const fs = this.frameSig();
+        if (fs === this.stillReqSig) return;
+        if (fs === this.stillSig && this.still) {
+            this.stillReqSig = fs;
+            this.drawStill();
+            return;
+        }
+        this.queueStill();
+    }
+
+    // Програвання: як раніше — підпис фрагмента → запит
+    tickPlay(ready) {
         const sig = ready ? this.signature() : "";
         if (sig !== this.sig) {
             this.sig = sig;
@@ -237,23 +339,72 @@ class VideoPanel {
                 this.queue();
             }
         }
-        this.presets.refresh();
-        this.paint();
     }
 
     signature() {
         return JSON.stringify([this.rawSeq, this.size(), this.start(), this.count(), paramValues(this.A)]);
     }
 
+    frameSig() { return JSON.stringify([this.rawSeq, this.size(), this.frame()]); }
+
     queue() {
+        if (this.isStill()) { this.queueStill(); return; }
         clearTimeout(this.dbT);
         this.dbT = setTimeout(() => { this.dbT = 0; this.request(); }, DEBOUNCE_MS);
     }
 
-    // ── запит до маршруту; відповідь зі старішим gen ігнорується
+    // доріжка тягнеться: якщо таймер уже чекає, він візьме актуальний кадр (оновлення раз на 150 мс)
+    queueStill() {
+        this.stillReqSig = this.frameSig();
+        if (this.stillT) return;
+        this.stillT = setTimeout(() => { this.stillT = 0; this.requestStill(); }, STILL_DEBOUNCE_MS);
+    }
+
+    // ── Статика: один кадр; відповідь зі старішим gen ігнорується
+    async requestStill() {
+        const A = this.A, raw = this.raw;
+        if (this.disposed || !this.isStill() || !A || !raw?.cache_key) return;
+        const sig = this.frameSig();
+        const gen = ++this.stillGen;
+        this.stillBusy = true;
+        this.paint();
+        try {
+            const res = await api.fetchApi(FRAME_ROUTE, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ key: String(raw.cache_key), i: this.frame(), size: this.size() }),
+            });
+            if (!res.ok) throw new Error(`сервер відповів ${res.status}`);
+            const j = await res.json();
+            if (this.disposed || gen !== this.stillGen || !this.isStill()) return;
+            if (!j.ok) {
+                if (j.reason === "no_cache") this.noCache = true;
+                else this.errMsg = j.message || "помилка обчислення";
+                return;
+            }
+            const s = M.decodePreview(j);
+            this.still = s;
+            this.stillSig = sig;
+            this.stillMeta = { w: s.w, h: s.h, start: s.keys[0].i, count: 1, total: s.frames, ms: 0 };
+            this.meta = this.stillMeta;
+            this.vi = 0;
+            this.noCache = false;
+            this.errMsg = "";
+            this.metaSeq++;
+            this.autoSize();
+            this.drawStill();
+        } catch (e) {
+            if (!this.disposed && gen === this.stillGen && this.isStill()) this.errMsg = String(e?.message || e);
+        } finally {
+            if (gen === this.stillGen) this.stillBusy = false;
+            this.paint();
+        }
+    }
+
+    // ── Програвання: один запит фрагмента; відповідь зі старішим gen ігнорується
     async request() {
         const A = this.A, raw = this.raw;
-        if (this.disposed || !A || !raw?.cache_key) return;
+        if (this.disposed || this.isStill() || !A || !raw?.cache_key) return;
         const gen = ++this.gen;
         const body = {
             key: String(raw.cache_key),
@@ -273,7 +424,7 @@ class VideoPanel {
             });
             if (!res.ok) throw new Error(`сервер відповів ${res.status}`);
             const j = await res.json();
-            if (this.disposed || gen < this.appliedGen) return;
+            if (this.disposed || this.isStill() || gen < this.appliedGen) return;
             if (!j.ok) {
                 if (j.reason === "superseded") return;
                 if (j.reason === "no_cache") this.noCache = true;
@@ -282,7 +433,7 @@ class VideoPanel {
             }
             await this.apply(j, gen);
         } catch (e) {
-            if (!this.disposed && gen >= this.appliedGen) this.errMsg = String(e?.message || e);
+            if (!this.disposed && !this.isStill() && gen >= this.appliedGen) this.errMsg = String(e?.message || e);
         } finally {
             if (gen === this.gen) this.busy = false;
             this.paint();
@@ -291,7 +442,7 @@ class VideoPanel {
 
     async apply(j, gen) {
         const [after, before] = await Promise.all([loadAll(j.after), loadAll(j.before)]);
-        if (this.disposed || gen < this.appliedGen) return;
+        if (this.disposed || this.isStill() || gen < this.appliedGen) return;
         if (!after.length || after.some((im) => !im)) throw new Error("кадри не декодувалися");
         this.appliedGen = gen;
         this.after = after;
@@ -304,6 +455,8 @@ class VideoPanel {
             total: +j.frames_total || 0,
             ms: +j.ms || 0,
         };
+        this.playMeta = this.meta;
+        this.metaSeq++;
         this.vi = this.wantVi != null ? this.wantVi : Math.min(this.vi, after.length - 1);
         this.wantVi = null;
         this.vi = Math.min(Math.max(0, this.vi), after.length - 1);
@@ -342,7 +495,7 @@ class VideoPanel {
     layout() {
         const pw = this.pic.clientWidth, ph = this.pic.clientHeight;
         const m = this.meta;
-        if (!m || !this.after.length || !pw || !ph) return;
+        if (!m || !this.hasImage() || !pw || !ph) return;
         const ar = m.w / m.h;
         let W = pw, H = pw / ar;
         if (H > ph) { H = ph; W = ph * ar; }
@@ -353,13 +506,45 @@ class VideoPanel {
     }
 
     placeDivider() {
-        const on = !!(this.compare && this.after.length && this.before[this.vi]);
+        const on = !!(this.compare && this.hasImage() && (this.isStill() || this.before[this.vi]));
         this.divider.style.display = on ? "block" : "none";
         this.divider.style.left = (this.splitPos() * 100) + "%";
     }
 
-    // ── малювання кадру: зображення, До/після, лічильник і доріжка
-    draw() {
+    // ── малювання: Статика або Програвання
+    draw() { return this.isStill() ? this.drawStill() : this.drawPlay(); }
+
+    // Статика: тон рахує M.grade на вибраному кадрі; «до» — сирий кадр, нормалізований як у View кадр
+    drawStill() {
+        const s = this.still, A = this.A, m = this.stillMeta;
+        if (!s || !A || !m) return;
+        this.meta = m;
+        const g = M.grade(s, toneValues(A), 0);
+        const key = s.keys[0];
+        const W = s.w, H = s.h, n = W * H;
+        if (this.canvas.width !== W || this.canvas.height !== H) {
+            this.canvas.width = W;
+            this.canvas.height = H;
+        }
+        const split = this.compare ? Math.round(this.splitPos() * W) : 0;
+        let xmin = Infinity, xmax = -Infinity;
+        if (split > 0) for (const v of key.x) { if (v < xmin) xmin = v; if (v > xmax) xmax = v; }
+        const span = Math.max(xmax - xmin, 1e-9);
+        const ctx = this.canvas.getContext("2d");
+        const img = ctx.createImageData(W, H);
+        for (let i = 0; i < n; i++) {
+            const v = (i % W) < split ? (key.x[i] - xmin) / span : g.out[i];
+            const b = v * 255;
+            img.data[4 * i] = img.data[4 * i + 1] = img.data[4 * i + 2] = b;
+            img.data[4 * i + 3] = 255;
+        }
+        ctx.putImageData(img, 0, 0);
+        this.layout();
+        this.paintFrame();
+    }
+
+    // Програвання: кадр фрагмента з сервера
+    drawPlay() {
         const n = this.after.length, m = this.meta;
         if (!n || !m) return;
         this.vi = Math.min(Math.max(0, this.vi), n - 1);
@@ -380,25 +565,28 @@ class VideoPanel {
     }
 
     paintFrame() {
-        const m = this.meta, n = this.after.length;
-        if (!m || !n) { setText(this.counter, ""); return; }
+        const m = this.meta;
+        if (!m || !this.hasImage()) { setText(this.counter, ""); return; }
+        const n = this.isStill() ? 1 : this.after.length;
         setText(this.counter, m.total
-            ? `кадр ${m.start + this.vi + 1} / ${m.total}`
-            : `кадр ${this.vi + 1} / ${n}`);
+            ? `кадр ${m.start + this.vi + 1} з ${m.total}`
+            : `кадр ${this.vi + 1} з ${n}`);
         this.placeTrack();
     }
 
     placeTrack() {
         const m = this.meta, total = m?.total || 0;
         if (!total) return;
+        this.trackHead.style.left = ((m.start + this.vi + 0.5) / total * 100) + "%";
+        if (this.isStill()) { this.trackSeg.style.display = "none"; return; }
+        this.trackSeg.style.display = "block";
         const c = Math.min(this.count(), total);
         const s = clampStart(this.start(), total, c);
         this.trackSeg.style.left = (s / total * 100) + "%";
         this.trackSeg.style.width = (c / total * 100) + "%";
-        this.trackHead.style.left = ((m.start + this.vi + 0.5) / total * 100) + "%";
     }
 
-    // ── доріжка: клік/перетяг усередині фрагмента — кадр; поза ним — новий фрагмент
+    // ── доріжка: Статика — будь-яка точка = кадр; Програвання — усередині фрагмента кадр, поза ним новий фрагмент
     frameAt(e) {
         const total = this.meta?.total || 0;
         const r = this.trackWrap.getBoundingClientRect();
@@ -426,8 +614,15 @@ class VideoPanel {
 
     onTrackAt(e) {
         const m = this.meta;
-        if (!m?.total || !this.after.length) return;
+        if (!m?.total) return;
         const f = this.frameAt(e);
+        if (this.isStill()) {
+            this.setProp("svkFrame", f);
+            this.queueStill();
+            this.placeTrack();
+            return;
+        }
+        if (!this.after.length) return;
         if (f >= m.start && f < m.start + m.count) {       // усередині показаного фрагмента — перехід до кадру
             this.pause();
             this.vi = f - m.start;
@@ -443,29 +638,55 @@ class VideoPanel {
         this.placeTrack();
     }
 
-    // ── До / після: лінію можна тягнути (позиція зберігається в svkSplit)
-    toggleCompare() {
-        this.compare = !this.compare;
-        this.draw();
+    // ── перемикання режиму: вибраний кадр переходить із Програвання у Статику і назад
+    setMode(m) {
+        if (this.disposed || m === this.mode()) return;
+        const frame = this.curFrame();
+        this.pause();
+        clearTimeout(this.dbT);
+        this.dbT = 0;
+        clearTimeout(this.stillT);
+        this.stillT = 0;
+        this.errMsg = "";
+        this.noCache = false;
+        this.setProp("svkVidMode", m);
+        this.setProp("svkFrame", frame);
+        const A = this.A, raw = this.raw;
+        const ready = !!A && !!raw?.cache_key;
+        if (m === "still") {
+            this.meta = this.still ? this.stillMeta : null;
+            this.metaSeq++;
+            this.stillReqSig = "";
+            this.tick();
+        } else {
+            this.meta = this.after.length ? this.playMeta : null;
+            this.metaSeq++;
+            if (ready) {
+                // один запит фрагмента зі start так, щоб вибраний кадр був у ньому
+                const total = this.total();
+                const c = total ? Math.min(this.count(), total) : this.count();
+                const s = clampStart(frame - Math.floor(c / 2), total, c);
+                this.setProp("svkStart", s);
+                this.wantVi = frame - s;
+                this.sig = this.signature();
+                this.reqSig = this.sig;
+                this.queue();
+            }
+        }
+        this.layout();
+        this.paintSig = "";
         this.paint();
     }
 
-    onSplitMove(e) {
-        if (!this.dragSplit) return;
-        const r = this.stage.getBoundingClientRect();
-        const v = Math.min(1, Math.max(0, (e.clientX - r.left) / Math.max(1, r.width)));
-        this.setProp("svkSplit", Math.round(v * 1000) / 1000);
-        this.draw();
-    }
-
-    // ── відтворення по колу: таймінг за fps, не setInterval
+    // ── Статика: доріжка й розмір міняють кадр — запит тільки тут
+    // ── Програвання: Пуск/Пауза — таймінг за fps, не setInterval
     togglePlay() {
         if (this.playing) this.pause();
         else this.play();
     }
 
     play() {
-        if (this.after.length < 2) return;
+        if (this.isStill() || this.after.length < 2) return;
         this.playing = true;
         this.lastT = null;
         this.acc = 0;
@@ -497,9 +718,26 @@ class VideoPanel {
         this.playRaf = requestAnimationFrame((t) => this.loop(t));
     }
 
+    // ── До / після: лінію можна тягнути (позиція зберігається в svkSplit)
+    toggleCompare() {
+        this.compare = !this.compare;
+        this.draw();
+        this.paint();
+    }
+
+    onSplitMove(e) {
+        if (!this.dragSplit) return;
+        const r = this.stage.getBoundingClientRect();
+        const v = Math.min(1, Math.max(0, (e.clientX - r.left) / Math.max(1, r.width)));
+        this.setProp("svkSplit", Math.round(v * 1000) / 1000);
+        this.draw();
+    }
+
     // ── стан → текст, кнопки, видимість; викликається з опитування і з подій
     paint() {
-        const A = this.A, n = this.after.length, has = n > 0 && !!this.meta;
+        this.presets.refresh();
+        const A = this.A, still = this.isStill(), n = this.after.length, has = this.hasImage();
+        const busy = this.busyNow();
 
         // порожній стан по центру картинки
         let empty = "";
@@ -520,16 +758,24 @@ class VideoPanel {
         else if (this.noCache) st = "Кеш застарів — натисни Run";
         else if (has) {
             const m = this.meta;
-            st = `${Math.max(m.w, m.h)} px · ${n} кадрів · ${(m.ms / 1000).toFixed(2).replace(".", ",")} с`;
+            const px = `${Math.max(m.w, m.h)} px`;
+            st = still
+                ? `${px} · статика`
+                : `${px} · ${n} кадрів · ${(m.ms / 1000).toFixed(2).replace(".", ",")} с`;
         }
-        if (this.busy) st = st ? `${st} · рахую…` : "рахую…";
+        if (busy) st = st ? `${st} · рахую…` : "рахую…";
         setText(this.statusLine, st);
         this.statusLine.style.color = this.errMsg ? ERR : C.dim;
-        this.busyEl.style.visibility = this.busy ? "visible" : "hidden";
-        this.hintLine.style.display = has && hintNeeded(A) ? "" : "none";
+        this.busyEl.style.visibility = busy ? "visible" : "hidden";
+        setText(this.hintLine, still ? STILL_HINT : HINT);
+        this.hintLine.style.display = has && hintOn(A, still) ? "" : "none";
         this.trackWrap.style.display = has && this.meta.total ? "block" : "none";
 
-        // кнопки і селектори
+        // режим, кнопки і селектори
+        this.modeStill.classList.toggle("svk-on", still);
+        this.modePlay.classList.toggle("svk-on", !still);
+        this.playBtn.style.display = still ? "none" : "";
+        this.fragSel.style.display = still ? "none" : "";
         const playState = this.playing ? "pause" : "play";
         if (this.iconState !== playState) {
             setIcon(this.playBtn, playState);
