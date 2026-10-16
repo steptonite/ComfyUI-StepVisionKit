@@ -106,8 +106,34 @@ def _is_api_class(ct):
     return api
 
 
+# Async API-нода ComfyUI запускає фоновою задачею (execution.py: pending_async_nodes) і тим часом
+# ганяє інші ноди — last_node_id тоді вже показує семплер. Тому запущені й ще не завершені API-ноди
+# пам'ятаємо окремо: id ноди → class_type. Поки тут хоч щось є — сторож не паузить і не заморожує.
+_api_pending = {}
+
+
+def _api_class_of(obj):
+    """class_type, якщо obj (клас або екземпляр ноди) — API-нода, інакше None."""
+    cls = obj if isinstance(obj, type) else type(obj)
+    try:
+        api = bool(getattr(cls, "API_NODE", False)) or "api_nodes" in (getattr(cls, "__module__", "") or "")
+    except Exception:
+        api = False
+    return cls.__name__ if api else None
+
+
+def _api_begin(uid, ct):
+    _api_pending[uid] = ct
+
+
+def _api_end(uid):
+    _api_pending.pop(uid, None)
+
+
 def _current_api():
-    """class_type API-ноди, що виконується зараз, або None."""
+    """class_type API-ноди, що виконується зараз (зокрема у фоні), або None."""
+    for ct in list(_api_pending.values()):
+        return ct
     pr = _prompt
     if not pr:
         return None
@@ -290,6 +316,7 @@ def _patch():
                     return orig_exe(self, *args, **kwargs)
                 finally:
                     _prompt = None
+                    _api_pending.clear()
                     _unhold()
                     try:
                         _job_end()
@@ -299,6 +326,41 @@ def _patch():
             PE.execute = execute
     except Exception as e:
         _log("підсумок задач вимкнено: %s" % e)
+
+    # Хто з API-нод запущений і ще не відповів — навіть коли ComfyUI тим часом рахує інші ноди.
+    try:
+        import asyncio
+        import execution
+        orig_map = execution._async_map_node_over_list
+        if not getattr(orig_map, "_svk_thermal", False):
+            async def _async_map_node_over_list(prompt_id, unique_id, obj, *args, **kwargs):
+                ct = _api_class_of(obj)
+                if ct is None:
+                    return await orig_map(prompt_id, unique_id, obj, *args, **kwargs)
+                uid = str(unique_id)
+                _api_begin(uid, ct)
+                try:
+                    res = await orig_map(prompt_id, unique_id, obj, *args, **kwargs)
+                except BaseException:
+                    _api_end(uid)
+                    raise
+                left = [r for r in res if isinstance(r, asyncio.Task) and not r.done()]
+                if not left:
+                    _api_end(uid)
+                    return res
+                todo = {"n": len(left)}
+
+                def _done(_t):
+                    todo["n"] -= 1
+                    if todo["n"] <= 0:
+                        _api_end(uid)
+                for t in left:
+                    t.add_done_callback(_done)
+                return res
+            _async_map_node_over_list._svk_thermal = True
+            execution._async_map_node_over_list = _async_map_node_over_list
+    except Exception as e:
+        _log("облік фонових API-нод вимкнено: %s" % e)
 
 
 # ───────────────────────── фоновий звіт для UI ─────────────────────────
