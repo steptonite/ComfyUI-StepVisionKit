@@ -18,7 +18,7 @@
 
 from .lex.nodes_core import LexBoxesToBBOX, LexHUDBoxes, LexYOLODetect
 from .lex.depth_curve import LexDepthCurve
-from .lex.depth_grade import SVKDepthGrade, SVKDepthGradeLive
+from .lex.depth_grade import SVKDepthGrade, SVKDepthGradeLive, SVKDepthGradeView
 from .lex.hud_sprite import LexHUDSprite
 
 from .vk.nodes_boxes import NODES as VK_BOX, DISPLAY as VKD_BOX
@@ -37,6 +37,7 @@ NODE_CLASS_MAPPINGS = {
     "LexDepthCurve": LexDepthCurve,
     "SVKDepthGrade": SVKDepthGrade,
     "SVKDepthGradeLive": SVKDepthGradeLive,
+    "SVKDepthGradeView": SVKDepthGradeView,
     **VK_DET, **VK_BOX, **VK_DRAW, **VK_OVL, **VK_MASK,
 }
 
@@ -47,7 +48,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LexHUDSprite": "HUD Sprite (кастомна рамка PNG + дірка)",
     "LexDepthCurve": "Depth Curve (DA3 → вигляд як V2)",
     "SVKDepthGrade": "Depth Grade 🎚 (грейд глибини + антимерехтіння)",
-    "SVKDepthGradeLive": "Depth Grade Live 🎛 (пульт з прев'ю, без перегенерації)",
+    "SVKDepthGradeLive": "Depth Grade Live (стара, заміни на Depth Grade + Depth Grade View)",
+    "SVKDepthGradeView": "Depth Grade View 👁 (живе прев'ю: повзунки без перегенерації)",
     **VKD_DET, **VKD_BOX, **VKD_DRAW, **VKD_OVL, **VKD_MASK,
 }
 
@@ -55,7 +57,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 # в двох різних місцях, як було з двома паками.
 _SUB = {"LexHUDSprite": "HUD", "LexHUDBoxes": "HUD", "VKDrawBoxes": "HUD",
         "VKOverlayOnBoxes": "HUD", "VKCutByMask": "HUD",
-        "LexDepthCurve": "Depth", "SVKDepthGrade": "Depth", "SVKDepthGradeLive": "Depth",
+        "LexDepthCurve": "Depth", "SVKDepthGrade": "Depth", "SVKDepthGradeLive": "Depth", "SVKDepthGradeView": "Depth",
         "LexYOLODetect": "Detect", "VKDetect": "Detect",
         "LexBoxesToBBOX": "Detect", "VKBoxesToBBOX": "Detect", "VKSelectBox": "Detect"}
 for _key, _cls in NODE_CLASS_MAPPINGS.items():

@@ -331,8 +331,27 @@ class SVKDepthGrade:
                 "result": (tt.unsqueeze(-1).repeat(1, 1, 1, 3), tt, info)}
 
 
+class SVKDepthGradeView:
+    """Живе прев'ю для Depth Grade. Під'єднай вхід до виходу depth ноди Depth Grade:
+    після одного Run повзунки тієї ноди крутяться тут наживо, без перегенерації."""
+    DESCRIPTION = ("Живе прев'ю Depth Grade: під'єднай до виходу depth, натисни Run один раз — "
+                   "далі тягай повзунки Depth Grade і бач зміну одразу. Піпетки й криві пишуть у ті самі повзунки.")
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})}}
+
+    RETURN_TYPES = ()
+    FUNCTION = "view"
+    OUTPUT_NODE = True
+    CATEGORY = "StepVisionKit/Depth"
+
+    def view(self, depth):
+        # саме прев'ю рахує браузер з мініатюри, яку віддала Depth Grade; тут нічого робити
+        return {"ui": {}}
+
+
 class SVKDepthGradeLive(SVKDepthGrade):
-    """Те саме, що Depth Grade, але з пультом: прев'ю, піпетки й криві крутяться
-    наживо в браузері, а тонові повзунки сховані (кнопка «Повзунки» їх показує)."""
-    DESCRIPTION = ("Depth Grade з живим пультом: натисни Run один раз, далі піпетки й "
-                   "маркери на кривій міняють тон миттєво, без перегенерації.")
+    """Стара назва (16.10.2026): пульт переїхав у SVKDepthGradeView. Лишено, щоб
+    збережені воркфлоу не червоніли; у пошуку не видно."""
+    DEPRECATED = True

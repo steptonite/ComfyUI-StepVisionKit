@@ -1,21 +1,20 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 import * as M from "./depth_grade_math.js";
 
-// Живий пульт для Depth Grade: прев'ю з піпетками + «Криві» з маркерами.
-//
-// Нащо (16.10.2026, Льоша): «не повзунки, а щось інтерактивне; крутити — і щоб
-// генерація заново не йшла». Після ОДНОГО Run нода віддає сюди мініатюру сирого
-// депсу, далі тон рахується в браузері (depth_grade_math.js) — миттєво.
-// Повзунки лишаються джерелом правди: маркери й піпетки пишуть у них, тому воркфлоу
-// зберігається як завжди, а без цього js нода повністю робоча.
-// Пульт живе в окремій ноді SVKDepthGradeLive (Льоша: «задовга») — там тонові
-// повзунки сховані; у звичайній SVKDepthGrade лишились повзунки + «Скинути».
+// Depth Grade: дві ноди.
+//  • SVKDepthGrade (нода A) — повні повзунки, «Скинути все», меню правої кнопки. Після Run
+//    віддає мініатюру сирого депсу (svk_depth_preview) — її читає нода B.
+//  • SVKDepthGradeView (нода B) — превью і інтерактив: під'єднується входом depth до виходу
+//    depth ноди A; тягаєш повзунки A — тут миттєво видно зміну, без перегенерації.
+//  • SVKDepthGradeLive — застаріла, поводиться як A.
+// Тонова математика — в depth_grade_math.js; тут лише UI.
+// Розкладка детермінована (без scrollHeight): висоти рахуємо з розмірів ноди.
 
 const NODE = "SVKDepthGrade";
 const LIVE = "SVKDepthGradeLive";
-// повзунки, які в Live-ноді замінює пульт (кнопка «Повзунки» показує їх назад)
-const HIDE_KEYS = ["blacks", "whites", "midtones", "foreground_ceiling", "ceiling_from",
-    "hero_plane", "hero_pop", "trim_far", "trim_near", "banding_edge", "motion_guard"];
+const VIEW = "SVKDepthGradeView";
+const SOURCES = [NODE, LIVE];
 const TONE_KEYS = ["depth_is", "look", "foreground_pop", "blacks", "whites", "midtones",
     "foreground_ceiling", "ceiling_from", "hero_plane", "hero_pop",
     "trim_far", "trim_near", "flip", "levels_scope"];
@@ -33,6 +32,22 @@ const TOOLS = [
     { id: "white", label: "Біле", hint: "клікни на близьке — воно й усе ближче стане білим" },
 ];
 
+const MAXH = 440;        // максимальна висота превью, px
+const GAP = 6;           // проміжок між блоками, px
+const SIDE_W = 210;      // ширина бічної колонки в портреті
+const ROW_GAP = 8;       // проміжок між превью і бічною колонкою
+const CURVE_H = 150;     // висота полотна кривих
+const LEGEND_COL = 48;   // легенда під кривими (колонка)
+const LEGEND_ROW = 124;  // легенда під кривими (бічна колонка)
+const START_W = 460;     // стартова ширина ноди B
+
+const VIEWS = new Set();
+let DEFAULTS = {};       // стандартні значення тонових і решти повзунків ноди A
+
+const BTN = `font:500 11px/1 system-ui,sans-serif;color:${C.text};background:${C.panel};
+    border:1px solid ${C.line};border-radius:6px;padding:5px 7px;cursor:pointer;
+    transition:transform .12s cubic-bezier(.16,1,.3,1),border-color .15s;user-select:none`;
+
 function h(tag, css = "", text) {
     const e = document.createElement(tag);
     if (css) e.style.cssText = css;
@@ -40,31 +55,106 @@ function h(tag, css = "", text) {
     return e;
 }
 
-const BTN = `font:500 11px/1 system-ui,sans-serif;color:${C.text};background:${C.panel};
-    border:1px solid ${C.line};border-radius:6px;padding:5px 7px;cursor:pointer;
-    transition:transform .12s cubic-bezier(.16,1,.3,1),border-color .15s;user-select:none`;
+function place(el, x, y, w, hh) {
+    el.style.left = x + "px";
+    el.style.top = y + "px";
+    el.style.width = w + "px";
+    el.style.height = hh + "px";
+}
 
-class LivePanel {
+function scheduleViews() { for (const v of VIEWS) v.schedule(); }
+
+function typeOf(node) { return node?.comfyClass ?? node?.type ?? ""; }
+function isSource(node) { return SOURCES.includes(typeOf(node)); }
+
+function nodeById(id) {
+    const s = String(id ?? "");
+    const last = s.includes(":") ? s.split(":").pop() : s;   // підграфи: "uuid:innerId"
+    const key = /^\d+$/.test(last) ? +last : last;
+    return app.graph?.getNodeById?.(key) ?? null;
+}
+
+function widgetOf(node, name) { return node?.widgets?.find((w) => w.name === name); }
+
+function toneSig(A) { return JSON.stringify(TONE_KEYS.map((k) => widgetOf(A, k)?.value)); }
+
+// сирий payload превью: з події виконання, з onExecuted або (після перезавантаження) з історії виводу
+function rawOf(A) {
+    if (A.__svkRaw) return A.__svkRaw;
+    try {
+        const r = app.nodeOutputs?.[String(A.id)]?.svk_depth_preview?.[0];
+        if (r) A.__svkRaw = r;
+        return r ?? null;
+    } catch (_) { return null; }
+}
+
+// декодування ліниве, з кешем за ідентичністю payload (новий Run = новий об'єкт)
+function prevOf(A) {
+    const raw = rawOf(A);
+    if (!raw?.keys) return null;
+    if (A.__svkRawDec !== raw) {
+        try {
+            A.__svkPrev = M.decodePreview(raw);
+        } catch (_) {
+            A.__svkPrev = null;
+        }
+        A.__svkRawDec = raw;
+    }
+    return A.__svkPrev ?? null;
+}
+
+// стандартні значення з опису ноди — для «Скинути»
+function readDefaults(nodeData) {
+    const d = {};
+    for (const [name, spec] of Object.entries(nodeData?.input?.required || {})) {
+        const def = spec?.[1]?.default ?? (Array.isArray(spec?.[0]) ? spec[0][0] : undefined);
+        if (def !== undefined) d[name] = def;
+    }
+    return d;
+}
+
+function resetWidget(node, w, value) {
+    const old = w.value;
+    w.value = value;
+    w.callback?.(value, app.canvas, node);
+    node.onWidgetChanged?.(w.name, value, old, w);
+    app.graph?.setDirtyCanvas(true, true);
+}
+
+function resetAllOf(node) {
+    for (const w of node.widgets || []) {
+        if (w.name in DEFAULTS && w.value !== DEFAULTS[w.name]) resetWidget(node, w, DEFAULTS[w.name]);
+    }
+    scheduleViews();
+}
+
+class ViewPanel {
     constructor(node) {
         this.node = node;
+        this.A = null;           // нода-джерело (SVKDepthGrade)
+        this.raw = undefined;    // ідентичність payload, з якого зроблено prev
+        this.W = -1;             // остання ширина ноди B
+        this.sig = "";           // остання сигнатура тонових значень A
         this.prev = null;
+        this.last = null;        // результат M.grade для піпеток і кривих
+        this.hs = null;          // маркери на осі кривих
         this.tool = null;
         this.compare = false;
         this.drag = null;
         this.hover = null;
+        this.ki = 0;
         this.raf = 0;
+        this.showCurve = false;  // «Криві» за замовчуванням згорнуті
+        this.total = 160;        // висота DOM-віджета, px
 
-        this.root = h("div", `display:flex;flex-direction:column;gap:6px;padding:6px 2px 2px;
-            box-sizing:border-box;width:100%;color:${C.text};font:12px system-ui,sans-serif`);
+        this.root = h("div", `position:relative;display:block;width:100%;box-sizing:border-box;
+            color:${C.text};font:12px system-ui,sans-serif`);
         // не тягати вузол замість маркера; колесо не чіпаємо — полотно має зумитись
         for (const ev of ["pointerdown", "pointerup", "click", "dblclick"])
             this.root.addEventListener(ev, (e) => e.stopPropagation());
-        this.defaults = {};
-        this.ki = 0;
-        this.showSliders = false;
 
-        // ── інструменти
-        const bar = h("div", "display:flex;gap:4px;flex-wrap:wrap;align-items:center");
+        // ── кнопки
+        this.bar = h("div", "display:flex;gap:4px;flex-wrap:wrap;align-items:center");
         this.toolBtns = {};
         for (const t of TOOLS) {
             const b = h("button", BTN, t.label);
@@ -73,62 +163,95 @@ class LivePanel {
             b.onpointerdown = () => (b.style.transform = "scale(0.97)");
             b.onpointerup = b.onpointerleave = () => (b.style.transform = "");
             this.toolBtns[t.id] = b;
-            bar.append(b);
+            this.bar.append(b);
         }
-        const cmp = h("button", BTN + ";margin-left:auto", "До / після");
-        cmp.title = "тримай — покаже вхід без грейду";
+        this.cmp = h("button", BTN + ";margin-left:auto", "До / після");
+        this.cmp.title = "тримай — покаже вхід без грейду";
         const on = () => { this.compare = true; this.schedule(); };
         const off = () => { this.compare = false; this.schedule(); };
-        cmp.onpointerdown = on; cmp.onpointerup = off; cmp.onpointerleave = off;
-        bar.append(cmp);
-        // «Скинути все» — кнопка-віджет ноди над пультом; тут лише перемикач точних повзунків
-        this.slBtn = h("button", BTN + ";align-self:flex-start", "Показати точні повзунки");
-        this.slBtn.onclick = () => this.toggleSliders();
+        this.cmp.onpointerdown = on; this.cmp.onpointerup = off; this.cmp.onpointerleave = off;
+        this.curveBtn = h("button", BTN, "Криві ▸");
+        this.curveBtn.title = "гістограма, крива і маркери Ч / Б / Г / С";
+        this.curveBtn.onclick = () => this.toggleCurve();
+        this.resetBtn = h("button", BTN, "↺");
+        this.resetBtn.title = "скинути всі повзунки Depth Grade до стандартних";
+        this.resetBtn.onclick = () => { if (this.A) resetAllOf(this.A); };
+        this.bar.append(this.cmp, this.curveBtn, this.resetBtn);
 
-        // ── прев'ю
-        this.stage = h("div", `position:relative;border-radius:8px;overflow:hidden;background:${C.bg};
-            border:1px solid ${C.line}`);
-        this.view = h("canvas", "display:block;width:100%;height:auto;image-rendering:auto");
-        this.empty = h("div", `padding:28px 14px;text-align:center;color:${C.dim};line-height:1.5;
-            border:1px dashed ${C.line};border-radius:8px`,
-            "Натисни Run один раз. Далі все крутиться наживо — без перегенерації.");
+        // ── тіло: усі блоки абсолютно позиціоновані, висоту тіла рахує layout()
+        this.body = h("div", "position:relative;margin-top:6px;width:100%;box-sizing:border-box");
+
+        this.empty = h("div", `position:absolute;display:none;box-sizing:border-box;padding:0 14px;
+            align-items:center;justify-content:center;text-align:center;color:${C.dim};line-height:1.5;
+            border:1px dashed ${C.line};border-radius:8px`);
+
+        this.stage = h("div", `position:absolute;display:none;overflow:hidden;border-radius:8px;
+            background:${C.bg};box-shadow:0 0 0 1px ${C.line}`);
+        this.view = h("canvas", "position:absolute;left:0;top:0;display:block;image-rendering:auto");
         this.readout = h("div", `position:absolute;left:6px;bottom:6px;padding:3px 6px;border-radius:5px;
             background:rgba(24,24,27,.82);font:11px ${MONO};color:${C.text};pointer-events:none;display:none`);
         this.stage.append(this.view, this.readout);
-        this.stage.style.display = "none";
         this.view.addEventListener("pointermove", (e) => this.onHover(e));
         this.view.addEventListener("pointerleave", () => { this.hover = null; this.readout.style.display = "none"; this.schedule(); });
         this.view.addEventListener("click", (e) => this.onPick(e));
 
-        this.scrub = h("div", "display:none;align-items:center;gap:8px");
-        this.scrubIn = h("input", `flex:1;accent-color:${C.accent}`);
+        this.scrub = h("div", "position:absolute;display:none;align-items:center;gap:8px");
+        this.scrubIn = h("input", `flex:1;min-width:0;accent-color:${C.accent}`);
         this.scrubIn.type = "range"; this.scrubIn.min = 0; this.scrubIn.step = 1; this.scrubIn.value = 0;
-        this.scrubLbl = h("span", `font:11px ${MONO};color:${C.dim};min-width:96px;text-align:right`);
+        this.scrubLbl = h("span", `font:11px ${MONO};color:${C.dim};white-space:nowrap`);
         this.scrubIn.oninput = () => { this.ki = +this.scrubIn.value; this.schedule(); };
         this.scrub.append(this.scrubIn, this.scrubLbl);
 
-        // ── криві
-        this.curve = h("canvas", `display:block;width:100%;height:150px;border-radius:8px;
-            background:${C.bg};border:1px solid ${C.line};touch-action:none;cursor:default`);
+        this.curve = h("canvas", `position:absolute;display:none;border-radius:8px;background:${C.bg};
+            box-shadow:0 0 0 1px ${C.line};touch-action:none;cursor:default`);
         this.curve.addEventListener("pointerdown", (e) => this.onCurveDown(e));
         this.curve.addEventListener("pointermove", (e) => this.onCurveMove(e));
         this.curve.addEventListener("pointerup", (e) => this.onCurveUp(e));
         this.curve.addEventListener("pointercancel", (e) => this.onCurveUp(e));
         this.curve.addEventListener("dblclick", (e) => this.onCurveDbl(e));
 
-        this.legend = h("div", `color:${C.dim};font-size:11px;line-height:1.45`);
+        this.legend = h("div", `position:absolute;display:none;overflow:hidden;color:${C.dim};
+            font-size:11px;line-height:1.4`);
         this.legend.innerHTML =
             "Тягни: Ч / Б — чорне й біле · <b style='color:" + C.accent + "'>Г</b> — герой (вгору — сильніше) · " +
             "С — звідки пригашувати, кружок справа — наскільки · порожнє місце вгору/вниз — середні тони. " +
             "Подвійний клік — скинути. Clarity, texture, смуги й deflicker — після Run.";
 
-        this.root.append(bar, this.empty, this.stage, this.scrub, this.curve, this.legend, this.slBtn);
-        for (const c of this.root.children) c.style.flexShrink = "0";   // інакше низ прев'ю обрізається
-        new ResizeObserver(() => this.schedule()).observe(this.curve);
+        this.body.append(this.empty, this.stage, this.scrub, this.curve, this.legend);
+        this.root.append(this.bar, this.body);
+
+        this.timer = setInterval(() => this.tick(), 120);
+        VIEWS.add(this);
     }
 
-    // ── віджети як джерело правди
-    widget(name) { return this.node.widgets?.find((w) => w.name === name); }
+    dispose() {
+        clearInterval(this.timer);
+        VIEWS.delete(this);
+        if (this.raf) cancelAnimationFrame(this.raf);
+        this.raf = 0;
+    }
+
+    // ── джерело: вхід depth → (reroute…) → нода A
+    source() {
+        const g = this.node.graph ?? app.graph;
+        let cur = this.node;
+        for (let step = 0; step < 9; step++) {
+            const inp = cur.inputs?.[0];
+            if (inp?.link == null || !g) return null;
+            const L = g.links?.get?.(inp.link) ?? g.links?.[inp.link];
+            if (!L) return null;
+            const origin = g.getNodeById?.(L.origin_id);
+            if (!origin) return null;
+            const t = typeOf(origin);
+            if (isSource(origin)) return origin;
+            if (/reroute/i.test(t)) { cur = origin; continue; }
+            return null;
+        }
+        return null;
+    }
+
+    // ── повзунки ноди A як джерело правди
+    widget(name) { return widgetOf(this.A, name); }
 
     values() {
         const o = {};
@@ -137,8 +260,9 @@ class LivePanel {
     }
 
     set(name, value) {
+        const A = this.A;
         const w = this.widget(name);
-        if (!w) return;
+        if (!A || !w) return;
         const o = w.options || {};
         if (typeof value === "number") {
             if (o.min != null) value = Math.max(o.min, value);
@@ -150,10 +274,15 @@ class LivePanel {
         if (w.value === value) return;
         const old = w.value;
         w.value = value;
-        w.callback?.(value, app.canvas, this.node);
-        this.node.onWidgetChanged?.(name, value, old, w);
-        this.node.setDirtyCanvas?.(true, true);
+        w.callback?.(value, app.canvas, A);
+        A.onWidgetChanged?.(name, value, old, w);
+        A.setDirtyCanvas?.(true, true);
         app.graph?.setDirtyCanvas(true, true);
+    }
+
+    reset(names) {
+        for (const n of names) if (n in DEFAULTS) this.set(n, DEFAULTS[n]);
+        this.schedule();
     }
 
     setTool(id) {
@@ -166,48 +295,112 @@ class LivePanel {
         this.view.style.cursor = id ? "crosshair" : "default";
     }
 
-    reset(names) {
-        for (const n of names) if (n in this.defaults) this.set(n, this.defaults[n]);
+    toggleCurve() {
+        this.showCurve = !this.showCurve;
+        this.layout();
         this.schedule();
     }
 
-    resetAll() { this.reset(TONE_KEYS); }
-
-    toggleSliders(force) {
-        this.showSliders = force ?? !this.showSliders;
-        setHidden(this.node, HIDE_KEYS, !this.showSliders);
-        this.slBtn.textContent = this.showSliders ? "Сховати точні повзунки" : "Показати точні повзунки";
+    // ── стан → розкладка: виклик лише при зміні джерела, payload або ширини ноди
+    tick() {
+        const A = this.source();
+        const raw = A ? rawOf(A) : null;
+        const W = this.node.size?.[0] ?? 0;
+        if (A !== this.A || raw !== this.raw || W !== this.W) {
+            this.A = A;
+            this.raw = raw;
+            this.W = W;
+            this.setPrev(A ? prevOf(A) : null);
+            this.layout();
+            this.sig = A ? toneSig(A) : "";
+            this.schedule();
+            return;
+        }
+        const sig = A ? toneSig(A) : "";
+        if (sig !== this.sig) {
+            this.sig = sig;
+            this.schedule();
+        }
     }
 
-    load(payload) {
-        this.prev = M.decodePreview(payload);
-        const nk = this.prev.keys.length;
+    setPrev(p) {
+        this.prev = p;
+        this.last = null;
+        this.hs = null;
+        if (!p) return;
+        const nk = p.keys.length;
         this.ki = Math.min(this.ki, nk - 1);
-        this.scrub.style.display = nk > 1 ? "flex" : "none";
-        this.scrubIn.max = nk - 1; this.scrubIn.value = this.ki;
-        this.view.width = this.prev.w;
-        this.view.height = this.prev.h;
-        this.empty.style.display = "none";
-        this.stage.style.display = "";
-        this.resizeNode();
-        this.schedule();
+        this.scrubIn.max = nk - 1;
+        this.scrubIn.value = this.ki;
+        this.view.width = p.w;
+        this.view.height = p.h;
     }
 
-    resizeNode() {
-        const n = this.node;
-        const want = n.computeSize?.();
-        if (want && n.size[1] < want[1]) n.setSize([Math.max(n.size[0], want[0]), want[1]]);
+    // ── розкладка: квадрат/альбом — колонка; портрет з кривими або кадрами — рядок
+    layout() {
+        const node = this.node;
+        const W = Math.max(200, (node.size?.[0] || START_W) - 16);
+        const barH = this.bar.offsetHeight || 28;
+        const p = this.prev;
+        const nk = p ? p.keys.length : 0;
+        const ar = p ? p.w / p.h : 16 / 9;
+        const curves = !!p && this.showCurve;
+        const scrub = !!p && nk > 1;
+        const row = !!p && ar < 0.95 && (this.showCurve || nk > 1);
+
+        this.empty.textContent = this.A
+            ? "Натисни Run один раз. Далі тягай повзунки Depth Grade — тут видно одразу, без перегенерації. Clarity, texture, смуги й deflicker видно лише після Run."
+            : "Під'єднай вхід depth до виходу depth ноди Depth Grade";
+        this.empty.style.display = p ? "none" : "flex";
+        this.stage.style.display = p ? "block" : "none";
+        this.scrub.style.display = scrub ? "flex" : "none";
+        this.curve.style.display = curves ? "block" : "none";
+        this.legend.style.display = curves ? "block" : "none";
+        this.curveBtn.textContent = `Криві ${this.showCurve ? "▾" : "▸"}`;
+
+        let bodyH;
+        if (!p) {
+            place(this.empty, 0, 0, W, 120);
+            bodyH = 120;
+        } else if (!row) {
+            let imgW = W, imgH = W / ar;
+            if (imgH > MAXH) { imgH = MAXH; imgW = imgH * ar; }
+            place(this.stage, Math.round((W - imgW) / 2), 0, imgW, imgH);
+            this.sizeView(imgW, imgH);
+            let y = imgH + GAP;
+            if (scrub) { place(this.scrub, 0, y, W, 24); y += 24 + GAP; }
+            if (curves) {
+                place(this.curve, 0, y, W, CURVE_H); y += CURVE_H + GAP;
+                place(this.legend, 0, y, W, LEGEND_COL); y += LEGEND_COL + GAP;
+            }
+            bodyH = y - GAP;
+        } else {
+            const rowW = W - SIDE_W - ROW_GAP;
+            let imgW = rowW, imgH = rowW / ar;
+            if (imgH > MAXH) { imgH = MAXH; imgW = imgH * ar; }
+            place(this.stage, Math.round((rowW - imgW) / 2), 0, imgW, imgH);
+            this.sizeView(imgW, imgH);
+            const x0 = W - SIDE_W;
+            let y = 0;
+            if (scrub) { place(this.scrub, x0, y, SIDE_W, 24); y += 24 + GAP; }
+            if (curves) {
+                place(this.curve, x0, y, SIDE_W, CURVE_H); y += CURVE_H + GAP;
+                place(this.legend, x0, y, SIDE_W, LEGEND_ROW); y += LEGEND_ROW + GAP;
+            }
+            bodyH = Math.max(imgH, y - GAP);
+        }
+
+        this.body.style.height = bodyH + "px";
+        this.total = barH + GAP + bodyH + 8;
+        this.root.style.height = this.total + "px";
+        const sz = node.computeSize?.();
+        if (sz) node.setSize([node.size[0], sz[1]]);
         app.graph?.setDirtyCanvas(true, true);
     }
 
-    minHeight() {
-        const wpx = Math.max(240, (this.node.size?.[0] || 340) - 20);
-        const img = this.prev ? (wpx * this.prev.h) / this.prev.w : 80;
-        const scrub = this.prev && this.prev.keys.length > 1 ? 28 : 0;
-        // висота ВМІСТУ (не scrollHeight: він росте разом із віджетом — нода пухла б без кінця)
-        let content = 0, shown = 0;
-        for (const c of this.root.children) if (c.offsetParent !== null) { content += c.offsetHeight; shown++; }
-        return content ? content + 6 * shown + 10 : 34 + Math.min(img, 520) + scrub + 160 + 100;
+    sizeView(w, hh) {
+        this.view.style.width = w + "px";
+        this.view.style.height = hh + "px";
     }
 
     schedule() {
@@ -217,14 +410,15 @@ class LivePanel {
 
     // ── малювання
     draw() {
-        if (!this.prev) { this.drawCurve(null); return; }
+        const A = this.A, p = this.prev;
+        if (!A || !p) { this.last = null; this.hs = null; return; }
         const w = this.values();
-        const g = M.grade(this.prev, w, this.ki);
-        const key = this.prev.keys[this.ki];
-        if (this.prev.keys.length > 1)
-            this.scrubLbl.textContent = `кадр ${key.i + 1} з ${this.prev.frames}`;
+        const ki = Math.min(this.ki, p.keys.length - 1);
+        const g = M.grade(p, w, ki);
+        const key = p.keys[ki];
+        if (p.keys.length > 1) this.scrubLbl.textContent = `кадр ${key.i + 1} з ${p.frames}`;
         this.last = g;
-        const { w: W, h: H } = this.prev;
+        const { w: W, h: H } = p;
         const ctx = this.view.getContext("2d");
         const img = ctx.createImageData(W, H);
         const src = this.compare ? null : g.out;
@@ -249,12 +443,12 @@ class LivePanel {
             }
         }
         ctx.putImageData(img, 0, 0);
-        this.drawCurve(g);
+        if (this.showCurve) this.drawCurve(g);
     }
 
     geom() {
         const dpr = window.devicePixelRatio || 1;
-        const cw = this.curve.clientWidth || 300, ch = this.curve.clientHeight || 150;
+        const cw = this.curve.clientWidth || 300, ch = this.curve.clientHeight || CURVE_H;
         if (this.curve.width !== Math.round(cw * dpr)) this.curve.width = Math.round(cw * dpr);
         if (this.curve.height !== Math.round(ch * dpr)) this.curve.height = Math.round(ch * dpr);
         const pad = { l: 10, r: 34, t: 10, b: 24 };
@@ -265,13 +459,12 @@ class LivePanel {
     handles(P) {
         const lv = (v) => M.levels(v, P);
         const hv = (v) => M.hero(M.levels(v, P), P);
-        const H = [
+        return [
             { id: "black", label: "Ч", v: P.bp },
             { id: "white", label: "Б", v: P.wp },
             { id: "hero", label: "Г", v: M.invert(lv, P.heroP), on: P.heroS > 0, accent: true },
             { id: "from", label: "С", v: M.invert(hv, P.k), on: P.c < 1 },
         ];
-        return H;
     }
 
     drawCurve(g) {
@@ -331,7 +524,7 @@ class LivePanel {
         }
         ctx.globalAlpha = 1;
 
-        // стеля: повзунок на правому краї
+        // стеля: кружок на правому краї
         const cy = Y(P.c), xr = G.x1 + 14;
         ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(xr, Y(0)); ctx.lineTo(xr, Y(1)); ctx.stroke();
         ctx.fillStyle = P.c < 1 ? C.text : C.dim;
@@ -475,107 +668,96 @@ class LivePanel {
     }
 }
 
-// сховати / показати віджети так само, як це робить сам фронтенд (hidden + options.hidden)
-function setHidden(node, names, hidden) {
-    for (const w of node.widgets || []) {
-        if (!names.includes(w.name)) continue;
-        w.hidden = hidden;
-        if (w.options) w.options.hidden = hidden;
-    }
-    const sz = node.computeSize?.();
-    if (sz) node.setSize([node.size[0], sz[1]]);
-    app.graph?.setDirtyCanvas(true, true);
+function registerSource(nodeType) {
+    const onCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+        const r = onCreated?.apply(this, arguments);
+        const rb = this.addWidget("button", "↺ Скинути все до стандартних", null, () => resetAllOf(this));
+        rb.serialize = false;
+        // будь-яка зміна тонового повзунка — перемалювати всі ноди-перегляди
+        for (const w of this.widgets || []) {
+            if (!TONE_KEYS.includes(w.name)) continue;
+            const cb = w.callback;
+            w.callback = function () {
+                const out = cb?.apply(this, arguments);
+                scheduleViews();
+                return out;
+            };
+        }
+        return r;
+    };
+
+    // Run: зберігаємо сирий payload превью на самій ноді
+    const onExecuted = nodeType.prototype.onExecuted;
+    nodeType.prototype.onExecuted = function (message) {
+        onExecuted?.apply(this, arguments);
+        const p = message?.svk_depth_preview?.[0];
+        if (p) { this.__svkRaw = p; scheduleViews(); }
+    };
+
+    // права кнопка по ноді: скинути все або один змінений повзунок
+    const extra = nodeType.prototype.getExtraMenuOptions;
+    nodeType.prototype.getExtraMenuOptions = function (canvas, options) {
+        const r = extra?.apply(this, arguments);
+        const changed = (this.widgets || []).filter((w) => w.name in DEFAULTS && w.value !== DEFAULTS[w.name]);
+        options.push(null, { content: "↺ Скинути все до стандартних", callback: () => resetAllOf(this) });
+        for (const w of changed) {
+            const cur = typeof w.value === "number" ? +w.value.toFixed(3) : w.value;
+            options.push({ content: `↺ ${w.name}: ${cur} → ${DEFAULTS[w.name]}`,
+                callback: () => resetWidget(this, w, DEFAULTS[w.name]) });
+        }
+        return r;
+    };
 }
 
-// стандартні значення з опису ноди — для «Скинути»
-function readDefaults(nodeData) {
-    const d = {};
-    for (const [name, spec] of Object.entries(nodeData?.input?.required || {})) {
-        const def = spec?.[1]?.default ?? (Array.isArray(spec?.[0]) ? spec[0][0] : undefined);
-        if (def !== undefined) d[name] = def;
-    }
-    return d;
-}
+function registerView(nodeType) {
+    const onCreated = nodeType.prototype.onNodeCreated;
+    nodeType.prototype.onNodeCreated = function () {
+        const r = onCreated?.apply(this, arguments);
+        const panel = new ViewPanel(this);
+        this.__svkView = panel;
+        this.addDOMWidget("view", "svk_depth_view", panel.root, {
+            serialize: false,
+            hideOnZoom: false,
+            getMinHeight: () => panel.total,
+        });
+        this.setSize([Math.max(this.size[0], START_W), this.size[1]]);
+        panel.layout();
+        return r;
+    };
 
-function resetWidget(node, w, value) {
-    const old = w.value;
-    w.value = value;
-    w.callback?.(value, app.canvas, node);
-    node.onWidgetChanged?.(w.name, value, old, w);
-    app.graph?.setDirtyCanvas(true, true);
+    const onConfigure = nodeType.prototype.onConfigure;
+    nodeType.prototype.onConfigure = function () {
+        const r = onConfigure?.apply(this, arguments);
+        this.__svkView?.schedule();
+        return r;
+    };
+
+    const onRemoved = nodeType.prototype.onRemoved;
+    nodeType.prototype.onRemoved = function () {
+        this.__svkView?.dispose();
+        this.__svkView = null;
+        return onRemoved?.apply(this, arguments);
+    };
 }
 
 app.registerExtension({
-    name: "StepVisionKit.DepthGradeLive",
+    name: "StepVisionKit.DepthGrade",
+    setup() {
+        // Nodes 2.0 не викликає onExecuted — беремо превью з події виконання
+        api.addEventListener("executed", (ev) => {
+            try {
+                const out = ev.detail?.output?.svk_depth_preview?.[0];
+                if (!out) return;
+                const node = nodeById(ev.detail.node);
+                if (node && isSource(node)) { node.__svkRaw = out; scheduleViews(); }
+            } catch (_) { /* превью — не критично */ }
+        });
+    },
     async beforeRegisterNodeDef(nodeType, nodeData) {
         const name = nodeData?.name;
-        if (name !== NODE && name !== LIVE) return;
-        const live = name === LIVE;
-        const defaults = readDefaults(nodeData);
-        const resetAll = (node) => {
-            for (const w of node.widgets || []) if (w.name in defaults && w.value !== defaults[w.name]) resetWidget(node, w, defaults[w.name]);
-            node.__svkLive?.schedule();
-        };
-
-        const onCreated = nodeType.prototype.onNodeCreated;
-        nodeType.prototype.onNodeCreated = function () {
-            const r = onCreated?.apply(this, arguments);
-            const rb = this.addWidget("button", "↺ Скинути все до стандартних", null, () => resetAll(this));
-            rb.serialize = false;
-            if (live) {
-                const panel = new LivePanel(this);
-                panel.defaults = defaults;
-                this.__svkLive = panel;
-                this.addDOMWidget("live", "svk_depth_live", panel.root, {
-                    serialize: false,
-                    hideOnZoom: false,
-                    getMinHeight: () => panel.minHeight(),
-                });
-                // будь-яка зміна тонового повзунка — перемалювати прев'ю
-                for (const w of this.widgets || []) {
-                    if (!TONE_KEYS.includes(w.name)) continue;
-                    const cb = w.callback;
-                    w.callback = function () {
-                        const out = cb?.apply(this, arguments);
-                        panel.schedule();
-                        return out;
-                    };
-                }
-                panel.toggleSliders(false);
-                this.setSize([Math.max(this.size[0], 380), this.computeSize()[1]]);
-            }
-            return r;
-        };
-
-        // права кнопка по ноді: скинути все або один змінений повзунок
-        const extra = nodeType.prototype.getExtraMenuOptions;
-        nodeType.prototype.getExtraMenuOptions = function (canvas, options) {
-            const r = extra?.apply(this, arguments);
-            const changed = (this.widgets || []).filter((w) => w.name in defaults && w.value !== defaults[w.name]);
-            options.push(null, { content: "↺ Скинути все до стандартних", callback: () => resetAll(this) });
-            for (const w of changed) {
-                const cur = typeof w.value === "number" ? +w.value.toFixed(3) : w.value;
-                options.push({ content: `↺ ${w.name}: ${cur} → ${defaults[w.name]}`,
-                    callback: () => { resetWidget(this, w, defaults[w.name]); this.__svkLive?.schedule(); } });
-            }
-            return r;
-        };
-
-        if (!live) return;
-
-        const onExecuted = nodeType.prototype.onExecuted;
-        nodeType.prototype.onExecuted = function (message) {
-            onExecuted?.apply(this, arguments);
-            const p = message?.svk_depth_preview?.[0];
-            if (p?.keys && this.__svkLive) this.__svkLive.load(p);
-        };
-
-        const onConfigure = nodeType.prototype.onConfigure;
-        nodeType.prototype.onConfigure = function () {
-            const r = onConfigure?.apply(this, arguments);
-            this.__svkLive?.toggleSliders(this.__svkLive.showSliders);
-            this.__svkLive?.schedule();
-            return r;
-        };
+        if (name === NODE || (name === LIVE && !Object.keys(DEFAULTS).length)) DEFAULTS = readDefaults(nodeData);
+        if (SOURCES.includes(name)) registerSource(nodeType);
+        else if (name === VIEW) registerView(nodeType);
     },
 });
