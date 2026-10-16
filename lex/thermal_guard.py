@@ -247,7 +247,7 @@ def _reporter_loop(seen):
                 seen = seq
                 secs = float(st["last_stop_s"])
                 _count("freezes", secs)
-                _log("ComfyUI був заморожений на %s (SoC %s ≥ межі %.0f°C), продовжено" % (
+                _log("ComfyUI був заморожений на %s (%s ≥ межі %.0f°C), продовжено" % (
                     _fmt_s(secs), "—" if st.get("t") is None else "%.0f°C" % st["t"], _cfg["hard_at"]))
                 _send("was_frozen", seconds=secs, t=st.get("t"))
         except Exception:
