@@ -251,6 +251,27 @@ export function resetWidget(node, w, value) {
     app.graph?.setDirtyCanvas(true, true);
 }
 
+// запис повзунка з межами й округленням, як у Python-ноді; перемальовує граф
+export function setWidgetValue(node, name, value) {
+    const w = widgetOf(node, name);
+    if (!node || !w) return;
+    const o = w.options || {};
+    if (typeof value === "number") {
+        if (o.min != null) value = Math.max(o.min, value);
+        if (o.max != null) value = Math.min(o.max, value);
+        const step = o.round || o.step2 || 0.01;
+        value = Math.round(value / step) * step;
+        value = +value.toFixed(3);
+    }
+    if (w.value === value) return;
+    const old = w.value;
+    w.value = value;
+    w.callback?.(value, app.canvas, node);
+    node.onWidgetChanged?.(name, value, old, w);
+    node.setDirtyCanvas?.(true, true);
+    app.graph?.setDirtyCanvas(true, true);
+}
+
 export function resetAllOf(node) {
     for (const w of node.widgets || []) {
         if (w.name in DEFAULTS && w.value !== DEFAULTS[w.name]) resetWidget(node, w, DEFAULTS[w.name]);

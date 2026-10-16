@@ -11,7 +11,9 @@ import * as M from "./depth_grade_math.js";
 import {
     VIDEO, C, GAP, CTRL_H, MONO, TONE_KEYS, ensureStyles, h, place, setText, icon, btn, setIcon,
     presetRow, findSource, rawOf, paramValues, widgetOf, toneSig, registerPanel, unregisterPanel,
+    getDefaults, setWidgetValue,
 } from "./depth_grade_ui.js";
+import { CurvePanel, CURVE_H, LEGEND_COL, LEGEND_ROW, SIDE_W, ROW_GAP } from "./depth_grade_curve.js";
 
 const ROUTE = "/svk/depth_grade/preview";
 const FRAME_ROUTE = "/svk/depth_grade/frame";
@@ -103,6 +105,9 @@ class VideoPanel {
         this.after = [];         // Програвання: Image[] результату
         this.before = [];        // Програвання: Image[] сирого депсу
         this.still = null;       // Статика: розкодований кадр (M.decodePreview), один ключ
+        this.last = null;        // Статика: останній результат M.grade (для кривих)
+        this.showCurve = false;  // «Криві» за замовчуванням згорнуті (як у фото-View)
+        this.curveDirty = false; // кривим потрібна перемальовка Статики без зміни тонів
         this.stillSig = "";      // підпис (rawSeq, розмір, кадр) завантаженого кадру
         this.stillReqSig = "";   // підпис останнього кадру, поставленого в чергу
         this.vi = 0;             // індекс кадру у фрагменті (у Статиці завжди 0)
@@ -148,7 +153,8 @@ class VideoPanel {
             (v) => { this.setProp("svkPreviewSize", +v); this.queue(); });
         this.fragSel = makeSelect(FRAGMENTS.map((n) => [String(n), `${n} кадрів`]), "Скільки кадрів у фрагменті",
             (v) => { this.setProp("svkFragment", +v); this.queue(); });
-        end.append(this.cmp, this.sizeSel, this.fragSel);
+        this.curveBtn = icon("curve", "Криві: гістограма, крива і маркери Ч / Б / Г / С (у режимі Статика)", () => this.toggleCurve());
+        end.append(this.cmp, this.curveBtn, this.sizeSel, this.fragSel);
         r1.append(modeSeg, this.playBtn, this.counter, end);
 
         // ── рядок 2: пресети кривої
@@ -166,7 +172,22 @@ class VideoPanel {
         this.divider = h("div", "position:absolute;top:0;bottom:0;width:14px;margin-left:-7px;cursor:ew-resize;touch-action:none;display:none");
         this.divider.append(h("div", `position:absolute;top:0;bottom:0;left:6px;width:2px;background:${C.accent}`));
         this.stage.append(this.canvas, this.divider);
-        this.pic.append(this.emptyEl, this.stage);
+        // криві: полотно і легенда живуть у pic, розкладка — у layout(); хост — цей VideoPanel
+        const panel = this;
+        this.curves = new CurvePanel({
+            widget: (name) => widgetOf(panel.A, name),
+            set: (name, value) => setWidgetValue(panel.A, name, value),
+            reset: (names) => {
+                const d = getDefaults();
+                for (const n of names) if (n in d) setWidgetValue(panel.A, n, d[n]);
+                panel.curveRedraw();
+            },
+            schedule: () => panel.curveRedraw(),
+            get last() { return panel.last; },
+        });
+        this.curve = this.curves.curve;
+        this.legend = this.curves.legend;
+        this.pic.append(this.emptyEl, this.stage, this.curve, this.legend);
         this.divider.addEventListener("pointerdown", (e) => {
             this.dragSplit = true;
             this.divider.setPointerCapture(e.pointerId);
@@ -296,7 +317,8 @@ class VideoPanel {
         this.A = A;
         const ready = !!A && !!raw?.cache_key;
         const tk = A ? `${A.id}|${toneSig(A)}` : "";
-        if (tk !== this.toneKey) {
+        if (tk !== this.toneKey || this.curveDirty) {
+            this.curveDirty = false;
             this.toneKey = tk;
             this.presets.refresh();
             if (this.isStill() && this.still) this.drawStill();
@@ -479,8 +501,12 @@ class VideoPanel {
         const W = this.root.clientWidth, H = this.root.clientHeight;
         if (!W || !H) return;   // ще не на екрані — спробуємо на наступному результаті
         node.properties.svkVidAr = key;
-        const pic = Math.min(AUTO_MAXH, W / ar);
-        const want = (this.bar.offsetHeight || BAR_H) + GAP + pic + GAP + TRACK_H + GAP + STATUS_H + 8;
+        // криві відкриті — місце під них: збоку (портрет) або під кадром (ландшафт), як у фото-View
+        const curves = this.curvesOn();
+        const body = curves && ar < 0.95
+            ? Math.max(Math.min(AUTO_MAXH, (W - SIDE_W - ROW_GAP) / ar), CURVE_H + GAP + LEGEND_ROW)
+            : Math.min(AUTO_MAXH, W / ar) + (curves ? GAP + CURVE_H + GAP + LEGEND_COL : 0);
+        const want = (this.bar.offsetHeight || BAR_H) + GAP + body + GAP + TRACK_H + GAP + STATUS_H + 8;
         const delta = want - H;
         if (Math.abs(delta) > 2) node.setSize([node.size[0], node.size[1] + delta]);
         app.graph?.setDirtyCanvas(true, true);
@@ -488,18 +514,60 @@ class VideoPanel {
 
     // мінімальна висота блоку — фіксована, не від вмісту
     minH() {
-        return (this.bar.offsetHeight || BAR_H) + GAP + MIN_PIC_H + GAP + TRACK_H + GAP + STATUS_H + 8;
+        return (this.bar.offsetHeight || BAR_H) + GAP + MIN_PIC_H + GAP + TRACK_H + GAP + STATUS_H + 8
+            + (this.isStill() && this.showCurve ? CURVE_H + GAP + LEGEND_COL + GAP : 0);
     }
 
-    // ── геометрія: картинка contain у зоні pic
+    // криві показані лише в Статиці, коли кадр є
+    curvesOn() { return this.isStill() && this.showCurve && this.hasImage(); }
+
+    // «Криві»: перемикач у Статиці; кадр перемальовується (з кривими або без них)
+    toggleCurve() {
+        this.showCurve = !this.showCurve;
+        this.layout();
+        if (this.isStill()) this.drawStill();
+        this.paint();
+    }
+
+    // кривим потрібна перемальовка навіть без зміни тонів (маркер підсвічується, тягнеться)
+    curveRedraw() {
+        this.curveDirty = true;
+        this.schedule();
+    }
+
+    // ── геометрія: картинка contain у зоні pic; криві — під кадром (ландшафт) або збоку (портрет)
     layout() {
         const pw = this.pic.clientWidth, ph = this.pic.clientHeight;
         const m = this.meta;
+        const curves = this.curvesOn();
+        this.curve.style.display = curves ? "block" : "none";
+        this.legend.style.display = curves ? "block" : "none";
         if (!m || !this.hasImage() || !pw || !ph) return;
         const ar = m.w / m.h;
-        let W = pw, H = pw / ar;
-        if (H > ph) { H = ph; W = ph * ar; }
-        place(this.stage, Math.round((pw - W) / 2), Math.round((ph - H) / 2), Math.round(W), Math.round(H));
+        let W, H, x, y;
+        if (curves && ar < 0.95) {
+            // портрет: кадр ліворуч, колонка кривих праворуч
+            const areaW = pw - SIDE_W - ROW_GAP;
+            H = Math.min(ph, areaW / ar); W = H * ar;
+            x = Math.round((areaW - W) / 2);
+            y = Math.round((ph - H) / 2);
+            const y0 = Math.round((ph - (CURVE_H + GAP + LEGEND_ROW)) / 2);
+            place(this.curve, pw - SIDE_W, y0, SIDE_W, CURVE_H);
+            place(this.legend, pw - SIDE_W, y0 + CURVE_H + GAP, SIDE_W, LEGEND_ROW);
+        } else {
+            // ландшафт: кадр, під ним криві й легенда; разом центруються по висоті
+            const under = curves ? GAP + CURVE_H + GAP + LEGEND_COL : 0;
+            const avail = under ? Math.max(60, ph - under) : ph;
+            H = Math.min(avail, pw / ar); W = H * ar;
+            const top = Math.round((ph - H - under) / 2);
+            x = Math.round((pw - W) / 2);
+            y = top;
+            if (curves) {
+                place(this.curve, 0, top + H + GAP, pw, CURVE_H);
+                place(this.legend, 0, top + H + GAP + CURVE_H + GAP, pw, LEGEND_COL);
+            }
+        }
+        place(this.stage, x, y, Math.round(W), Math.round(H));
         this.canvas.style.width = Math.round(W) + "px";
         this.canvas.style.height = Math.round(H) + "px";
         this.placeDivider();
@@ -520,6 +588,7 @@ class VideoPanel {
         if (!s || !A || !m) return;
         this.meta = m;
         const g = M.grade(s, toneValues(A), 0);
+        this.last = g;
         const key = s.keys[0];
         const W = s.w, H = s.h, n = W * H;
         if (this.canvas.width !== W || this.canvas.height !== H) {
@@ -540,6 +609,7 @@ class VideoPanel {
         }
         ctx.putImageData(img, 0, 0);
         this.layout();
+        if (this.curvesOn()) this.curves.draw(g);   // після layout: полотно вже має свій розмір
         this.paintFrame();
     }
 
@@ -660,6 +730,7 @@ class VideoPanel {
             this.tick();
         } else {
             this.meta = this.after.length ? this.playMeta : null;
+            this.last = null;   // криві у Програванні не показуємо
             this.metaSeq++;
             if (ready) {
                 // один запит фрагмента зі start так, щоб вибраний кадр був у ньому
@@ -784,6 +855,8 @@ class VideoPanel {
         this.playBtn.title = this.playing ? "Пауза" : PLAY_TITLE;
         this.playBtn.disabled = n < 2;
         this.cmp.disabled = !has;
+        this.curveBtn.style.display = still ? "" : "none";
+        this.curveBtn.classList.toggle("svk-on", still && this.showCurve);
         this.cmp.classList.toggle("svk-on", this.compare && has);
         if (this.sizeSel.value !== String(this.size())) this.sizeSel.value = String(this.size());
         if (this.fragSel.value !== String(this.count())) this.fragSel.value = String(this.count());

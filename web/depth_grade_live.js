@@ -4,8 +4,9 @@ import * as M from "./depth_grade_math.js";
 import {
     NODE, LIVE, VIEW, SOURCES, TONE_KEYS, C, MONO, GAP, CTRL_H, ensureStyles, h, place, setText, icon, btn,
     presetRow, isSource, nodeById, widgetOf, toneSig, rawOf, findSource, readDefaults, getDefaults, setDefaults,
-    resetWidget, resetAllOf, scheduleViews, registerPanel, unregisterPanel,
+    resetWidget, resetAllOf, scheduleViews, registerPanel, unregisterPanel, setWidgetValue,
 } from "./depth_grade_ui.js";
+import { CurvePanel, CURVE_H, LEGEND_COL, LEGEND_ROW, SIDE_W, ROW_GAP } from "./depth_grade_curve.js";
 
 // Depth Grade: ноди і спільна тонова математика.
 //  • SVKDepthGrade (нода A) — повні повзунки, «Скинути все», меню правої кнопки. Після Run
@@ -21,11 +22,6 @@ import {
 
 const AUTO_MAXH = 480;   // одноразове авто-розміру ноди: картинка не вища за це, px
 const MIN_VIEW_H = 160;  // мінімальна висота картинки (для getMinHeight), px
-const SIDE_W = 210;      // ширина бічної колонки в портреті
-const ROW_GAP = 8;       // проміжок між превью і бічною колонкою
-const CURVE_H = 150;     // висота полотна кривих
-const LEGEND_COL = 46;   // легенда під кривими (колонка)
-const LEGEND_ROW = 124;  // легенда під кривими (бічна колонка)
 const START_W = 460;     // стартова ширина ноди B
 const BAR_H = 2 * CTRL_H + 6;   // два рядки панелі + проміжок
 
@@ -60,10 +56,8 @@ class ViewPanel {
         this.sig = "";           // остання сигнатура тонових значень A
         this.prev = null;
         this.last = null;        // результат M.grade для піпеток і кривих
-        this.hs = null;          // маркери на осі кривих
         this.tool = null;
         this.compare = false;
-        this.drag = null;
         this.hover = null;
         this.ki = 0;
         this.raf = 0;
@@ -137,20 +131,10 @@ class ViewPanel {
         this.scrubIn.oninput = () => { this.ki = +this.scrubIn.value; this.schedule(); };
         this.scrub.append(this.scrubIn, this.scrubLbl);
 
-        this.curve = h("canvas", `position:absolute;display:none;border-radius:8px;background:${C.bg};
-            box-shadow:0 0 0 1px ${C.line};touch-action:none;cursor:default`);
-        this.curve.addEventListener("pointerdown", (e) => this.onCurveDown(e));
-        this.curve.addEventListener("pointermove", (e) => this.onCurveMove(e));
-        this.curve.addEventListener("pointerup", (e) => this.onCurveUp(e));
-        this.curve.addEventListener("pointercancel", (e) => this.onCurveUp(e));
-        this.curve.addEventListener("dblclick", (e) => this.onCurveDbl(e));
-
-        this.legend = h("div", `position:absolute;display:none;overflow:hidden;color:${C.dim};
-            font-size:11px;line-height:1.4`);
-        this.legend.innerHTML =
-            "Тягни: Ч / Б — чорне й біле · <b style='color:" + C.accent + "'>Г</b> — герой (вгору — сильніше) · " +
-            "С — звідки пригашувати, кружок справа — наскільки · порожнє місце вгору/вниз — середні тони. " +
-            "Подвійний клік — скинути. Clarity, texture, смуги й deflicker — після Run.";
+        // криві: полотно і легенда живуть у CurvePanel; розкладку тут рахує layout()
+        this.curves = new CurvePanel(this);
+        this.curve = this.curves.curve;
+        this.legend = this.curves.legend;
 
         this.body.append(this.empty, this.stage, this.scrub, this.curve, this.legend);
         this.root.append(this.bar, this.body);
@@ -184,24 +168,7 @@ class ViewPanel {
     }
 
     set(name, value) {
-        const A = this.A;
-        const w = this.widget(name);
-        if (!A || !w) return;
-        const o = w.options || {};
-        if (typeof value === "number") {
-            if (o.min != null) value = Math.max(o.min, value);
-            if (o.max != null) value = Math.min(o.max, value);
-            const step = o.round || o.step2 || 0.01;
-            value = Math.round(value / step) * step;
-            value = +value.toFixed(3);
-        }
-        if (w.value === value) return;
-        const old = w.value;
-        w.value = value;
-        w.callback?.(value, app.canvas, A);
-        A.onWidgetChanged?.(name, value, old, w);
-        A.setDirtyCanvas?.(true, true);
-        app.graph?.setDirtyCanvas(true, true);
+        if (this.A) setWidgetValue(this.A, name, value);
     }
 
     reset(names) {
@@ -260,7 +227,7 @@ class ViewPanel {
     setPrev(p) {
         this.prev = p;
         this.last = null;
-        this.hs = null;
+        this.curves.hs = null;
         if (!p) return;
         this.ki = Math.min(this.ki, p.keys.length - 1);
         this.syncScrub();
@@ -375,7 +342,7 @@ class ViewPanel {
     // ── малювання
     draw() {
         const A = this.A, p = this.prev;
-        if (!A || !p) { this.last = null; this.hs = null; return; }
+        if (!A || !p) { this.last = null; this.curves.hs = null; return; }
         const w = this.values();
         const ki = Math.min(this.ki, p.keys.length - 1);
         const g = M.grade(p, w, ki);
@@ -407,187 +374,7 @@ class ViewPanel {
             }
         }
         ctx.putImageData(img, 0, 0);
-        if (this.showCurve) this.drawCurve(g);
-    }
-
-    geom() {
-        const dpr = window.devicePixelRatio || 1;
-        const cw = this.curve.clientWidth || 300, ch = this.curve.clientHeight || CURVE_H;
-        if (this.curve.width !== Math.round(cw * dpr)) this.curve.width = Math.round(cw * dpr);
-        if (this.curve.height !== Math.round(ch * dpr)) this.curve.height = Math.round(ch * dpr);
-        const pad = { l: 10, r: 34, t: 10, b: 24 };
-        return { dpr, cw, ch, pad, x0: pad.l, x1: cw - pad.r, y0: ch - pad.b, y1: pad.t };
-    }
-
-    // позиції маркерів у координатах осі v (вхідний тон після об'єму)
-    handles(P) {
-        const lv = (v) => M.levels(v, P);
-        const hv = (v) => M.hero(M.levels(v, P), P);
-        return [
-            { id: "black", label: "Ч", v: P.bp },
-            { id: "white", label: "Б", v: P.wp },
-            { id: "hero", label: "Г", v: M.invert(lv, P.heroP), on: P.heroS > 0, accent: true },
-            { id: "from", label: "С", v: M.invert(hv, P.k), on: P.c < 1 },
-        ];
-    }
-
-    drawCurve(g) {
-        const G = this.geom();
-        const ctx = this.curve.getContext("2d");
-        ctx.setTransform(G.dpr, 0, 0, G.dpr, 0, 0);
-        ctx.clearRect(0, 0, G.cw, G.ch);
-        const X = (v) => G.x0 + v * (G.x1 - G.x0);
-        const Y = (o) => G.y0 - o * (G.y0 - G.y1);
-
-        ctx.strokeStyle = C.line; ctx.lineWidth = 1;
-        for (let i = 0; i <= 4; i++) {
-            const t = i / 4;
-            ctx.beginPath(); ctx.moveTo(X(t), Y(0)); ctx.lineTo(X(t), Y(1)); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(X(0), Y(t)); ctx.lineTo(X(1), Y(t)); ctx.stroke();
-        }
-        ctx.fillStyle = C.dim; ctx.font = `10px system-ui,sans-serif`;
-        ctx.textBaseline = "alphabetic";
-        ctx.fillText("далеко", X(0) + 3, G.y1 + 11);
-        ctx.textAlign = "right"; ctx.fillText("близько", X(1) - 3, G.y1 + 11); ctx.textAlign = "left";
-        if (!g) return;
-
-        // гістограма планів (вхід після об'єму): горб = план сцени
-        const bins = 96, hist = new Float32Array(bins);
-        for (const v of g.v) hist[Math.min(bins - 1, (v * bins) | 0)]++;
-        let hm = 0;
-        for (let i = 1; i < bins - 1; i++) hm = Math.max(hm, hist[i]);   // крайні біни — обрізане, не масштабуємо по них
-        ctx.fillStyle = C.hist;
-        for (let i = 0; i < bins; i++) {
-            const hh = Math.min(1, Math.sqrt(hist[i] / Math.max(hm, 1)));
-            ctx.fillRect(X(i / bins), Y(hh * 0.92), (G.x1 - G.x0) / bins - 0.5, Y(0) - Y(hh * 0.92));
-        }
-
-        // діагональ-орієнтир і сама крива
-        ctx.strokeStyle = C.line; ctx.setLineDash([3, 3]);
-        ctx.beginPath(); ctx.moveTo(X(0), Y(0)); ctx.lineTo(X(1), Y(1)); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.strokeStyle = C.accent; ctx.lineWidth = 2; ctx.beginPath();
-        const L = g.lut.length - 1;
-        for (let i = 0; i <= 200; i++) {
-            const v = i / 200, o = g.lut[Math.round(v * L)];
-            i ? ctx.lineTo(X(v), Y(o)) : ctx.moveTo(X(v), Y(o));
-        }
-        ctx.stroke();
-
-        // маркери на осі
-        const P = g.P;
-        this.hs = this.handles(P);
-        ctx.font = `600 10px system-ui,sans-serif`; ctx.textAlign = "center";
-        for (const m of this.hs) {
-            const x = X(m.v), active = m.on !== false, hot = this.drag?.id === m.id;
-            ctx.fillStyle = m.accent ? (active ? C.accent : C.accentDim) : (active ? C.text : C.dim);
-            ctx.globalAlpha = active || hot ? 1 : 0.55;
-            ctx.beginPath(); ctx.moveTo(x, G.y0 + 1); ctx.lineTo(x - 5, G.y0 + 9); ctx.lineTo(x + 5, G.y0 + 9); ctx.closePath(); ctx.fill();
-            ctx.fillText(m.label, x, G.y0 + 20);
-            if (hot) { ctx.strokeStyle = ctx.fillStyle; ctx.beginPath(); ctx.moveTo(x, G.y1); ctx.lineTo(x, G.y0); ctx.stroke(); }
-        }
-        ctx.globalAlpha = 1;
-
-        // стеля: кружок на правому краї
-        const cy = Y(P.c), xr = G.x1 + 14;
-        ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(xr, Y(0)); ctx.lineTo(xr, Y(1)); ctx.stroke();
-        ctx.fillStyle = P.c < 1 ? C.text : C.dim;
-        ctx.beginPath(); ctx.arc(xr, cy, 5, 0, Math.PI * 2); ctx.fill();
-        ctx.font = `10px ${MONO}`; ctx.fillText(P.c.toFixed(2), xr, Math.min(G.y0 + 20, cy + 16));
-        if (P.c < 1) {
-            ctx.strokeStyle = C.dim; ctx.setLineDash([2, 3]);
-            ctx.beginPath(); ctx.moveTo(X(0), cy); ctx.lineTo(G.x1, cy); ctx.stroke(); ctx.setLineDash([]);
-        }
-
-        if (this.drag?.tip) {
-            ctx.font = `11px ${MONO}`; ctx.textAlign = "center"; ctx.fillStyle = C.text;
-            ctx.fillText(this.drag.tip, (G.x0 + G.x1) / 2, G.y1 + 26);
-        }
-        ctx.textAlign = "left";
-    }
-
-    // ── мишка на кривих
-    pos(e) {
-        const r = this.curve.getBoundingClientRect();
-        return { x: e.clientX - r.left, y: e.clientY - r.top };
-    }
-
-    onCurveDown(e) {
-        if (!this.last) return;
-        const G = this.geom(), p = this.pos(e);
-        const X = (v) => G.x0 + v * (G.x1 - G.x0);
-        let pick = null;
-        if (Math.abs(p.x - (G.x1 + 14)) < 12) pick = { id: "ceil" };
-        else {
-            let best = 14;
-            for (const m of this.hs || []) {
-                const d = Math.abs(p.x - X(m.v)) + (p.y < G.y0 - 30 ? 20 : 0);
-                if (d < best) { best = d; pick = { id: m.id }; }
-            }
-        }
-        if (!pick && p.x > G.x0 && p.x < G.x1 && p.y > G.y1 && p.y < G.y0) pick = { id: "mid" };
-        if (!pick) return;
-        e.stopPropagation();
-        pick.y = p.y;
-        pick.mid = this.widget("midtones")?.value || 0;
-        pick.pop = this.widget("hero_pop")?.value || 0;
-        this.drag = pick;
-        this.curve.setPointerCapture(e.pointerId);
-        e.preventDefault();
-        this.schedule();
-    }
-
-    onCurveMove(e) {
-        const G = this.geom(), p = this.pos(e);
-        if (!this.drag) {
-            const near = Math.abs(p.x - (G.x1 + 14)) < 12 ||
-                (this.hs || []).some((m) => Math.abs(p.x - (G.x0 + m.v * (G.x1 - G.x0))) < 10 && p.y > G.y0 - 30);
-            this.curve.style.cursor = near ? "grab" : "default";
-            return;
-        }
-        this.curve.style.cursor = "grabbing";
-        const v = Math.min(1, Math.max(0, (p.x - G.x0) / (G.x1 - G.x0)));
-        const o = Math.min(1, Math.max(0, (G.y0 - p.y) / (G.y0 - G.y1)));
-        const P = this.last.P;
-        const d = this.drag;
-        if (d.id === "black") { this.set("blacks", Math.min(v, P.wp - 0.02)); d.tip = `чорне від ${v.toFixed(2)}`; }
-        if (d.id === "white") { this.set("whites", 1 - Math.max(v, P.bp + 0.02)); d.tip = `біле від ${v.toFixed(2)}`; }
-        if (d.id === "hero") {
-            this.set("hero_plane", M.levels(v, P));
-            const pop = Math.min(14, Math.max(0, d.pop + (d.y - p.y) / 6));
-            this.set("hero_pop", pop);
-            d.tip = `герой ${M.levels(v, P).toFixed(2)} · сила ${pop.toFixed(1)}`;
-        }
-        if (d.id === "from") {
-            const k = M.hero(M.levels(v, P), P);
-            this.set("ceiling_from", k);
-            if ((this.widget("foreground_ceiling")?.value ?? 1) >= 1) this.set("foreground_ceiling", k + 0.3 * (1 - k));
-            d.tip = `пригашувати від ${k.toFixed(2)}`;
-        }
-        if (d.id === "ceil") { this.set("foreground_ceiling", o); d.tip = `стеля ${o.toFixed(2)}`; }
-        if (d.id === "mid") {
-            const m = Math.min(2, Math.max(-2, d.mid + (d.y - p.y) / 60));
-            this.set("midtones", m);
-            d.tip = `середні тони ${m >= 0 ? "+" : ""}${m.toFixed(2)}`;
-        }
-        this.schedule();
-    }
-
-    onCurveDbl(e) {
-        const G = this.geom(), p = this.pos(e);
-        const X = (v) => G.x0 + v * (G.x1 - G.x0);
-        const groups = { black: ["blacks"], white: ["whites"], hero: ["hero_plane", "hero_pop"],
-            from: ["ceiling_from", "foreground_ceiling"] };
-        if (Math.abs(p.x - (G.x1 + 14)) < 12) return this.reset(["foreground_ceiling", "ceiling_from"]);
-        for (const m of this.hs || []) if (Math.abs(p.x - X(m.v)) < 12 && p.y > G.y0 - 30) return this.reset(groups[m.id]);
-        this.reset(["midtones"]);
-    }
-
-    onCurveUp(e) {
-        if (!this.drag) return;
-        this.drag = null;
-        try { this.curve.releasePointerCapture(e.pointerId); } catch (_) { /* уже відпущено */ }
-        this.schedule();
+        if (this.showCurve) this.curves.draw(g);
     }
 
     // ── піпетки на прев'ю
