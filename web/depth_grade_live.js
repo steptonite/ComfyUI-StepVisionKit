@@ -7,9 +7,11 @@ import * as M from "./depth_grade_math.js";
 //    віддає мініатюру сирого депсу (svk_depth_preview) — її читає нода B.
 //  • SVKDepthGradeView (нода B) — превью і інтерактив: під'єднується входом depth до виходу
 //    depth ноди A; тягаєш повзунки A — тут миттєво видно зміну, без перегенерації.
+//    Режим «Відео» — кадри результату з deflicker (svk_frames) з відтворенням по колу.
 //  • SVKDepthGradeLive — застаріла, поводиться як A.
 // Тонова математика — в depth_grade_math.js; тут лише UI.
-// Розкладка детермінована (без scrollHeight): висоти рахуємо з розмірів ноди.
+// Розкладка від розмірів САМОГО root (ResizeObserver): картинка вписується contain,
+// висота ноди не залежить від вмісту — немає петлі «вміст росте → нода росте».
 
 const NODE = "SVKDepthGrade";
 const LIVE = "SVKDepthGradeLive";
@@ -32,12 +34,13 @@ const TOOLS = [
     { id: "white", label: "Біле", hint: "клікни на близьке — воно й усе ближче стане білим" },
 ];
 
-const MAXH = 440;        // максимальна висота превью, px
+const AUTO_MAXH = 480;   // одноразове авто-розміру ноди: картинка не вища за це, px
+const MIN_VIEW_H = 160;  // мінімальна висота картинки (для getMinHeight), px
 const GAP = 6;           // проміжок між блоками, px
 const SIDE_W = 210;      // ширина бічної колонки в портреті
 const ROW_GAP = 8;       // проміжок між превью і бічною колонкою
 const CURVE_H = 150;     // висота полотна кривих
-const LEGEND_COL = 48;   // легенда під кривими (колонка)
+const LEGEND_COL = 46;   // легенда під кривими (колонка)
 const LEGEND_ROW = 124;  // легенда під кривими (бічна колонка)
 const START_W = 460;     // стартова ширина ноди B
 
@@ -133,7 +136,6 @@ class ViewPanel {
         this.node = node;
         this.A = null;           // нода-джерело (SVKDepthGrade)
         this.raw = undefined;    // ідентичність payload, з якого зроблено prev
-        this.W = -1;             // остання ширина ноди B
         this.sig = "";           // остання сигнатура тонових значень A
         this.prev = null;
         this.last = null;        // результат M.grade для піпеток і кривих
@@ -145,16 +147,33 @@ class ViewPanel {
         this.ki = 0;
         this.raf = 0;
         this.showCurve = false;  // «Криві» за замовчуванням згорнуті
-        this.total = 160;        // висота DOM-віджета, px
+        this.mode = "cal";       // "cal" — калібрування, "vid" — відео з deflicker
+        this.frames = [];        // Image кадрів результату
+        this.framesKey = null;   // ідентичність набору кадрів (імена файлів)
+        this.loadTok = 0;
+        this.fps = 24;
+        this.stride = 1;
+        this.vi = 0;             // поточний кадр відео
+        this.playing = false;
+        this.playRaf = 0;
+        this.lastT = null;
+        this.acc = 0;
+        this.disposed = false;
 
-        this.root = h("div", `position:relative;display:block;width:100%;box-sizing:border-box;
-            color:${C.text};font:12px system-ui,sans-serif`);
+        this.root = h("div", `position:relative;display:block;width:100%;height:100%;box-sizing:border-box;
+            overflow:hidden;color:${C.text};font:12px system-ui,sans-serif`);
         // не тягати вузол замість маркера; колесо не чіпаємо — полотно має зумитись
         for (const ev of ["pointerdown", "pointerup", "click", "dblclick"])
             this.root.addEventListener(ev, (e) => e.stopPropagation());
 
         // ── кнопки
         this.bar = h("div", "display:flex;gap:4px;flex-wrap:wrap;align-items:center");
+        this.modeCal = h("button", BTN, "Калібрування");
+        this.modeCal.title = "ключові кадри: повзунки, піпетки, криві — тягаєш і бачиш одразу";
+        this.modeCal.onclick = () => this.setMode("cal");
+        this.modeVid = h("button", BTN, "Відео");
+        this.modeVid.onclick = () => this.setMode("vid");
+        this.bar.append(this.modeCal, this.modeVid);
         this.toolBtns = {};
         for (const t of TOOLS) {
             const b = h("button", BTN, t.label);
@@ -178,8 +197,8 @@ class ViewPanel {
         this.resetBtn.onclick = () => { if (this.A) resetAllOf(this.A); };
         this.bar.append(this.cmp, this.curveBtn, this.resetBtn);
 
-        // ── тіло: усі блоки абсолютно позиціоновані, висоту тіла рахує layout()
-        this.body = h("div", "position:relative;margin-top:6px;width:100%;box-sizing:border-box");
+        // ── тіло: усі блоки абсолютно позиціоновані; розкладку рахує layout() від розмірів root
+        this.body = h("div", `position:absolute;left:0;right:0;bottom:0;top:${34 + GAP}px;box-sizing:border-box`);
 
         this.empty = h("div", `position:absolute;display:none;box-sizing:border-box;padding:0 14px;
             align-items:center;justify-content:center;text-align:center;color:${C.dim};line-height:1.5;
@@ -190,17 +209,28 @@ class ViewPanel {
         this.view = h("canvas", "position:absolute;left:0;top:0;display:block;image-rendering:auto");
         this.readout = h("div", `position:absolute;left:6px;bottom:6px;padding:3px 6px;border-radius:5px;
             background:rgba(24,24,27,.82);font:11px ${MONO};color:${C.text};pointer-events:none;display:none`);
-        this.stage.append(this.view, this.readout);
+        this.stale = h("div", `position:absolute;display:none;left:0;right:0;top:0;padding:6px 8px;
+            box-sizing:border-box;background:rgba(24,24,27,.8);color:${C.text};font:11px system-ui,sans-serif;
+            text-align:center;pointer-events:none`);
+        this.stale.textContent = "Повзунки змінено — натисни Run, щоб побачити це у відео";
+        this.stage.append(this.view, this.readout, this.stale);
         this.view.addEventListener("pointermove", (e) => this.onHover(e));
         this.view.addEventListener("pointerleave", () => { this.hover = null; this.readout.style.display = "none"; this.schedule(); });
         this.view.addEventListener("click", (e) => this.onPick(e));
 
         this.scrub = h("div", "position:absolute;display:none;align-items:center;gap:8px");
+        this.playBtn = h("button", BTN + ";min-width:64px;text-align:center", "Пуск");
+        this.playBtn.title = "відтворити кадри по колу";
+        this.playBtn.style.display = "none";
+        this.playBtn.onclick = () => this.togglePlay();
         this.scrubIn = h("input", `flex:1;min-width:0;accent-color:${C.accent}`);
         this.scrubIn.type = "range"; this.scrubIn.min = 0; this.scrubIn.step = 1; this.scrubIn.value = 0;
         this.scrubLbl = h("span", `font:11px ${MONO};color:${C.dim};white-space:nowrap`);
-        this.scrubIn.oninput = () => { this.ki = +this.scrubIn.value; this.schedule(); };
-        this.scrub.append(this.scrubIn, this.scrubLbl);
+        this.scrubIn.oninput = () => {
+            if (this.mode === "vid") { this.pause(); this.vi = +this.scrubIn.value; this.drawVideo(); }
+            else { this.ki = +this.scrubIn.value; this.schedule(); }
+        };
+        this.scrub.append(this.playBtn, this.scrubIn, this.scrubLbl);
 
         this.curve = h("canvas", `position:absolute;display:none;border-radius:8px;background:${C.bg};
             box-shadow:0 0 0 1px ${C.line};touch-action:none;cursor:default`);
@@ -220,15 +250,22 @@ class ViewPanel {
         this.body.append(this.empty, this.stage, this.scrub, this.curve, this.legend);
         this.root.append(this.bar, this.body);
 
+        this.ro = new ResizeObserver(() => this.layout());
+        this.ro.observe(this.root);
         this.timer = setInterval(() => this.tick(), 120);
         VIEWS.add(this);
+        this.updateModeUI();
     }
 
     dispose() {
+        this.disposed = true;
         clearInterval(this.timer);
+        this.ro?.disconnect();
         VIEWS.delete(this);
         if (this.raf) cancelAnimationFrame(this.raf);
         this.raf = 0;
+        this.pause();
+        this.frames = [];
     }
 
     // ── джерело: вхід depth → (reroute…) → нода A
@@ -286,6 +323,7 @@ class ViewPanel {
     }
 
     setTool(id) {
+        if (id && this.mode === "vid") this.setMode("cal");   // піпетка — це калібрування
         this.tool = id;
         for (const [k, b] of Object.entries(this.toolBtns)) {
             const act = k === id;
@@ -301,26 +339,167 @@ class ViewPanel {
         this.schedule();
     }
 
-    // ── стан → розкладка: виклик лише при зміні джерела, payload або ширини ноди
+    // ── режими: калібрування (ключові кадри) / відео (кадри результату)
+    setMode(m) {
+        if (m === "vid" && !this.frames.length) return;
+        this.mode = m;
+        this.pause();
+        this.updateModeUI();
+        this.syncScrub();
+        if (m === "vid") {
+            this.setTool(null);
+            this.drawVideo();
+        } else if (this.prev) {
+            this.view.width = this.prev.w;
+            this.view.height = this.prev.h;
+            this.draw();
+        }
+        this.layout();
+        this.updateStale();
+    }
+
+    updateModeUI() {
+        const vid = this.mode === "vid";
+        const has = this.frames.length > 0;
+        this.modeCal.style.borderColor = vid ? C.line : C.accent;
+        this.modeCal.style.color = vid ? C.text : C.accent;
+        this.modeVid.style.borderColor = vid ? C.accent : C.line;
+        this.modeVid.style.color = vid ? C.accent : (has ? C.text : C.dim);
+        this.modeVid.disabled = !has;
+        this.modeVid.style.opacity = has ? "1" : "0.45";
+        this.modeVid.style.cursor = has ? "pointer" : "default";
+        this.modeVid.title = has ? "відтворити результат з deflicker по колу"
+            : "натисни Run — тут з'явиться результат з deflicker";
+        for (const b of Object.values(this.toolBtns)) b.style.opacity = vid ? "0.45" : "1";
+        this.cmp.disabled = vid;
+        this.cmp.style.opacity = vid ? "0.45" : "1";
+        this.playBtn.style.display = vid ? "" : "none";
+        this.playBtn.textContent = this.playing ? "Пауза" : "Пуск";
+    }
+
+    // кількість кроків повзунка в поточному режимі
+    scrubCount() { return this.mode === "vid" ? this.frames.length : (this.prev ? this.prev.keys.length : 0); }
+
+    syncScrub() {
+        if (this.mode === "vid") {
+            this.scrubIn.max = Math.max(0, this.frames.length - 1);
+            this.scrubIn.value = this.vi;
+        } else if (this.prev) {
+            this.scrubIn.max = this.prev.keys.length - 1;
+            this.scrubIn.value = this.ki;
+        }
+    }
+
+    // розміри картинки поточного режиму
+    media() {
+        if (this.mode === "vid" && this.frames.length) {
+            const f = this.frames[0];
+            return { w: f.naturalWidth, h: f.naturalHeight };
+        }
+        if (this.mode === "cal" && this.prev) return { w: this.prev.w, h: this.prev.h };
+        return null;
+    }
+
+    togglePlay() { if (this.playing) this.pause(); else this.play(); }
+
+    play() {
+        if (this.mode !== "vid" || this.frames.length < 2) return;
+        this.playing = true;
+        this.lastT = null;
+        this.acc = 0;
+        this.updateModeUI();
+        this.playRaf = requestAnimationFrame((t) => this.loopPlay(t));
+    }
+
+    pause() {
+        this.playing = false;
+        if (this.playRaf) cancelAnimationFrame(this.playRaf);
+        this.playRaf = 0;
+        if (this.playBtn) this.updateModeUI();
+    }
+
+    // відтворення по колу: таймінг за fps, не setInterval
+    loopPlay(now) {
+        this.playRaf = 0;
+        if (!this.playing || this.disposed) return;
+        if (this.lastT == null) this.lastT = now;
+        const dt = Math.min(250, now - this.lastT);   // фон/пауза вкладки не має стрибати кадрами
+        this.lastT = now;
+        this.acc += dt;
+        const frameMs = 1000 / this.fps;
+        if (this.acc >= frameMs) {
+            const adv = Math.floor(this.acc / frameMs);
+            this.acc -= adv * frameMs;
+            this.vi = (this.vi + adv) % this.frames.length;
+            this.drawVideo();
+        }
+        this.playRaf = requestAnimationFrame((t) => this.loopPlay(t));
+    }
+
+    // набір кадрів з виходу Run ноди B: завантажуємо й перемикаємось у «Відео» на першому кадрі
+    setFrames(out) {
+        const list = out?.svk_frames;
+        if (!Array.isArray(list) || !list.length) return;
+        const key = list.map((f) => f.filename).join("|");
+        if (key === this.framesKey) return;
+        this.framesKey = key;
+        this.fps = Math.max(1, +out.svk_fps?.[0] || 24);
+        this.stride = Math.max(1, +out.svk_stride?.[0] || 1);
+        const tok = ++this.loadTok;
+        const urls = list.map((f) => api.apiURL(
+            `/view?filename=${encodeURIComponent(f.filename)}&subfolder=${encodeURIComponent(f.subfolder ?? "")}` +
+            `&type=${encodeURIComponent(f.type ?? "temp")}`));
+        Promise.all(urls.map((u) => new Promise((ok) => {
+            const im = new Image();
+            im.onload = () => ok(im);
+            im.onerror = () => ok(null);
+            im.src = u;
+        }))).then((imgs) => {
+            if (this.disposed || tok !== this.loadTok) return;
+            const good = imgs.filter(Boolean);
+            if (!good.length) return;
+            this.frames = good;
+            this.vi = 0;
+            this.setMode("vid");   // на паузі, на першому кадрі
+        });
+    }
+
+    // після перезавантаження сторінки — кадри з історії виводу, якщо вони ще є
+    restoreFrames() {
+        try {
+            const out = app.nodeOutputs?.[String(this.node.id)];
+            if (out?.svk_frames) this.setFrames(out);
+        } catch (_) { /* історія — не критично */ }
+    }
+
+    // зміна тонів після Run: у відео ця зміна ще не видна — показуємо плашку
+    updateStale() {
+        const A = this.A;
+        const on = this.mode === "vid" && !!A && !!A.__svkRunSig && A.__svkRunSig !== toneSig(A);
+        this.stale.style.display = on ? "" : "none";
+    }
+
+    // ── стан → розкладка: виклик лише при зміні джерела або payload
     tick() {
         const A = this.source();
         const raw = A ? rawOf(A) : null;
-        const W = this.node.size?.[0] ?? 0;
-        if (A !== this.A || raw !== this.raw || W !== this.W) {
+        if (A !== this.A || raw !== this.raw) {
             this.A = A;
             this.raw = raw;
-            this.W = W;
             this.setPrev(A ? prevOf(A) : null);
+            if (this.prev) this.autoSize(this.prev);
             this.layout();
             this.sig = A ? toneSig(A) : "";
             this.schedule();
-            return;
+        } else {
+            const sig = A ? toneSig(A) : "";
+            if (sig !== this.sig) {
+                this.sig = sig;
+                this.schedule();
+            }
         }
-        const sig = A ? toneSig(A) : "";
-        if (sig !== this.sig) {
-            this.sig = sig;
-            this.schedule();
-        }
+        if (this.framesKey === null) this.restoreFrames();
+        this.updateStale();
     }
 
     setPrev(p) {
@@ -328,73 +507,106 @@ class ViewPanel {
         this.last = null;
         this.hs = null;
         if (!p) return;
-        const nk = p.keys.length;
-        this.ki = Math.min(this.ki, nk - 1);
-        this.scrubIn.max = nk - 1;
-        this.scrubIn.value = this.ki;
-        this.view.width = p.w;
-        this.view.height = p.h;
+        this.ki = Math.min(this.ki, p.keys.length - 1);
+        this.syncScrub();
+        if (this.mode !== "vid") {
+            this.view.width = p.w;
+            this.view.height = p.h;
+        }
     }
 
-    // ── розкладка: квадрат/альбом — колонка; портрет з кривими або кадрами — рядок
-    layout() {
+    // мінімальна висота блоку — фіксована (бар + картинка + рядок + криві), не від вмісту
+    minH() {
+        const scrub = this.scrubCount() > 1;
+        return (this.bar.offsetHeight || 28) + GAP + MIN_VIEW_H
+            + (scrub ? 24 + GAP : 0)
+            + (this.showCurve ? CURVE_H + GAP + LEGEND_COL + GAP : 0) + 8;
+    }
+
+    // одноразово (на кожну пропорцію кадру, у самій ноді): картинка вписується в ≤ AUTO_MAXH
+    autoSize(p) {
         const node = this.node;
-        const W = Math.max(200, (node.size?.[0] || START_W) - 16);
+        const ar = p.w / p.h;
+        const key = Math.round(ar * 100) / 100;
+        node.properties ??= {};
+        if (node.properties.svkSizedAr === key) return;
+        const W = this.root.clientWidth, H = this.root.clientHeight;
+        if (!W || !H) return;                 // ще не на екрані — спробуємо на наступному payload
+        node.properties.svkSizedAr = key;
+        const nk = p.keys.length;
+        const row = ar < 0.95 && (this.showCurve || nk > 1);
+        let body;
+        if (row) {
+            const imgH = Math.min(AUTO_MAXH, (W - SIDE_W - ROW_GAP) / ar);
+            const side = (nk > 1 ? 24 + GAP : 0) + (this.showCurve ? CURVE_H + GAP + LEGEND_ROW : 0);
+            body = Math.max(imgH, side);
+        } else {
+            const imgH = Math.min(AUTO_MAXH, W / ar);
+            body = imgH + (nk > 1 ? GAP + 24 : 0) + (this.showCurve ? GAP + CURVE_H + GAP + LEGEND_COL : 0);
+        }
+        const wantH = (this.bar.offsetHeight || 28) + GAP + body + 8;
+        const delta = wantH - H;
+        if (Math.abs(delta) > 2) node.setSize([node.size[0], node.size[1] + delta]);
+        app.graph?.setDirtyCanvas(true, true);
+    }
+
+    // ── розкладка: картинка contain у доступному прямокутнику root; root сам не росте
+    layout() {
+        const root = this.root;
+        const W = root.clientWidth || Math.max(200, (this.node.size?.[0] || START_W) - 16);
+        const H = root.clientHeight || this.minH();
         const barH = this.bar.offsetHeight || 28;
-        const p = this.prev;
-        const nk = p ? p.keys.length : 0;
-        const ar = p ? p.w / p.h : 16 / 9;
-        const curves = !!p && this.showCurve;
-        const scrub = !!p && nk > 1;
-        const row = !!p && ar < 0.95 && (this.showCurve || nk > 1);
+        const top = barH + GAP;
+        this.body.style.top = top + "px";
+        const BH = Math.max(120, H - top);
+
+        const m = this.media();
+        const n = this.scrubCount();
+        const scrub = !!m && n > 1;
+        const ar = m ? m.w / m.h : 16 / 9;
+        const curves = !!m && this.showCurve;
+        const row = !!m && ar < 0.95 && (this.showCurve || scrub);   // портрет + криві/кадри — збоку
 
         this.empty.textContent = this.A
             ? "Натисни Run один раз. Далі тягай повзунки Depth Grade — тут видно одразу, без перегенерації. Clarity, texture, смуги й deflicker видно лише після Run."
             : "Під'єднай вхід depth до виходу depth ноди Depth Grade";
-        this.empty.style.display = p ? "none" : "flex";
-        this.stage.style.display = p ? "block" : "none";
+        this.empty.style.display = m ? "none" : "flex";
+        this.stage.style.display = m ? "block" : "none";
         this.scrub.style.display = scrub ? "flex" : "none";
         this.curve.style.display = curves ? "block" : "none";
         this.legend.style.display = curves ? "block" : "none";
         this.curveBtn.textContent = `Криві ${this.showCurve ? "▾" : "▸"}`;
 
-        let bodyH;
-        if (!p) {
-            place(this.empty, 0, 0, W, 120);
-            bodyH = 120;
+        if (!m) {
+            place(this.empty, 0, 0, W, BH);
         } else if (!row) {
-            let imgW = W, imgH = W / ar;
-            if (imgH > MAXH) { imgH = MAXH; imgW = imgH * ar; }
+            const under = [];
+            if (scrub) under.push(24);
+            if (curves) under.push(CURVE_H, LEGEND_COL);
+            const underH = under.reduce((a, b) => a + b, 0) + GAP * under.length;
+            const avail = Math.max(60, BH - underH);
+            const imgH = Math.min(avail, W / ar), imgW = imgH * ar;
             place(this.stage, Math.round((W - imgW) / 2), 0, imgW, imgH);
             this.sizeView(imgW, imgH);
             let y = imgH + GAP;
             if (scrub) { place(this.scrub, 0, y, W, 24); y += 24 + GAP; }
             if (curves) {
                 place(this.curve, 0, y, W, CURVE_H); y += CURVE_H + GAP;
-                place(this.legend, 0, y, W, LEGEND_COL); y += LEGEND_COL + GAP;
+                place(this.legend, 0, y, W, LEGEND_COL);
             }
-            bodyH = y - GAP;
         } else {
-            const rowW = W - SIDE_W - ROW_GAP;
-            let imgW = rowW, imgH = rowW / ar;
-            if (imgH > MAXH) { imgH = MAXH; imgW = imgH * ar; }
-            place(this.stage, Math.round((rowW - imgW) / 2), 0, imgW, imgH);
+            const areaW = W - SIDE_W - ROW_GAP;
+            const imgH = Math.min(BH, areaW / ar), imgW = imgH * ar;
+            place(this.stage, Math.round((areaW - imgW) / 2), 0, imgW, imgH);
             this.sizeView(imgW, imgH);
             const x0 = W - SIDE_W;
             let y = 0;
             if (scrub) { place(this.scrub, x0, y, SIDE_W, 24); y += 24 + GAP; }
             if (curves) {
                 place(this.curve, x0, y, SIDE_W, CURVE_H); y += CURVE_H + GAP;
-                place(this.legend, x0, y, SIDE_W, LEGEND_ROW); y += LEGEND_ROW + GAP;
+                place(this.legend, x0, y, SIDE_W, LEGEND_ROW);
             }
-            bodyH = Math.max(imgH, y - GAP);
         }
-
-        this.body.style.height = bodyH + "px";
-        this.total = barH + GAP + bodyH + 8;
-        this.root.style.height = this.total + "px";
-        const sz = node.computeSize?.();
-        if (sz) node.setSize([node.size[0], sz[1]]);
         app.graph?.setDirtyCanvas(true, true);
     }
 
@@ -409,7 +621,34 @@ class ViewPanel {
     }
 
     // ── малювання
+    drawVideo() {
+        const n = this.frames.length;
+        if (!n) return;
+        this.vi = Math.min(this.vi, n - 1);
+        const im = this.frames[this.vi];
+        const W = im.naturalWidth, H = im.naturalHeight;
+        if (this.view.width !== W || this.view.height !== H) {
+            this.view.width = W;
+            this.view.height = H;
+        }
+        this.view.getContext("2d").drawImage(im, 0, 0, W, H);
+        this.scrubIn.value = this.vi;
+        this.scrubLbl.textContent = `кадр ${this.vi + 1} з ${n}` + (this.stride > 1 ? ` · кожен ${this.stride}-й` : "");
+        this.hover = null;
+        this.readout.style.display = "none";
+    }
+
     draw() {
+        if (this.mode === "vid") {
+            this.drawVideo();
+            const p = this.prev;
+            if (this.showCurve && this.A && p) {
+                const g = M.grade(p, this.values(), Math.min(this.ki, p.keys.length - 1));
+                this.last = g;
+                this.drawCurve(g);
+            }
+            return;
+        }
         const A = this.A, p = this.prev;
         if (!A || !p) { this.last = null; this.hs = null; return; }
         const w = this.values();
@@ -549,6 +788,7 @@ class ViewPanel {
     }
 
     onCurveDown(e) {
+        if (this.mode === "vid") this.setMode("cal");   // тяга кривої — калібрування
         if (!this.last) return;
         const G = this.geom(), p = this.pos(e);
         const X = (v) => G.x0 + v * (G.x1 - G.x0);
@@ -610,6 +850,7 @@ class ViewPanel {
     }
 
     onCurveDbl(e) {
+        if (this.mode === "vid") this.setMode("cal");
         const G = this.geom(), p = this.pos(e);
         const X = (v) => G.x0 + v * (G.x1 - G.x0);
         const groups = { black: ["blacks"], white: ["whites"], hero: ["hero_plane", "hero_pop"],
@@ -638,6 +879,7 @@ class ViewPanel {
     }
 
     onHover(e) {
+        if (this.mode === "vid") return;
         const s = this.sample(e);
         if (!s) return;
         this.hover = s;
@@ -647,6 +889,7 @@ class ViewPanel {
     }
 
     onPick(e) {
+        if (this.mode === "vid") return;
         const s = this.sample(e);
         if (!s || !this.tool) return;
         const P = this.last.P;
@@ -687,12 +930,12 @@ function registerSource(nodeType) {
         return r;
     };
 
-    // Run: зберігаємо сирий payload превью на самій ноді
+    // Run: зберігаємо сирий payload превью і сигнатуру тонів, з якими його зроблено
     const onExecuted = nodeType.prototype.onExecuted;
     nodeType.prototype.onExecuted = function (message) {
         onExecuted?.apply(this, arguments);
         const p = message?.svk_depth_preview?.[0];
-        if (p) { this.__svkRaw = p; scheduleViews(); }
+        if (p) { this.__svkRaw = p; this.__svkRunSig = toneSig(this); scheduleViews(); }
     };
 
     // права кнопка по ноді: скинути все або один змінений повзунок
@@ -719,11 +962,18 @@ function registerView(nodeType) {
         this.addDOMWidget("view", "svk_depth_view", panel.root, {
             serialize: false,
             hideOnZoom: false,
-            getMinHeight: () => panel.total,
+            getMinHeight: () => panel.minH(),
         });
         this.setSize([Math.max(this.size[0], START_W), this.size[1]]);
         panel.layout();
         return r;
+    };
+
+    // Run ноди B: кадри результату (deflicker) → режим «Відео»
+    const onExecuted = nodeType.prototype.onExecuted;
+    nodeType.prototype.onExecuted = function (message) {
+        onExecuted?.apply(this, arguments);
+        if (message?.svk_frames) this.__svkView?.setFrames(message);
     };
 
     const onConfigure = nodeType.prototype.onConfigure;
@@ -744,13 +994,19 @@ function registerView(nodeType) {
 app.registerExtension({
     name: "StepVisionKit.DepthGrade",
     setup() {
-        // Nodes 2.0 не викликає onExecuted — беремо превью з події виконання
+        // Nodes 2.0 не викликає onExecuted — беремо виводи з події виконання
         api.addEventListener("executed", (ev) => {
             try {
-                const out = ev.detail?.output?.svk_depth_preview?.[0];
-                if (!out) return;
-                const node = nodeById(ev.detail.node);
-                if (node && isSource(node)) { node.__svkRaw = out; scheduleViews(); }
+                const d = ev.detail;
+                const node = nodeById(d?.node);
+                if (!node) return;
+                const out = d.output;
+                if (isSource(node)) {
+                    const p = out?.svk_depth_preview?.[0];
+                    if (p) { node.__svkRaw = p; node.__svkRunSig = toneSig(node); scheduleViews(); }
+                } else if (typeOf(node) === VIEW) {
+                    node.__svkView?.setFrames(out);
+                }
             } catch (_) { /* превью — не критично */ }
         });
     },

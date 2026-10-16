@@ -16,6 +16,8 @@
 Стара нода лишається як була — збережені воркфлоу на ній не ламаються.
 """
 
+import os
+
 import numpy as np
 import torch
 
@@ -333,22 +335,56 @@ class SVKDepthGrade:
 
 class SVKDepthGradeView:
     """Живе прев'ю для Depth Grade. Під'єднай вхід до виходу depth ноди Depth Grade:
-    після одного Run повзунки тієї ноди крутяться тут наживо, без перегенерації."""
+    після одного Run повзунки тієї ноди крутяться тут наживо, без перегенерації.
+    Кнопка «Відео» в прев'ю показує кадри результату (deflicker) з швидкістю fps."""
     DESCRIPTION = ("Живе прев'ю Depth Grade: під'єднай до виходу depth, натисни Run один раз — "
-                   "далі тягай повзунки Depth Grade і бач зміну одразу. Піпетки й криві пишуть у ті самі повзунки.")
+                   "далі тягай повзунки Depth Grade і бач зміну одразу. Піпетки й криві пишуть у ті самі повзунки. "
+                   "Режим «Відео» відтворює кадри результату з deflicker.")
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})}}
+        return {
+            "required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})},
+            "optional": {"fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 1.0,
+                                           "tooltip": "швидкість відтворення в прев'ю"})},
+        }
 
     RETURN_TYPES = ()
     FUNCTION = "view"
     OUTPUT_NODE = True
     CATEGORY = "StepVisionKit/Depth"
 
-    def view(self, depth):
-        # саме прев'ю рахує браузер з мініатюри, яку віддала Depth Grade; тут нічого робити
-        return {"ui": {}}
+    def view(self, depth, fps=24.0):
+        n = int(depth.shape[0])
+        if n <= 1:
+            # один кадр — саме прев'ю рахує браузер з мініатюри Depth Grade; тут нічого робити
+            return {"ui": {}}
+
+        import uuid
+        from PIL import Image
+        import folder_paths
+
+        h, w = int(depth.shape[1]), int(depth.shape[2])
+        k = max(1, -(-n // 400))                      # кожен k-й кадр, щоб лишилось ≤ 400
+        x = depth[::k].detach().float().cpu()
+        s = min(1.0, 512.0 / float(max(h, w)))        # довша сторона ≤ 512 — для прев'ю досить
+        if s < 1.0:
+            nh, nw = max(1, round(h * s)), max(1, round(w * s))
+            x = torch.nn.functional.interpolate(x.permute(0, 3, 1, 2), size=(nh, nw), mode="area")
+            x = x.permute(0, 2, 3, 1)
+        arr = (x.clamp(0.0, 1.0) * 255.0 + 0.5).to(torch.uint8).numpy()
+
+        out_dir = os.path.join(folder_paths.get_temp_directory(), "svk_view")
+        os.makedirs(out_dir, exist_ok=True)
+        prefix = uuid.uuid4().hex[:8]
+        frames = []
+        for j, fr in enumerate(arr):
+            if fr.shape[-1] == 1:
+                fr = np.repeat(fr, 3, axis=-1)
+            name = f"{prefix}_{j:04d}.jpg"
+            Image.fromarray(np.ascontiguousarray(fr[..., :3])).save(os.path.join(out_dir, name), quality=85)
+            frames.append({"filename": name, "subfolder": "svk_view", "type": "temp"})
+        return {"ui": {"svk_frames": frames, "svk_fps": [float(fps)], "svk_stride": [k]}}
 
 
 class SVKDepthGradeLive(SVKDepthGrade):
