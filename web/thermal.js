@@ -121,19 +121,81 @@ function ensureBadge() {
     if (badge) return badge;
     badge = document.createElement("div");
     badge.id = "svk-thermal-badge";
-    badge.style.cssText = "position:fixed;right:10px;bottom:10px;z-index:9999;padding:4px 9px;"
+    // За замовчуванням — над панеллю масштабу канви внизу праворуч, щоб не перекривати її кнопки.
+    badge.style.cssText = "position:fixed;right:10px;bottom:72px;z-index:9999;padding:4px 9px;"
         + "border-radius:6px;font:12px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;"
         + "background:rgba(24,24,27,.85);color:#8a8a93;border:1px solid #2e2e33;"
-        + "pointer-events:none;user-select:none;display:none";
+        + "cursor:grab;touch-action:none;user-select:none;display:none";
+    badge.title = "Перетягніть, щоб пересунути. Подвійний клік — повернути на місце.";
     document.body.appendChild(badge);
+    makeDraggable(badge);
     return badge;
+}
+
+// Позиція плашки — лише зручність цього браузера (localStorage), сервер її не знає.
+const POS_KEY = "svk.thermal.badgePos";
+
+function placeBadge(e, pos) {
+    if (!pos) {
+        e.style.left = e.style.top = "";
+        e.style.right = "10px"; e.style.bottom = "72px";
+        return;
+    }
+    const r = e.getBoundingClientRect();
+    const x = Math.max(0, Math.min(window.innerWidth - r.width, pos.x));
+    const y = Math.max(0, Math.min(window.innerHeight - r.height, pos.y));
+    e.style.right = e.style.bottom = "";
+    e.style.left = x + "px"; e.style.top = y + "px";
+}
+
+function loadPos() {
+    try { return JSON.parse(localStorage.getItem(POS_KEY) || "null"); } catch (_) { return null; }
+}
+
+function savePos(pos) {
+    try {
+        if (pos) localStorage.setItem(POS_KEY, JSON.stringify(pos));
+        else localStorage.removeItem(POS_KEY);
+    } catch (_) { /* приватне вікно — просто не запам'ятаємо */ }
+}
+
+function makeDraggable(e) {
+    let drag = null;
+    e.addEventListener("pointerdown", (ev) => {
+        if (ev.button !== 0) return;
+        const r = e.getBoundingClientRect();
+        drag = { dx: ev.clientX - r.left, dy: ev.clientY - r.top, id: ev.pointerId };
+        e.setPointerCapture(ev.pointerId);
+        e.style.cursor = "grabbing";
+        ev.preventDefault(); ev.stopPropagation();
+    });
+    e.addEventListener("pointermove", (ev) => {
+        if (!drag || ev.pointerId !== drag.id) return;
+        placeBadge(e, { x: ev.clientX - drag.dx, y: ev.clientY - drag.dy });
+        ev.stopPropagation();
+    });
+    const end = (ev) => {
+        if (!drag || ev.pointerId !== drag.id) return;
+        drag = null;
+        e.style.cursor = "grab";
+        const r = e.getBoundingClientRect();
+        savePos({ x: r.left, y: r.top });
+    };
+    e.addEventListener("pointerup", end);
+    e.addEventListener("pointercancel", end);
+    e.addEventListener("dblclick", (ev) => { savePos(null); placeBadge(e, null); ev.stopPropagation(); });
+    window.addEventListener("resize", () => { const p = loadPos(); if (p) placeBadge(e, p); });
 }
 
 function toast(text, isErr = false, ms = TOAST_MS) {
     try {
         const d = document.createElement("div");
         const edge = isErr ? "#e0857c" : "#d9a441";
-        d.style.cssText = "position:fixed;right:10px;bottom:48px;z-index:10000;max-width:360px;"
+        // тост — над плашкою, хоч де її поставили
+        const br = badge && badge.style.display !== "none" ? badge.getBoundingClientRect() : null;
+        const bottom = br ? Math.max(8, window.innerHeight - br.top + 6) : 110;
+        const right = br ? Math.max(8, window.innerWidth - br.right) : 10;
+        d.style.cssText = `position:fixed;right:${right}px;bottom:${bottom}px;z-index:10000;max-width:360px;`
             + "padding:8px 12px;border-radius:8px;font:13px/1.35 system-ui,sans-serif;"
             + "background:" + (isErr ? "#3a1f1d" : "#2a2416") + ";color:#e8e8ea;"
             + "border:1px solid " + edge + ";box-shadow:0 4px 16px rgba(0,0,0,.35)";
@@ -147,6 +209,7 @@ function render() {
     const e = ensureBadge();
     if (!server) { e.style.display = "none"; return; }
     e.style.display = "block";
+    if (!e._svkPlaced) { e._svkPlaced = true; const p = loadPos(); if (p) placeBadge(e, p); }
     if (!server.enabled) {
         e.style.color = "#8a8a93";
         e.textContent = "термо-сторож вимкнено";
