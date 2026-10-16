@@ -74,18 +74,39 @@ def _warp(img, flow_small, scale):
     return out, valid
 
 
-def _temporal_pass(vs, flows, strength, guard, scale, order):
-    """Рекурсивний фільтр уздовж руху. Шум між кадрами усереднюється, рух лишається."""
-    acc = None
+def _consistency(flow, back, scale):
+    """Довіра до потоку 0…1: шлях t→сусід→t має повернутись у ту саму точку.
+
+    На швидкій панорамі й перекритті потік бреше, хоч тон у сірому тумані й збігається, —
+    без цієї перевірки фільтр тягне туди напівпрозорих «привидів»."""
+    bx, _ = _warp(back[..., 0], flow, 1.0)
+    by, _ = _warp(back[..., 1], flow, 1.0)
+    err = np.hypot(flow[..., 0] + bx, flow[..., 1] + by)
+    c = np.exp(-np.square(err / 0.75)).astype(np.float32)   # 0.75 px на малому кадрі
+    return c
+
+
+def _temporal_pass(vs, flows, back, strength, guard, scale, order):
+    """Рекурсивний фільтр уздовж руху. Шум між кадрами усереднюється, рух лишається.
+
+    flows[t] тягне попередній (за order) кадр у геометрію t, back[prev] — зворотний потік,
+    для перевірки узгодженості."""
+    import cv2
+
+    acc, prev = None, None
     for t in order:
         v = vs[t]
         if acc is None:
             acc = v.copy()
         else:
             w, valid = _warp(acc, flows[t], scale)
-            conf = np.exp(-np.square(np.abs(v - w) / guard)) * valid
+            cons = _consistency(flows[t], back[prev], scale)
+            if cons.shape != v.shape:
+                cons = cv2.resize(cons, (v.shape[1], v.shape[0]), interpolation=cv2.INTER_LINEAR)
+            conf = np.exp(-np.square(np.abs(v - w) / guard)) * valid * cons
             alpha = (0.9 * strength) * conf
             acc = v + alpha * (w - v)
+        prev = t
         yield t, acc
 
 
@@ -270,7 +291,28 @@ def _grade_array(x, p, motion=None, progress=None, clip_lohi=None):
         if smooth_banding > 0:
             r = max(3, int(round(min(v.shape) / 220.0)) | 1)
             sm = cv2.bilateralFilter(v, -1, float(banding_edge), r)
-            v = v * (1.0 - smooth_banding) + sm * smooth_banding
+            a = min(1.0, float(smooth_banding))
+            v = v * (1.0 - a) + sm * a
+            if smooth_banding > 1.0:
+                # 1…2: широкі смуги (20–40 px у тумані) вузьке ядро не бере — розмиваємо
+                # на зменшеному кадрі (дешево) і повертаємо лише там, де перепад менший за межу
+                h0, w0 = v.shape
+                k = max(1.0, min(h0, w0) / 180.0)
+                small = cv2.resize(v, (max(8, int(w0 / k)), max(8, int(h0 / k))), interpolation=cv2.INTER_AREA)
+                # смуга — це сходинка в кілька відсотків тону; межу беремо не ширшу за 0.04,
+                # інакше широке ядро з'їдає силуети (при banding_edge 0.5 зникали люди)
+                e = min(float(banding_edge), 0.04)
+                small = cv2.bilateralFilter(small, -1, e, 6.0)
+                small = cv2.bilateralFilter(small, -1, e, 6.0)
+                wide = cv2.resize(small, (w0, h0), interpolation=cv2.INTER_LINEAR)
+                keep = np.exp(-np.square((v - wide) / e))
+                # захисна смуга довкола справжніх меж (крутіше за смугу) на всю досяжність ядра
+                g = (np.abs(cv2.Sobel(v, cv2.CV_32F, 1, 0)) + np.abs(cv2.Sobel(v, cv2.CV_32F, 0, 1))) / 8.0
+                reach = int(k * 12) | 1
+                g = cv2.dilate(g, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (reach, reach)))
+                keep *= np.exp(-np.square(g / 0.03))
+                b = (float(smooth_banding) - 1.0) * keep
+                v = v * (1.0 - b) + wide * b
 
         if clarity > 0:
             rad = int(max(4, min(v.shape) / 45))
@@ -288,11 +330,15 @@ def _grade_array(x, p, motion=None, progress=None, clip_lohi=None):
     if run_defl:
         st, gd = float(deflicker), float(motion_guard)
         fwd = np.empty_like(out)
-        for t, acc in _temporal_pass(out, bw, st, gd, sc, range(n)):
+        for t, acc in _temporal_pass(out, bw, fw, st, gd, sc, range(n)):
             fwd[t] = acc
             tick()
-        for t, acc in _temporal_pass(out, fw, st, gd, sc, range(n - 1, -1, -1)):
-            fwd[t] = 0.5 * (fwd[t] + acc)
+        for t, acc in _temporal_pass(out, fw, bw, st, gd, sc, range(n - 1, -1, -1)):
+            # злиття не 50/50: прохід, що далеко відійшов від кадру (привид з одного боку), важить менше
+            a, b = fwd[t], acc
+            wa = np.exp(-np.square((a - out[t]) / gd))
+            wb = np.exp(-np.square((b - out[t]) / gd))
+            fwd[t] = (a * wa + b * wb + out[t] * 1e-3) / (wa + wb + 1e-3)
             tick()
         out = np.clip(fwd, 0.0, 1.0)
 
@@ -428,8 +474,8 @@ class SVKDepthGrade:
                             "tooltip": "як Clarity у Lightroom: ліплення форм усередині об'єкта (вилиці, складки), без ореолу по силуету. 0.3–0.5"}),
                 "texture": (F, {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.1,
                             "tooltip": "як Texture у Lightroom: дрібні складочки й кромки. 0.3–0.5"}),
-                "smooth_banding": (F, {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                   "tooltip": "прибрати сходинки-смуги в плавних переходах; силует лишається різким. 0.2–0.5"}),
+                "smooth_banding": (F, {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.05,
+                                   "tooltip": "прибрати сходинки-смуги в плавних переходах; силует лишається різким. 0.2–0.5 дрібні · 1.0–2.0 широкі смуги (туман, небо, стіни)"}),
                 "banding_edge": (F, {"default": 0.12, "min": 0.01, "max": 0.5, "step": 0.01,
                                  "tooltip": "який перепад вважати смугою, а не межею. 0.06 — лише смуги · 0.12 звично · 0.25+ з'їдає й листя, але тупить силует"}),
                 "trim_far": (F, {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.5,
@@ -440,7 +486,7 @@ class SVKDepthGrade:
                 "levels_scope": (["whole clip", "per frame"], {"default": "whole clip",
                                  "tooltip": "відео: whole clip = одні рівні на весь кліп (без стрибків яскравості). per frame = кожен кадр сам по собі (для фото)"}),
                 "deflicker": (F, {"default": 0.6, "min": 0.0, "max": 1.0, "step": 0.05,
-                              "tooltip": "🆕 ВІДЕО: гасить дрібне тремтіння поверхонь (стіни, асфальт, шкіра). 0 = вимкнено · 0.6 звично · 1.0 = максимум; якщо з'являються шлейфи — менше"}),
+                              "tooltip": "🆕 ВІДЕО: гасить дрібне тремтіння поверхонь (стіни, асфальт, шкіра). 0 = вимкнено · 0.6 звично · 1.0 = максимум. Там, де потік ненадійний (швидка панорама, перекриття), фільтр сам не тягне кадри"}),
                 "motion_guard": (F, {"default": 0.08, "min": 0.01, "max": 0.4, "step": 0.01,
                                  "tooltip": "ВІДЕО: який стрибок тону вважати справжнім рухом, а не мерехтінням. Менше = нуль шлейфів, але й гасить слабше; більше = гасить сильніше, ризик шлейфу за рухом"}),
             },
