@@ -16,7 +16,12 @@
 Стара нода лишається як була — збережені воркфлоу на ній не ламаються.
 """
 
-import os
+import asyncio
+import base64
+import io
+import threading
+import time
+from collections import OrderedDict
 
 import numpy as np
 import torch
@@ -139,6 +144,231 @@ def _preview_payload(x, side=384, max_keys=8):
             "clip_lo": clo, "clip_hi": chi, "keys": keys}
 
 
+# ───────────────────────── ядро грейду (спільне для Run і живого прев'ю) ─────────────────────────
+
+class _Superseded(Exception):
+    """Новіший запит прев'ю витіснив цей — ядро перериває рахунок."""
+
+
+def _grade_steps(n, video, deflicker):
+    """Кроки прогресу Run: тон (n), потоки (n) і два проходи deflicker (2n) — якщо є відео й deflicker > 0."""
+    return n + (3 * n if video and deflicker > 0 else 0)
+
+
+def _grade_array(x, p, motion=None, progress=None, clip_lohi=None):
+    """Тіло колишнього SVKDepthGrade.grade. Формули не змінені.
+
+    x — float32 (n,h,w) сирий депс; p — параметри за іменами віджетів; motion — float32 (n,h,w)
+    сірий motion_guide або None; progress(k_done, k_total) — колбек або None (може кинути _Superseded);
+    clip_lohi — спільні рівні кліпу (для прев'ю по фрагменту); None = рахувати з самого x, як у Run.
+    Повертає (out, info).
+    """
+    import cv2
+
+    depth_is, look = p["depth_is"], p["look"]
+    foreground_pop, blacks, whites, midtones = p["foreground_pop"], p["blacks"], p["whites"], p["midtones"]
+    foreground_ceiling, ceiling_from = p["foreground_ceiling"], p["ceiling_from"]
+    hero_plane, hero_pop = p["hero_plane"], p["hero_pop"]
+    clarity, texture = p["clarity"], p["texture"]
+    smooth_banding, banding_edge = p["smooth_banding"], p["banding_edge"]
+    trim_far, trim_near = p["trim_far"], p["trim_near"]
+    flip, levels_scope = p["flip"], p["levels_scope"]
+    deflicker, motion_guard = p["deflicker"], p["motion_guard"]
+
+    n, h, w = x.shape
+    video = n > 1
+    run_defl = video and deflicker > 0
+    total = _grade_steps(n, video, deflicker)
+    done = [0]
+
+    def tick(step=1):
+        done[0] += step
+        if progress is not None:
+            progress(done[0], total)
+
+    # 1) ВІДСТАНЬ: 0 = найближче
+    dist = (1.0 - x) if depth_is == "near is white" else x
+
+    sw, sh, sc = _small_side(h, w)
+    small = np.stack([cv2.resize(dist[i], (sw, sh), interpolation=cv2.INTER_AREA) for i in range(n)])
+
+    bw = fw = None
+    if run_defl:
+        if motion is not None and motion.shape[0] == n:
+            gs = [cv2.resize(motion[i], (sw, sh), interpolation=cv2.INTER_AREA) for i in range(n)]
+        else:
+            gs = [_stretch(s, *_lohi(s, 1.0, 99.0)) for s in small]   # кожен кадр у свій діапазон — потоку так легше
+        bw, fw = _flows(gs)
+        tick(n)
+
+    # «до»: той самий кліп у тій самій шкалі, але ще без замка й без deflicker
+    jit_in = _jitter([_stretch(s, *_lohi(small, 1.0, 99.0)) for s in small], bw) if bw else None
+
+    # 🔴 Тут був замок шкали (афінна підгонка кадру до сусіда уздовж потоку) — ПРИБРАНО
+    #    16.10.2026 після двох замірів на depth_ant_v3_00001: і ланцюжок, і «стабілізатор
+    #    траєкторії» ПОСИЛЮВАЛИ і тремтіння, і пульсацію (1.32 → 2.36). Глобального
+    #    «дихання» в DA3 після спільних рівнів майже нема, а підгонка вносить свій шум ±0.02.
+    #    Мерехтіння DA3 — ЛОКАЛЬНЕ, його гасить deflicker нижче.
+    scale_note = ""
+
+    # 3) РІВНІ по всьому кліпу або по кадру
+    if levels_scope == "whole clip" and video:
+        if clip_lohi is None:
+            clip_lohi = _lohi(dist, trim_near, 100.0 - trim_far)
+    else:
+        clip_lohi = None
+
+    near_bias = 2.0 * (0.01 ** float(foreground_pop))   # 0 → 2.0 (лінійно), 1 → 0.02 (максимум)
+    bp = float(blacks)
+    wp = max(1.0 - float(whites), bp + 1e-3)
+    gamma = 2.0 ** (-float(midtones))
+    c, k = float(foreground_ceiling), float(ceiling_from)
+
+    out = np.empty_like(dist)
+    for i in range(n):
+        lohi = clip_lohi if clip_lohi is not None else _lohi(dist[i], trim_near, 100.0 - trim_far)
+        d = _stretch(dist[i], *lohi)
+
+        if look == "V2 volume":
+            v = 1.0 / (d + near_bias)
+            v = _stretch(v, 1.0 / (1.0 + near_bias), 1.0 / near_bias)
+        else:
+            v = 1.0 - d
+
+        v = np.clip((v - bp) / (wp - bp), 0.0, 1.0)
+        if gamma != 1.0:
+            v = np.power(v, gamma)
+
+        if hero_pop > 0:
+            s, hp = float(hero_pop), float(hero_plane)
+            g0 = float(1.0 / (1.0 + np.exp(s * hp)))
+            g1 = float(1.0 / (1.0 + np.exp(-s * (1.0 - hp))))
+            v = ((1.0 / (1.0 + np.exp(-s * (v - hp)))) - g0) / max(g1 - g0, 1e-6)
+            v = np.clip(v, 0.0, 1.0).astype(np.float32)
+
+        # СТЕЛЯ переднього плану: усе світліше за k м'яко лягає під c.
+        # c > k: плече з нахилом 1 у точці k (без зламу), найближче = c.
+        # c ≤ k: найближче ТЕМНІШЕ за героя — творчий «провал» переднього плану.
+        if c < 1.0 and k < 1.0:
+            m = v > k
+            # clip: float32 дає t = 1.0000001 на вершині → np.power(негативна основа) = NaN, і він
+            # розповзається по всьому кліпу через deflicker. Для скінченних пікселів нічого не змінює.
+            t = np.clip((v[m] - k) / (1.0 - k), 0.0, 1.0)
+            if c > k:
+                pw = (1.0 - k) / max(c - k, 1e-3)
+                shape = 1.0 - np.power(1.0 - t, pw)
+            else:
+                shape = t * t * (3.0 - 2.0 * t)
+            v[m] = k + (c - k) * shape
+
+        v = v.astype(np.float32)
+        if smooth_banding > 0:
+            r = max(3, int(round(min(v.shape) / 220.0)) | 1)
+            sm = cv2.bilateralFilter(v, -1, float(banding_edge), r)
+            v = v * (1.0 - smooth_banding) + sm * smooth_banding
+
+        if clarity > 0:
+            rad = int(max(4, min(v.shape) / 45))
+            base = _edge_base(v, rad)
+            v = np.clip(v + (v - base) * float(clarity) * 1.6, 0.0, 1.0)
+
+        if texture > 0:
+            blur = cv2.GaussianBlur(v, (0, 0), 2.0)
+            v = np.clip(v + (v - blur) * float(texture), 0.0, 1.0)
+
+        out[i] = (1.0 - v) if flip else v
+        tick()
+
+    # 4) DEFLICKER: вперед і назад уздовж руху, середнє — без запізнення й без шлейфу в один бік
+    if run_defl:
+        st, gd = float(deflicker), float(motion_guard)
+        fwd = np.empty_like(out)
+        for t, acc in _temporal_pass(out, bw, st, gd, sc, range(n)):
+            fwd[t] = acc
+            tick()
+        for t, acc in _temporal_pass(out, fw, st, gd, sc, range(n - 1, -1, -1)):
+            fwd[t] = 0.5 * (fwd[t] + acc)
+            tick()
+        out = np.clip(fwd, 0.0, 1.0)
+
+    jit_note = ""
+    if jit_in is not None:
+        # «після»: вихід, зведений до лінійної шкали входу, — щоб криві грейду не міняли мірило
+        so = np.stack([cv2.resize(out[i], (sw, sh), interpolation=cv2.INTER_AREA) for i in range(n)])
+        jit_note = f" · тремтіння ×1000: вхід {jit_in:.1f} → вихід {_jitter(list(_stretch(so, *_lohi(so, 1.0, 99.0))), bw):.1f}"
+
+    q = np.percentile(out[0], [2, 25, 50, 75, 98])
+    info = (f"кадрів {n} · {look} pop {foreground_pop}"
+            + f" · blacks {blacks} whites {whites} midtones {midtones}"
+            + (f" · стеля {c} від {k}" if c < 1.0 else "")
+            + (f" · герой {hero_plane}×{hero_pop}" if hero_pop > 0 else "")
+            + scale_note + jit_note
+            + " · тони p2/25/50/75/98: " + "/".join(f"{v:.2f}" for v in q))
+    hist = np.histogram(out[0], bins=10, range=(0.0, 1.0))[0] / out[0].size
+    bars = "".join(" ▁▂▃▄▅▆▇█"[min(8, int(p * 8 / max(hist.max(), 1e-6) + 0.5))] for p in hist)
+    print(f"[DepthGrade] {info}")
+    print(f"[DepthGrade] плани 0.0→1.0: |{bars}|  (hero_plane став на горб героя)")
+    return out, info
+
+
+# ───────────────────────── кеш кадрів для живого прев'ю ─────────────────────────
+
+_CACHE = OrderedDict()                # ключ ноди → (x16, motion16 | None, n_orig, stride)
+_CACHE_MAX = 2                        # скільки ключів тримаємо
+_CACHE_SIDE = 768                     # довша сторона кешу
+_CACHE_BYTES = 250 * 1024 * 1024      # більше — беремо кожен stride-й кадр
+_LATEST = {}                          # ключ → (gen, monotonic час запиту)
+_LOCK = threading.Lock()
+_STALE_SEC = 60.0                     # після такої паузи gen можна починати з нуля (перезавантажили сторінку)
+_WARM = 8                             # запас кадрів з кожного боку — розігрів deflicker
+
+
+def _resize_stack(a, side):
+    """Зменшити стек кадрів (n,h,w) так, щоб довша сторона була ≤ side. Збільшення немає."""
+    import cv2
+
+    h, w = int(a.shape[1]), int(a.shape[2])
+    s = min(1.0, side / float(max(h, w)))
+    if s >= 1.0:
+        return a
+    nh, nw = max(1, int(round(h * s))), max(1, int(round(w * s)))
+    return np.stack([cv2.resize(f, (nw, nh), interpolation=cv2.INTER_AREA) for f in a]).astype(np.float32)
+
+
+def _cache_put(key, x, motion, n):
+    """Кладе сирий депс (зменшений, float16) під ключ ноди. Найстаріший ключ викидається."""
+    xs = _resize_stack(x, _CACHE_SIDE).astype(np.float16)
+    ms = None
+    if motion is not None and motion.shape[0] == n:
+        ms = _resize_stack(motion, _CACHE_SIDE).astype(np.float16)
+    stride = max(1, -(-int(xs.nbytes) // _CACHE_BYTES))
+    if stride > 1:
+        xs = xs[::stride]
+        ms = ms[::stride] if ms is not None else None
+    with _LOCK:
+        _CACHE[key] = (xs, ms, int(n), int(stride))
+        _CACHE.move_to_end(key)
+        while len(_CACHE) > _CACHE_MAX:
+            old, _ = _CACHE.popitem(last=False)
+            _LATEST.pop(old, None)
+
+
+def _cache_clip_lohi(x16, p):
+    """Рівні всього кліпу з кешу тією ж логікою, що в Run: щоб прев'ю по фрагменту не міняло яскравість."""
+    flat = x16.reshape(-1)
+    if flat.size > 200_000:
+        flat = flat[np.random.default_rng(0).integers(0, flat.size, 200_000)]
+    flat = flat.astype(np.float32)
+    dist = (1.0 - flat) if p["depth_is"] == "near is white" else flat
+    return _lohi(dist, p["trim_near"], 100.0 - p["trim_far"])
+
+
+def _is_superseded(key, gen):
+    with _LOCK:
+        cur = _LATEST.get(key)
+    return cur is not None and cur[0] > gen
+
+
 # ───────────────────────── нода ─────────────────────────
 
 class SVKDepthGrade:
@@ -193,6 +423,7 @@ class SVKDepthGrade:
             "optional": {
                 "motion_guide": ("IMAGE", {"tooltip": "ВІДЕО: підключи СВОЄ оригінальне відео (ті самі кадри). Рух тоді рахується по картинці, а не по депсу — точніше, менше шлейфів"}),
             },
+            "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
@@ -203,130 +434,47 @@ class SVKDepthGrade:
     def grade(self, depth, depth_is, look, foreground_pop, blacks, whites, midtones,
               foreground_ceiling, ceiling_from, hero_plane, hero_pop, clarity, texture,
               smooth_banding, banding_edge, trim_far, trim_near, flip, levels_scope,
-              deflicker, motion_guard, motion_guide=None):
-        import cv2
-
+              deflicker, motion_guard, motion_guide=None, unique_id=None):
         x = depth.cpu().numpy().astype(np.float32)
         if x.ndim == 4:
             x = x[..., :3].mean(axis=3)
-        n, h, w = x.shape
+        n = x.shape[0]
         video = n > 1
         preview = _preview_payload(x)
+        preview["cache_key"] = str(unique_id) if unique_id is not None else ""
+        preview["frames_total"] = int(n)
 
-        # 1) ВІДСТАНЬ: 0 = найближче
-        dist = (1.0 - x) if depth_is == "near is white" else x
+        motion = None
+        if video and motion_guide is not None and motion_guide.shape[0] == n:
+            g = motion_guide.cpu().numpy().astype(np.float32)
+            motion = g[..., :3].mean(axis=3) if g.ndim == 4 else g
 
-        sw, sh, sc = _small_side(h, w)
-        small = np.stack([cv2.resize(dist[i], (sw, sh), interpolation=cv2.INTER_AREA) for i in range(n)])
+        progress = None
+        try:
+            from comfy.utils import ProgressBar
+            pbar = ProgressBar(_grade_steps(n, video, deflicker))
 
-        bw = fw = None
-        if video and deflicker > 0:
-            if motion_guide is not None and motion_guide.shape[0] == n:
-                g = motion_guide.cpu().numpy().astype(np.float32)
-                g = g[..., :3].mean(axis=3) if g.ndim == 4 else g
-                gs = [cv2.resize(g[i], (sw, sh), interpolation=cv2.INTER_AREA) for i in range(n)]
-            else:
-                gs = [_stretch(s, *_lohi(s, 1.0, 99.0)) for s in small]   # кожен кадр у свій діапазон — потоку так легше
-            bw, fw = _flows(gs)
+            def progress(k, _total):
+                try:
+                    pbar.update_absolute(k)
+                except Exception:
+                    pass
+        except Exception:
+            progress = None
 
-        # «до»: той самий кліп у тій самій шкалі, але ще без замка й без deflicker
-        jit_in = _jitter([_stretch(s, *_lohi(small, 1.0, 99.0)) for s in small], bw) if bw else None
+        p = dict(depth_is=depth_is, look=look, foreground_pop=foreground_pop, blacks=blacks,
+                 whites=whites, midtones=midtones, foreground_ceiling=foreground_ceiling,
+                 ceiling_from=ceiling_from, hero_plane=hero_plane, hero_pop=hero_pop,
+                 clarity=clarity, texture=texture, smooth_banding=smooth_banding,
+                 banding_edge=banding_edge, trim_far=trim_far, trim_near=trim_near,
+                 flip=flip, levels_scope=levels_scope, deflicker=deflicker, motion_guard=motion_guard)
+        out, info = _grade_array(x, p, motion=motion, progress=progress)
 
-        # 🔴 Тут був замок шкали (афінна підгонка кадру до сусіда уздовж потоку) — ПРИБРАНО
-        #    16.10.2026 після двох замірів на depth_ant_v3_00001: і ланцюжок, і «стабілізатор
-        #    траєкторії» ПОСИЛЮВАЛИ і тремтіння, і пульсацію (1.32 → 2.36). Глобального
-        #    «дихання» в DA3 після спільних рівнів майже нема, а підгонка вносить свій шум ±0.02.
-        #    Мерехтіння DA3 — ЛОКАЛЬНЕ, його гасить deflicker нижче.
-        scale_note = ""
-
-        # 3) РІВНІ по всьому кліпу або по кадру
-        clip_lohi = _lohi(dist, trim_near, 100.0 - trim_far) if (levels_scope == "whole clip" and video) else None
-
-        near_bias = 2.0 * (0.01 ** float(foreground_pop))   # 0 → 2.0 (лінійно), 1 → 0.02 (максимум)
-        bp = float(blacks)
-        wp = max(1.0 - float(whites), bp + 1e-3)
-        gamma = 2.0 ** (-float(midtones))
-        c, k = float(foreground_ceiling), float(ceiling_from)
-
-        out = np.empty_like(dist)
-        for i in range(n):
-            lohi = clip_lohi if clip_lohi is not None else _lohi(dist[i], trim_near, 100.0 - trim_far)
-            d = _stretch(dist[i], *lohi)
-
-            if look == "V2 volume":
-                v = 1.0 / (d + near_bias)
-                v = _stretch(v, 1.0 / (1.0 + near_bias), 1.0 / near_bias)
-            else:
-                v = 1.0 - d
-
-            v = np.clip((v - bp) / (wp - bp), 0.0, 1.0)
-            if gamma != 1.0:
-                v = np.power(v, gamma)
-
-            if hero_pop > 0:
-                s, p = float(hero_pop), float(hero_plane)
-                g0 = float(1.0 / (1.0 + np.exp(s * p)))
-                g1 = float(1.0 / (1.0 + np.exp(-s * (1.0 - p))))
-                v = ((1.0 / (1.0 + np.exp(-s * (v - p)))) - g0) / max(g1 - g0, 1e-6)
-                v = np.clip(v, 0.0, 1.0).astype(np.float32)
-
-            # СТЕЛЯ переднього плану: усе світліше за k м'яко лягає під c.
-            # c > k: плече з нахилом 1 у точці k (без зламу), найближче = c.
-            # c ≤ k: найближче ТЕМНІШЕ за героя — творчий «провал» переднього плану.
-            if c < 1.0 and k < 1.0:
-                m = v > k
-                t = (v[m] - k) / (1.0 - k)
-                if c > k:
-                    pw = (1.0 - k) / max(c - k, 1e-3)
-                    shape = 1.0 - np.power(1.0 - t, pw)
-                else:
-                    shape = t * t * (3.0 - 2.0 * t)
-                v[m] = k + (c - k) * shape
-
-            v = v.astype(np.float32)
-            if smooth_banding > 0:
-                r = max(3, int(round(min(v.shape) / 220.0)) | 1)
-                sm = cv2.bilateralFilter(v, -1, float(banding_edge), r)
-                v = v * (1.0 - smooth_banding) + sm * smooth_banding
-
-            if clarity > 0:
-                rad = int(max(4, min(v.shape) / 45))
-                base = _edge_base(v, rad)
-                v = np.clip(v + (v - base) * float(clarity) * 1.6, 0.0, 1.0)
-
-            if texture > 0:
-                blur = cv2.GaussianBlur(v, (0, 0), 2.0)
-                v = np.clip(v + (v - blur) * float(texture), 0.0, 1.0)
-
-            out[i] = (1.0 - v) if flip else v
-
-        # 4) DEFLICKER: вперед і назад уздовж руху, середнє — без запізнення й без шлейфу в один бік
-        if video and deflicker > 0:
-            st, gd = float(deflicker), float(motion_guard)
-            fwd = np.empty_like(out)
-            for t, acc in _temporal_pass(out, bw, st, gd, sc, range(n)):
-                fwd[t] = acc
-            for t, acc in _temporal_pass(out, fw, st, gd, sc, range(n - 1, -1, -1)):
-                fwd[t] = 0.5 * (fwd[t] + acc)
-            out = np.clip(fwd, 0.0, 1.0)
-
-        jit_note = ""
-        if jit_in is not None:
-            # «після»: вихід, зведений до лінійної шкали входу, — щоб криві грейду не міняли мірило
-            so = np.stack([cv2.resize(out[i], (sw, sh), interpolation=cv2.INTER_AREA) for i in range(n)])
-            jit_note = f" · тремтіння ×1000: вхід {jit_in:.1f} → вихід {_jitter(list(_stretch(so, *_lohi(so, 1.0, 99.0))), bw):.1f}"
-
-        q = np.percentile(out[0], [2, 25, 50, 75, 98])
-        info = (f"кадрів {n} · {look} pop {foreground_pop}"
-                + f" · blacks {blacks} whites {whites} midtones {midtones}"
-                + (f" · стеля {c} від {k}" if c < 1.0 else "")
-                + (f" · герой {hero_plane}×{hero_pop}" if hero_pop > 0 else "")
-                + scale_note + jit_note
-                + " · тони p2/25/50/75/98: " + "/".join(f"{v:.2f}" for v in q))
-        hist = np.histogram(out[0], bins=10, range=(0.0, 1.0))[0] / out[0].size
-        bars = "".join(" ▁▂▃▄▅▆▇█"[min(8, int(p * 8 / max(hist.max(), 1e-6) + 0.5))] for p in hist)
-        print(f"[DepthGrade] {info}")
-        print(f"[DepthGrade] плани 0.0→1.0: |{bars}|  (hero_plane став на горб героя)")
+        if unique_id is not None:
+            try:
+                _cache_put(str(unique_id), x, motion, n)
+            except Exception as e:
+                print(f"[DepthGrade] кеш для живого прев'ю не записано: {e}")
 
         tt = torch.from_numpy(np.ascontiguousarray(out, dtype=np.float32))
         return {"ui": {"svk_depth_preview": [preview]},
@@ -334,60 +482,182 @@ class SVKDepthGrade:
 
 
 class SVKDepthGradeView:
-    """Живе прев'ю для Depth Grade. Під'єднай вхід до виходу depth ноди Depth Grade:
-    після одного Run повзунки тієї ноди крутяться тут наживо, без перегенерації.
-    Кнопка «Відео» в прев'ю показує кадри результату (deflicker) з швидкістю fps."""
-    DESCRIPTION = ("Живе прев'ю Depth Grade: під'єднай до виходу depth, натисни Run один раз — "
-                   "далі тягай повзунки Depth Grade і бач зміну одразу. Піпетки й криві пишуть у ті самі повзунки. "
-                   "Режим «Відео» відтворює кадри результату з deflicker.")
+    """Калібрування кадру. Під'єднай вхід до виходу depth ноди Depth Grade: вихід віддає той самий депс далі,
+    тож ланцюжок не рветься. Панель у ноді — піпетки, До/після і криві пишуть у повзунки Depth Grade."""
+    DESCRIPTION = ("Калібрування кадру: під'єднай до виходу depth ноди Depth Grade. Вхід іде на вихід без змін, "
+                   "тож ланцюжок не рветься. Піпетки й криві пишуть у ті самі повзунки Depth Grade.")
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})}}
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("depth",)
+    FUNCTION = "view"
+    OUTPUT_NODE = True
+    CATEGORY = "StepVisionKit/Depth"
+
+    def view(self, depth):
+        return {"ui": {}, "result": (depth,)}
+
+
+class SVKDepthGradeVideoView:
+    """Живе прев'ю відео: фрагмент кліпу перераховується сам при зміні повзунків Depth Grade."""
+    DESCRIPTION = ("Живе прев'ю відео: під'єднай до виходу depth ноди Depth Grade, натисни Run один раз — "
+                   "далі прев'ю перераховується саме при зміні повзунків, у зменшеному розмірі. "
+                   "Clarity, texture і smooth_banding на малому розмірі видно слабше — точний вигляд дає Run.")
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})},
             "optional": {"fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 1.0,
-                                           "tooltip": "швидкість відтворення в прев'ю"})},
+                                           "tooltip": "швидкість відтворення прев'ю"})},
         }
 
-    RETURN_TYPES = ()
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("depth",)
     FUNCTION = "view"
     OUTPUT_NODE = True
     CATEGORY = "StepVisionKit/Depth"
 
     def view(self, depth, fps=24.0):
-        n = int(depth.shape[0])
-        if n <= 1:
-            # один кадр — саме прев'ю рахує браузер з мініатюри Depth Grade; тут нічого робити
-            return {"ui": {}}
-
-        import uuid
-        from PIL import Image
-        import folder_paths
-
-        h, w = int(depth.shape[1]), int(depth.shape[2])
-        k = max(1, -(-n // 400))                      # кожен k-й кадр, щоб лишилось ≤ 400
-        x = depth[::k].detach().float().cpu()
-        s = min(1.0, 512.0 / float(max(h, w)))        # довша сторона ≤ 512 — для прев'ю досить
-        if s < 1.0:
-            nh, nw = max(1, round(h * s)), max(1, round(w * s))
-            x = torch.nn.functional.interpolate(x.permute(0, 3, 1, 2), size=(nh, nw), mode="area")
-            x = x.permute(0, 2, 3, 1)
-        arr = (x.clamp(0.0, 1.0) * 255.0 + 0.5).to(torch.uint8).numpy()
-
-        out_dir = os.path.join(folder_paths.get_temp_directory(), "svk_view")
-        os.makedirs(out_dir, exist_ok=True)
-        prefix = uuid.uuid4().hex[:8]
-        frames = []
-        for j, fr in enumerate(arr):
-            if fr.shape[-1] == 1:
-                fr = np.repeat(fr, 3, axis=-1)
-            name = f"{prefix}_{j:04d}.jpg"
-            Image.fromarray(np.ascontiguousarray(fr[..., :3])).save(os.path.join(out_dir, name), quality=85)
-            frames.append({"filename": name, "subfolder": "svk_view", "type": "temp"})
-        return {"ui": {"svk_frames": frames, "svk_fps": [float(fps)], "svk_stride": [k]}}
+        return {"ui": {}, "result": (depth,)}
 
 
 class SVKDepthGradeLive(SVKDepthGrade):
     """Стара назва (16.10.2026): пульт переїхав у SVKDepthGradeView. Лишено, щоб
     збережені воркфлоу не червоніли; у пошуку не видно."""
     DEPRECATED = True
+
+
+
+# ───────────────────────── живе прев'ю: обчислення одного запиту ─────────────────────────
+
+_PREVIEW_SIZES = (256, 384, 512, 768)
+_SPECS = SVKDepthGrade.INPUT_TYPES()["required"]
+_PARAM_NAMES = [name for name in _SPECS if name != "depth"]
+_CHOICES = {name: tuple(_SPECS[name][0]) for name in _PARAM_NAMES if isinstance(_SPECS[name][0], list)}
+_DEFAULTS = {name: _SPECS[name][1]["default"] for name in _PARAM_NAMES}
+
+
+def _coerce_params(raw):
+    """Параметри з JSON → типи віджетів. Відсутній ключ = дефолт віджета."""
+    p = {}
+    for name in _PARAM_NAMES:
+        v = raw.get(name, _DEFAULTS[name])
+        if name in _CHOICES:
+            if v not in _CHOICES[name]:
+                raise ValueError(f"{name}: неочікуване значення {v!r}")
+            p[name] = v
+        elif name == "flip":
+            p[name] = bool(v)
+        else:
+            p[name] = float(v)
+    return p
+
+
+def _jpeg_b64(f):
+    from PIL import Image
+
+    u8 = (np.clip(f, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    buf = io.BytesIO()
+    Image.fromarray(np.ascontiguousarray(u8)).save(buf, format="JPEG", quality=85)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _preview_job(body):
+    """Один запит живого прев'ю: фрагмент з кешу → грейд тим самим ядром → до/після JPEG.
+
+    start/count — у кадрах оригінального кліпу. Відповідь: start — оригінальний індекс першого
+    повернутого кадру, count — скільки кадрів повернуто (при stride > 1 це кадри кешу, кожен = stride
+    оригінальних). Викликається в executor, тому синхронна.
+    """
+    t0 = time.perf_counter()
+    try:
+        key = str(body.get("key", ""))
+        gen = int(body.get("gen", 0))
+    except Exception as e:
+        return {"ok": False, "gen": 0, "reason": "error", "message": f"key/gen: {e}"}
+
+    def fail(reason, msg):
+        return {"ok": False, "gen": gen, "reason": reason, "message": msg}
+
+    try:
+        size = int(body.get("size", 384))
+        start = int(body.get("start", 0))
+        count = int(body.get("count", 48))
+        if size not in _PREVIEW_SIZES:
+            return fail("error", "size має бути 256, 384, 512 або 768")
+        if not 1 <= count <= 96:
+            return fail("error", "count має бути від 1 до 96")
+        raw = body.get("params")
+        if not isinstance(raw, dict):
+            return fail("error", "params має бути обʼєктом")
+        p = _coerce_params(raw)
+
+        with _LOCK:
+            entry = _CACHE.get(key)
+            if entry is not None:
+                _CACHE.move_to_end(key)
+                cur = _LATEST.get(key)
+                now = time.monotonic()
+                if cur is not None and gen < cur[0] and now - cur[1] < _STALE_SEC:
+                    return fail("superseded", "новіший запит уже йде")
+                _LATEST[key] = (gen, now)
+        if entry is None:
+            return fail("no_cache", "немає кадрів у кеші: натисни Run на Depth Grade один раз")
+
+        x16, m16, n_orig, stride = entry
+        nc = int(x16.shape[0])
+        start = min(max(start, 0), n_orig - 1)
+        end = min(n_orig, start + count) - 1
+        c0 = start // stride
+        c1 = max(c0 + 1, min(nc, end // stride + 1))
+        lo, hi = max(0, c0 - _WARM), min(nc, c1 + _WARM)
+
+        xs = _resize_stack(x16[lo:hi].astype(np.float32), size)
+        ms = _resize_stack(m16[lo:hi].astype(np.float32), size) if m16 is not None else None
+        clip = _cache_clip_lohi(x16, p) if (p["levels_scope"] == "whole clip" and n_orig > 1) else None
+
+        def cb(_k, _t):
+            if _is_superseded(key, gen):
+                raise _Superseded()
+
+        out, _info = _grade_array(xs, p, motion=ms, progress=cb, clip_lohi=clip)
+
+        k0 = c0 - lo
+        k1 = k0 + (c1 - c0)
+        after = out[k0:k1]
+        frag = xs[k0:k1]
+        lo_p, hi_p = np.percentile(frag, [1.0, 99.0])
+        before = np.clip((frag - lo_p) / max(float(hi_p - lo_p), 1e-6), 0.0, 1.0)
+        return {"ok": True, "gen": gen, "w": int(out.shape[2]), "h": int(out.shape[1]),
+                "start": int(c0 * stride), "count": int(c1 - c0), "frames_total": int(n_orig),
+                "after": [_jpeg_b64(f) for f in after],
+                "before": [_jpeg_b64(f) for f in before],
+                "ms": int(round((time.perf_counter() - t0) * 1000))}
+    except _Superseded:
+        return fail("superseded", "новіший запит уже йде")
+    except Exception as e:
+        return fail("error", str(e) or type(e).__name__)
+
+
+# ───────────────────────── маршрут ─────────────────────────
+
+try:
+    from server import PromptServer
+    from aiohttp import web as _web
+
+    @PromptServer.instance.routes.post("/svk/depth_grade/preview")
+    async def _svk_depth_grade_preview(request):
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("тіло запиту має бути обʼєктом")
+        except Exception as e:
+            return _web.json_response({"ok": False, "gen": 0, "reason": "error", "message": str(e)})
+        loop = asyncio.get_running_loop()
+        return _web.json_response(await loop.run_in_executor(None, _preview_job, body))
+except Exception as _e:
+    print(f"[DepthGrade] маршрут живого прев'ю не зареєстровано: {_e}")
