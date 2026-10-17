@@ -6,8 +6,11 @@ DA3Inference віддає DA3_GEOMETRY — float32 depth у мірилі мод�
   Receiver — геометрія → depth IMAGE для Depth Grade, float, без обрізання країв;
   Save 16/EXR — фінальний вихід у 16-біт PNG або float32 EXR.
 """
+import asyncio
 import json
 import os
+import subprocess
+import sys
 import time
 
 os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
@@ -25,18 +28,26 @@ def _raw_root():
     return os.path.join(folder_paths.get_output_directory(), RAW_DIR)
 
 
-def _raw_clips():
-    root = _raw_root()
-    if not os.path.isdir(root):
-        return []
-    return sorted(d for d in os.listdir(root) if os.path.isfile(os.path.join(root, d, "meta.json")))
+def _folder(path):
+    # шлях із поля вводу: «Copy as Pathname» у Finder, лапки, ~ — усе приймаємо; порожньо = output/svk_raw
+    path = path.strip().strip("'\"")
+    return os.path.abspath(os.path.expanduser(path)) if path else _raw_root()
 
 
-def _clip_dir(name):
-    # значення combo — недовірене: тільки ім'я теки, що справді лежить у svk_raw
-    if name not in _raw_clips():
-        raise ValueError(f"Raw Load: no saved depth '{name}' in output/{RAW_DIR}")
-    return os.path.join(_raw_root(), name)
+def _is_clip(d):
+    return os.path.isfile(os.path.join(d, "meta.json"))
+
+
+def _clip_dir(path):
+    # тека кліпу з Raw Save, або тека, куди Raw Save пише, — тоді найсвіжіший кліп у ній
+    d = _folder(path)
+    if _is_clip(d):
+        return d
+    clips = [os.path.join(d, c) for c in os.listdir(d)] if os.path.isdir(d) else []
+    clips = [c for c in clips if _is_clip(c)]
+    if not clips:
+        raise ValueError(f"Raw Load: no depth saved by Raw Save in {d}")
+    return max(clips, key=lambda c: os.path.getmtime(os.path.join(c, "meta.json")))
 
 
 def _write_exr(path, a):
@@ -52,14 +63,16 @@ def _read_exr(path):
 
 
 class SVKRawDepthSave:
-    DESCRIPTION = ("Saves raw DA3 geometry (float32 EXR per frame + source image) to output/svk_raw. "
+    DESCRIPTION = ("Saves raw DA3 geometry (float32 EXR per frame + source image) to a new subfolder of 'folder' "
+                   "(empty = output/svk_raw). "
                    "Run DA3 once, then grade from Raw Load as many times as you want.")
 
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
             "da3_geometry": ("DA3_GEOMETRY", {"tooltip": "output of DA3Inference"}),
-            "name": ("STRING", {"default": "depth", "tooltip": "folder name prefix in output/svk_raw"}),
+            "name": ("STRING", {"default": "depth", "tooltip": "prefix of the new subfolder: name_00001, name_00002…"}),
+            "folder": ("STRING", {"default": "", "tooltip": "where to save; empty = output/svk_raw"}),
         }}
 
     RETURN_TYPES = ()
@@ -67,10 +80,10 @@ class SVKRawDepthSave:
     OUTPUT_NODE = True
     CATEGORY = "StepVisionKit/Depth"
 
-    def save(self, da3_geometry, name):
+    def save(self, da3_geometry, name, folder):
         g = da3_geometry
         base = "".join(ch for ch in name.strip() if ch.isalnum() or ch in "-_") or "depth"
-        root = _raw_root()
+        root = _folder(folder)
         os.makedirs(root, exist_ok=True)
         i = 1
         while os.path.exists(os.path.join(root, f"{base}_{i:05d}")):
@@ -98,18 +111,20 @@ class SVKRawDepthSave:
                 meta[k] = g[k].cpu().float().tolist()
         with open(os.path.join(d, "meta.json"), "w") as fh:
             json.dump(meta, fh)
-        msg = f"output/{RAW_DIR}/{clip} · {n} frame(s) {meta['width']}×{meta['height']} float32"
+        msg = f"{d} · {n} frame(s) {meta['width']}×{meta['height']} float32"
         print(f"[SVK Raw Save] {msg}")
         return {"ui": {"text": [msg]}}
 
 
 class SVKRawDepthLoad:
     DESCRIPTION = ("Loads raw depth saved by Raw Save back as DA3_GEOMETRY (float32). "
-                   "Feed it to Depth Receiver, or to DA3 mesh / point cloud nodes. Press R to refresh the list.")
+                   "Point 'folder' at a saved clip, or at the folder Raw Save writes to — the newest clip there is taken. "
+                   "Feed it to Depth Receiver, or to DA3 mesh / point cloud nodes.")
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"raw": (_raw_clips() or [""], {"tooltip": f"folder in output/{RAW_DIR}"})}}
+        return {"required": {"folder": ("STRING", {"default": "",
+                                                   "tooltip": "clip folder, or the Raw Save folder (newest clip); empty = output/svk_raw"})}}
 
     RETURN_TYPES = ("DA3_GEOMETRY",)
     RETURN_NAMES = ("da3_geometry",)
@@ -117,14 +132,16 @@ class SVKRawDepthLoad:
     CATEGORY = "StepVisionKit/Depth"
 
     @classmethod
-    def IS_CHANGED(cls, raw):
+    def IS_CHANGED(cls, folder):
         try:
-            return os.path.getmtime(os.path.join(_clip_dir(raw), "meta.json"))
+            d = _clip_dir(folder)
         except ValueError:
             return ""
+        return d + str(os.path.getmtime(os.path.join(d, "meta.json")))
 
-    def load(self, raw):
-        d = _clip_dir(raw)
+    def load(self, folder):
+        d = _clip_dir(folder)
+        print(f"[SVK Raw Load] {d}")
         with open(os.path.join(d, "meta.json")) as fh:
             meta = json.load(fh)
         n = meta["frames"]
@@ -290,3 +307,32 @@ def loupe_payload(depth, uid, max_frames):
                        "relief": {"filename": f"{tag}_{f:05d}_relief.png", "subfolder": "", "type": "temp"}})
         print(f"[SVK Loupe] frame {f}: steps {pct:.3f}% of pixels")
     return {"width": int(a.shape[2]), "height": int(a.shape[1]), "frames_total": int(n), "frames": frames}
+
+
+def _pick_folder(start):
+    if sys.platform != "darwin":
+        return {"ok": False, "message": "Folder picker is macOS only — paste the path into 'folder'"}
+    script = ["-e", "activate"]
+    if start and os.path.isdir(start):
+        script += ["-e", f'set p to choose folder with prompt "Raw depth folder" default location (POSIX file {json.dumps(start)})']
+    else:
+        script += ["-e", 'set p to choose folder with prompt "Raw depth folder"']
+    script += ["-e", "POSIX path of p"]
+    r = subprocess.run(["osascript", *script], capture_output=True, text=True)
+    if r.returncode:
+        return {"ok": False, "cancelled": "-128" in r.stderr, "message": r.stderr.strip()}
+    return {"ok": True, "path": r.stdout.strip().rstrip("/")}
+
+
+try:
+    from server import PromptServer
+    from aiohttp import web as _web
+
+    @PromptServer.instance.routes.post("/svk/raw/pick_folder")
+    async def _svk_raw_pick_folder(request):
+        body = await request.json()
+        start = _folder(str(body.get("path", "")))
+        loop = asyncio.get_running_loop()
+        return _web.json_response(await loop.run_in_executor(None, _pick_folder, start))
+except Exception as _e:
+    print(f"[SVK Raw] folder picker route not registered: {_e}")
