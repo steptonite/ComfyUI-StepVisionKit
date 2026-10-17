@@ -201,6 +201,7 @@ class SVKSaveDepth16:
             "images": ("IMAGE",),
             "filename_prefix": ("STRING", {"default": "depth16/depth"}),
             "format": (["png 16-bit", "exr float32"], {"default": "png 16-bit"}),
+            "folder": ("STRING", {"default": "", "tooltip": "where to save; empty = ComfyUI output"}),
         }}
 
     RETURN_TYPES = ()
@@ -208,12 +209,12 @@ class SVKSaveDepth16:
     OUTPUT_NODE = True
     CATEGORY = "StepVisionKit/Depth"
 
-    def save(self, images, filename_prefix, format):
+    def save(self, images, filename_prefix, format, folder=""):
         if format not in ("png 16-bit", "exr float32"):
             raise ValueError(f"unknown format {format}")
         a = images.cpu().numpy().astype(np.float32)
         h, w = a.shape[1:3]
-        out_dir = folder_paths.get_output_directory()
+        out_dir = _folder(folder) if folder.strip() else folder_paths.get_output_directory()
         full, fname, counter, sub, _ = folder_paths.get_save_image_path(filename_prefix, out_dir, w, h)
         gray = a.shape[-1] == 1 or bool(np.all(a[..., 0] == a[..., 1]) and np.all(a[..., 0] == a[..., 2]))
         ui = []
@@ -222,13 +223,14 @@ class SVKSaveDepth16:
             if format == "png 16-bit":
                 file = f"{fname}_{counter:05}_.png"
                 cv2.imwrite(os.path.join(full, file), np.clip(px * 65535.0 + 0.5, 0, 65535).astype(np.uint16))
-                ui.append({"filename": file, "subfolder": sub, "type": "output"})
+                if not folder.strip():
+                    ui.append({"filename": file, "subfolder": sub, "type": "output"})
             else:
                 file = f"{fname}_{counter:05}_.exr"
                 _write_exr(os.path.join(full, file), px)
             counter += 1
         print(f"[SVK Save 16] {a.shape[0]} file(s) → {os.path.join(full, fname)}_*  ({format})")
-        return {"ui": {"images": ui}} if ui else {"ui": {"text": [f"{a.shape[0]} EXR → {sub}/{fname}"]}}
+        return {"ui": {"images": ui}} if ui else {"ui": {"text": [f"{a.shape[0]} file(s) → {os.path.join(full, fname)}_*"]}}
 
 
 # ───────────────────────── лупа 1:1 і карта сходинок ─────────────────────────

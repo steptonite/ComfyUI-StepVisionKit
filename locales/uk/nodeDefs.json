@@ -29,6 +29,12 @@
   },
   "SVKSaveDepth16": {
     "display_name": "Зберегти глибину 16 біт / EXR",
-    "description": "Вихід без 8-бітних сходинок: PNG 16 біт або EXR float32."
+    "description": "Вихід без 8-бітних сходинок: PNG 16 біт або EXR float32.",
+    "inputs": {
+      "folder": {
+        "name": "folder",
+        "tooltip": "куди зберігати; порожньо = output ComfyUI"
+      }
+    }
   }
 }
