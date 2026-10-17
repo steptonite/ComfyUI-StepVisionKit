@@ -1,0 +1,18 @@
+{
+  "SVKDepthReceiver": {
+    "display_name": "Приймач глибини (сира DA3 → float)",
+    "description": "Сира геометрія DA3 → глибина для Depth Grade, float32, близьке біле, нічого не обрізано."
+  },
+  "SVKRawDepthSave": {
+    "display_name": "Зберегти сиру глибину (EXR float32)",
+    "description": "Сира геометрія DA3 у output/svk_raw: DA3 рахується раз, грейд — скільки завгодно."
+  },
+  "SVKRawDepthLoad": {
+    "display_name": "Завантажити сиру глибину (EXR float32)",
+    "description": "Сира глибина з Raw Save назад як DA3_GEOMETRY. R — оновити список."
+  },
+  "SVKSaveDepth16": {
+    "display_name": "Зберегти глибину 16 біт / EXR",
+    "description": "Вихід без 8-бітних сходинок: PNG 16 біт або EXR float32."
+  }
+}

@@ -19,6 +19,7 @@
 from .lex.nodes_core import LexBoxesToBBOX, LexHUDBoxes, LexYOLODetect
 from .lex.depth_curve import LexDepthCurve
 from .lex.depth_grade import SVKDepthGrade, SVKDepthGradeLive, SVKDepthGradeView, SVKDepthGradeVideoView
+from .lex.depth_raw import SVKDepthReceiver, SVKRawDepthLoad, SVKRawDepthSave, SVKSaveDepth16
 from .lex.hud_sprite import LexHUDSprite
 
 # Термо-сторож: пауза при перегріві SoC (м'яка — всередині процесу, жорстка — окремий наглядач).
@@ -47,6 +48,10 @@ NODE_CLASS_MAPPINGS = {
     "SVKDepthGradeLive": SVKDepthGradeLive,
     "SVKDepthGradeView": SVKDepthGradeView,
     "SVKDepthGradeVideoView": SVKDepthGradeVideoView,
+    "SVKDepthReceiver": SVKDepthReceiver,
+    "SVKRawDepthSave": SVKRawDepthSave,
+    "SVKRawDepthLoad": SVKRawDepthLoad,
+    "SVKSaveDepth16": SVKSaveDepth16,
     **VK_DET, **VK_BOX, **VK_DRAW, **VK_OVL, **VK_MASK,
 }
 
@@ -60,6 +65,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SVKDepthGradeLive": "Depth Grade Live (стара, заміни на Depth Grade + Depth Grade View)",
     "SVKDepthGradeView": "Depth Grade View · кадр (калібрування)",
     "SVKDepthGradeVideoView": "Depth Grade View · відео (живе прев'ю)",
+    "SVKDepthReceiver": "Depth Receiver (raw DA3 → float depth)",
+    "SVKRawDepthSave": "Raw Depth Save (DA3 geometry → EXR float32)",
+    "SVKRawDepthLoad": "Raw Depth Load (EXR float32 → DA3 geometry)",
+    "SVKSaveDepth16": "Save Depth 16-bit / EXR",
     **VKD_DET, **VKD_BOX, **VKD_DRAW, **VKD_OVL, **VKD_MASK,
 }
 
@@ -68,6 +77,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 _SUB = {"LexHUDSprite": "HUD", "LexHUDBoxes": "HUD", "VKDrawBoxes": "HUD",
         "VKOverlayOnBoxes": "HUD", "VKCutByMask": "HUD",
         "LexDepthCurve": "Depth", "SVKDepthGrade": "Depth", "SVKDepthGradeLive": "Depth", "SVKDepthGradeView": "Depth", "SVKDepthGradeVideoView": "Depth",
+        "SVKDepthReceiver": "Depth", "SVKRawDepthSave": "Depth", "SVKRawDepthLoad": "Depth", "SVKSaveDepth16": "Depth",
         "LexYOLODetect": "Detect", "VKDetect": "Detect",
         "LexBoxesToBBOX": "Detect", "VKBoxesToBBOX": "Detect", "VKSelectBox": "Detect"}
 for _key, _cls in NODE_CLASS_MAPPINGS.items():

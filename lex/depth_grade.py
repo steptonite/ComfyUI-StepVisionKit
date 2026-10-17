@@ -27,6 +27,7 @@ import numpy as np
 import torch
 
 from .depth_curve import _lohi, _stretch, _edge_base
+from .depth_raw import loupe_payload
 
 
 # ───────────────────────── рух ─────────────────────────
@@ -559,7 +560,8 @@ class SVKDepthGradeView:
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})}}
+        return {"required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})},
+                "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("depth",)
@@ -567,8 +569,8 @@ class SVKDepthGradeView:
     OUTPUT_NODE = True
     CATEGORY = "StepVisionKit/Depth"
 
-    def view(self, depth):
-        return {"ui": {}, "result": (depth,)}
+    def view(self, depth, unique_id=None):
+        return {"ui": {"svk_loupe": [loupe_payload(depth, unique_id, 1)]}, "result": (depth,)}
 
 
 class SVKDepthGradeVideoView:
@@ -583,6 +585,7 @@ class SVKDepthGradeVideoView:
             "required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})},
             "optional": {"fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 1.0,
                                            "tooltip": "швидкість відтворення прев'ю"})},
+            "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -591,8 +594,8 @@ class SVKDepthGradeVideoView:
     OUTPUT_NODE = True
     CATEGORY = "StepVisionKit/Depth"
 
-    def view(self, depth, fps=24.0):
-        return {"ui": {}, "result": (depth,)}
+    def view(self, depth, fps=24.0, unique_id=None):
+        return {"ui": {"svk_loupe": [loupe_payload(depth, unique_id, 6)]}, "result": (depth,)}
 
 
 class SVKDepthGradeLive(SVKDepthGrade):
