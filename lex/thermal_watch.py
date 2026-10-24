@@ -33,7 +33,7 @@ CFG_RELOAD_S = 10.0         # як часто перечитувати thermal_c
 
 def _log(msg):
     try:
-        print("[Термо-сторож] " + msg, file=sys.stderr, flush=True)
+        print("[Thermal guard] " + msg, file=sys.stderr, flush=True)
     except Exception:
         pass
 
@@ -82,7 +82,7 @@ class _Watch:
         except ProcessLookupError:
             return False
         except Exception as e:
-            _log("сигнал %s не відправлено: %s" % (sig, e))
+            _log("signal %s not sent: %s" % (sig, e))
             return False
 
     # ── заморозка і розморожування ──
@@ -96,7 +96,7 @@ class _Watch:
         self.seq += 1
         self.th.write_state({"stopped": True, "since": self.freeze_t0, "t": t,
                              "seq": self.seq, "pid": self.target}, self.state_path)
-        _log("%.0f°C ≥ %.0f — ComfyUI (pid %d) заморожено, чекаю охолодження до %.0f°C"
+        _log("%.0f°C ≥ %.0f — ComfyUI (pid %d) frozen, waiting to cool down to %.0f°C"
              % (t, self.cfg["hard_at"], self.target, self.cfg["resume_at"]))
 
     def _resume(self, reason):
@@ -108,24 +108,24 @@ class _Watch:
         self.th.write_state({"stopped": False, "last_stop_s": secs, "seq": self.seq, "t": self.t_freeze,
                              "ended": time.time(), "reason": reason, "pid": self.target},
                             self.state_path)
-        _log("розморожено (%s) після %.0f с" % (reason, secs))
+        _log("unfrozen (%s) after %.0f s" % (reason, secs))
 
     def _tick(self):
         cfg = self.cfg
         t = self.th.read_max_c()
         if self.stopped:
             if t is None:
-                self._resume("датчик температури недоступний")
+                self._resume("temperature sensor unavailable")
             elif not cfg["enabled"]:
-                self._resume("гейт вимкнено")
+                self._resume("gate disabled")
             elif t <= cfg["resume_at"]:
-                self._resume("охолоджено до %.0f°C" % t)
+                self._resume("cooled down to %.0f°C" % t)
             elif time.time() - self.freeze_t0 >= MAX_FREEZE_S:
                 self.cap_latch = True
-                _log("ПОПЕРЕДЖЕННЯ: заморожено вже %.0f с, SoC %.0f°C — знімаю заморозку. "
-                     "Наступна заморозка лише після охолодження до %.0f°C"
+                _log("WARNING: already frozen for %.0f s, SoC %.0f°C — lifting the freeze. "
+                     "The next freeze only after cooling down to %.0f°C"
                      % (MAX_FREEZE_S, t, cfg["resume_at"]))
-                self._resume("стеля заморозки")
+                self._resume("freeze ceiling")
             else:
                 self.th.write_state({"stopped": True, "since": self.freeze_t0, "t": t,
                                      "seq": self.seq, "pid": self.target}, self.state_path)
@@ -142,7 +142,7 @@ class _Watch:
             if float(hold.get("until", 0) or 0) > time.time():
                 if self.hold_noted != hold.get("node"):
                     self.hold_noted = hold.get("node")
-                    _log("%.0f°C ≥ %.0f, але працює API-нода %s — заморозку пропускаю"
+                    _log("%.0f°C ≥ %.0f, but API node %s is running — skipping freeze"
                          % (t, cfg["hard_at"], self.hold_noted))
                 return
             self.hold_noted = None
@@ -151,7 +151,7 @@ class _Watch:
     def run(self):
         while True:
             if not self._target_alive():
-                _log("ComfyUI (pid %d) більше не живий — наглядач виходить" % self.target)
+                _log("ComfyUI (pid %d) is no longer alive — watcher exiting" % self.target)
                 return
             now = time.monotonic()
             if now - self.cfg_t >= CFG_RELOAD_S:
@@ -163,13 +163,13 @@ class _Watch:
     def release(self):
         """Останній рубіж: ComfyUI не лишається замороженим, що б не сталося."""
         if self.stopped:
-            self._resume("наглядач завершився")
+            self._resume("watcher exited")
         self._signal(signal.SIGCONT)
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Жорсткий запобіжник термо-сторожа StepVisionKit")
-    ap.add_argument("--pid", type=int, required=True, help="pid процесу ComfyUI")
+    ap = argparse.ArgumentParser(description="StepVisionKit thermal guard hard failsafe")
+    ap.add_argument("--pid", type=int, required=True, help="pid of the ComfyUI process")
     ap.add_argument("--config", default=None)
     ap.add_argument("--state", default=None)
     a = ap.parse_args(argv)
@@ -184,15 +184,15 @@ def main(argv=None):
         signal.signal(s, _on_signal)
     try:
         if th.read_max_c() is None:
-            _log("температуру не прочитати — наглядач не запущено")
+            _log("cannot read temperature — watcher not started")
             return 0
-        _log("наглядач за pid %d: заморозка від %.0f°C, розморожування до %.0f°C"
+        _log("watching pid %d: freeze at %.0f°C, unfreeze at %.0f°C"
              % (a.pid, w.cfg["hard_at"], w.cfg["resume_at"]))
         w.run()
     except SystemExit:
         pass
     except Exception as e:
-        _log("помилка наглядача: %s" % e)
+        _log("watcher error: %s" % e)
     finally:
         w.release()
     return 0

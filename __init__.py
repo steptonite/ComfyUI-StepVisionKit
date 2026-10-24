@@ -31,13 +31,14 @@ try:
     from .lex import thermal_guard as _svk_thermal_guard
     _svk_thermal_guard.install()
 except Exception as _e:
-    print(f"[Термо-сторож] не запущено: {_e}")
+    print(f"[Thermal guard] not started: {_e}")
 
 from .vk.nodes_boxes import NODES as VK_BOX, DISPLAY as VKD_BOX
 from .vk.nodes_detect import NODES as VK_DET, DISPLAY as VKD_DET
 from .vk.nodes_draw import NODES as VK_DRAW, DISPLAY as VKD_DRAW
 from .vk.nodes_mask import NODES as VK_MASK, DISPLAY as VKD_MASK
 from .vk.nodes_overlay import NODES as VK_OVL, DISPLAY as VKD_OVL
+from .media import NODES as IO_NODES, DISPLAY as IO_DISPLAY
 
 WEB_DIRECTORY = "./web"
 
@@ -61,14 +62,14 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LexYOLODetect": "YOLO Detect",
-    "LexBoxesToBBOX": "Boxes → BBOX (для SAM2)",
-    "LexHUDBoxes": "HUD Boxes (кути/підписи)",
-    "LexHUDSprite": "HUD Sprite (кастомна рамка PNG + дірка)",
-    "LexDepthCurve": "Depth Curve (DA3 → вигляд як V2)",
-    "SVKDepthGrade": "Depth Grade 🎚 (грейд глибини + антимерехтіння)",
-    "SVKDepthGradeLive": "Depth Grade Live (стара, заміни на Depth Grade + Depth Grade View)",
-    "SVKDepthGradeView": "Depth Grade View · кадр (калібрування)",
-    "SVKDepthGradeVideoView": "Depth Grade View · відео (живе прев'ю)",
+    "LexBoxesToBBOX": "Boxes → BBOX (for SAM2)",
+    "LexHUDBoxes": "HUD Boxes (corners/labels)",
+    "LexHUDSprite": "HUD Sprite (custom PNG frame + cutout)",
+    "LexDepthCurve": "Depth Curve (DA3 → V2 look)",
+    "SVKDepthGrade": "Depth Grade (grade + anti-flicker)",
+    "SVKDepthGradeLive": "Depth Grade Live (legacy)",
+    "SVKDepthGradeView": "Depth Grade View · Frame (calibration)",
+    "SVKDepthGradeVideoView": "Depth Grade View · Video (live preview)",
     "SVKDepthReceiver": "Depth Receiver (raw DA3 → float depth)",
     "SVKRawDepthSave": "Raw Depth Save (DA3 geometry → EXR float32)",
     "SVKRawDepthLoad": "Raw Depth Load (EXR float32 → DA3 geometry)",
@@ -86,6 +87,9 @@ _SUB = {"LexHUDSprite": "HUD", "LexHUDBoxes": "HUD", "VKDrawBoxes": "HUD",
         "SVKDepthReceiver": "Depth", "SVKRawDepthSave": "Depth", "SVKRawDepthLoad": "Depth", "SVKSaveDepth16": "Depth",
         "LexYOLODetect": "Detect", "VKDetect": "Detect",
         "LexBoxesToBBOX": "Detect", "VKBoxesToBBOX": "Detect", "VKSelectBox": "Detect"}
+NODE_CLASS_MAPPINGS.update(IO_NODES)
+NODE_DISPLAY_NAME_MAPPINGS.update(IO_DISPLAY)
+_SUB.update({k: "IO" for k in IO_NODES})
 for _key, _cls in NODE_CLASS_MAPPINGS.items():
     _cls.CATEGORY = f"StepVisionKit/{_SUB.get(_key, 'misc')}"
 

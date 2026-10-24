@@ -31,7 +31,7 @@ CACHE_DIR = os.path.join(CODE_DIR, "_cache")
 GRAD_DIR = os.path.join(CODE_DIR, "gradients")
 NODE_MAX_FRAMES = 8          # скільки кадрів батча тримає кеш ноди
 NODE_LONG_SIDE = 2144        # робоча роздільність рушія; кеш не більший
-NEED_RUN_MSG = "запусти граф раз, щоб превʼю взяло твій кадр"
+NEED_RUN_MSG = "run the graph once so the preview picks up your frame"
 
 
 class NeedRun(Exception):
@@ -210,16 +210,16 @@ def builtin_grads():
     except Exception:
         pass
     out += [
-        ("Жар", _hexpal([("#0b0604", 0), ("#7c0303", .35), ("#c54202", .65), ("#ffc9a0", 1)])),
-        ("Безодня", _hexpal([("#01091c", 0), ("#03035b", .35), ("#0025ac", .65), ("#5fe0e0", 1)])),
-        ("Спектр", _hexpal([("#000000", 0), ("#3a0ca3", .2), ("#0077ff", .4), ("#00d4a0", .55),
+        ("Ember", _hexpal([("#0b0604", 0), ("#7c0303", .35), ("#c54202", .65), ("#ffc9a0", 1)])),
+        ("Abyss", _hexpal([("#01091c", 0), ("#03035b", .35), ("#0025ac", .65), ("#5fe0e0", 1)])),
+        ("Spectrum", _hexpal([("#000000", 0), ("#3a0ca3", .2), ("#0077ff", .4), ("#00d4a0", .55),
                             ("#ffd000", .75), ("#ff3c00", .9), ("#ffffff", 1)])),
-        ("Чорний→червоний", _hexpal([("#000000", 0), ("#5a0000", .5), ("#ff2a00", 1)])),
+        ("Black→red", _hexpal([("#000000", 0), ("#5a0000", .5), ("#ff2a00", 1)])),
     ]
     try:
         import variants
         for i in range(1, 8):
-            out.append(("Палітра %d" % i, variants.jsonable_pal(variants.PALETTES[i])))
+            out.append(("Palette %d" % i, variants.jsonable_pal(variants.PALETTES[i])))
     except Exception:
         pass
     return out
@@ -228,7 +228,7 @@ def builtin_grads():
 def safe_grad_name(name):
     n = "".join(ch for ch in str(name) if ch.isalnum() or ch in "_- ").strip()
     if not n:
-        raise ValueError("порожнє імʼя")
+        raise ValueError("empty name")
     return n
 
 
@@ -236,7 +236,7 @@ def clean_pal(pal):
     out = sorted(([min(1.0, max(0.0, float(t))), [min(1.0, max(0.0, float(x))) for x in c[:3]]] for t, c in pal),
                  key=lambda s: s[0])
     if len(out) < 2 or any(len(s[1]) != 3 for s in out):
-        raise ValueError("палітра: потрібно ≥2 стопи з RGB")
+        raise ValueError("palette: at least 2 RGB stops are required")
     return out
 
 
@@ -276,7 +276,7 @@ class LookApi:
     # ---- допоміжне
     def _src_name(self, src):
         if src is None or src[0] == "npy":
-            return "кадр з графа"
+            return "frame from the graph"
         return src[1] if src[0] == "photo" else os.path.splitext(os.path.basename(src[1]))[0]
 
     def _src(self):
@@ -389,11 +389,11 @@ class LookApi:
         if path == "/api/state":
             st = self.state
             d = dict(spec=LP.spec_json(self.anim), groups=LP.groups_json(self.anim), anim=self.anim,
-                     extra_groups={"Превʼю": dict(icon=LP.GROUP_ICON.get("Превʼю", ""), hint=LP.GROUP_HINT.get("Превʼю", ""))},
+                     extra_groups={"Preview": dict(icon=LP.GROUP_ICON.get("Preview", ""), hint=LP.GROUP_HINT.get("Preview", ""))},
                      presets=LP.list_presets(), locked=sorted(LP.LOCKED),
                      preset_name=st["preset"], preset=LP.load_preset(st["preset"]))
             if self.node_id is not None:
-                d.update(photos=[], photo="", name="кадр з графа", image="", depth="", **self._node_info())
+                d.update(photos=[], photo="", name="frame from the graph", image="", depth="", **self._node_info())
             else:
                 src = st["src"]
                 d.update(photos=LP.photo_list(), photo=src[1] if src[0] == "photo" else "",
@@ -443,16 +443,16 @@ class LookApi:
             return self._j(200, dict(depth=float(np.median(win)), x=x, y=y, w=W, h=H))
         if path == "/api/load":
             if self.node_id is not None:
-                raise ValueError("у ноді кадр береться з входів image/depth")
+                raise ValueError("in the node, the frame comes from the image/depth inputs")
 
             def _chk(p, what):
                 p = os.path.abspath(os.path.expanduser(str(p or "").strip()))
                 if not os.path.isfile(p):
-                    raise ValueError("%s: файл не знайдено: %s" % (what, p))
+                    raise ValueError("%s: file not found: %s" % (what, p))
                 if not p.lower().endswith(IMG_EXT):
-                    raise ValueError("%s: розширення має бути %s" % (what, "/".join(e[1:] for e in IMG_EXT)))
+                    raise ValueError("%s: extension must be %s" % (what, "/".join(e[1:] for e in IMG_EXT)))
                 return p
-            image, depth = _chk(q.get("image"), "кадр"), _chk(q.get("depth"), "глибина")
+            image, depth = _chk(q.get("image"), "frame"), _chk(q.get("depth"), "depth")
             new = ("file", image, depth)
             R.reset()
             try:
@@ -468,7 +468,7 @@ class LookApi:
         if path == "/api/gradients/save":
             name = safe_grad_name(q["name"])
             if name.lower() in [n.lower() for n, _ in builtin_grads()]:
-                raise ValueError("«%s» — вбудований градієнт, збережи під іншим імʼям" % name)
+                raise ValueError("\"%s\" is a built-in gradient, save it under a different name" % name)
             os.makedirs(GRAD_DIR, exist_ok=True)
             p = os.path.join(GRAD_DIR, name + ".json")
             json.dump(dict(name=name, palette=clean_pal(q["palette"])), open(p, "w", encoding="utf-8"),
@@ -477,10 +477,10 @@ class LookApi:
         if path == "/api/gradients/delete":
             name = safe_grad_name(q["name"])
             if name.lower() in [n.lower() for n, _ in builtin_grads()]:
-                raise ValueError("вбудований градієнт видаляти не можна")
+                raise ValueError("a built-in gradient cannot be deleted")
             p = os.path.join(GRAD_DIR, name + ".json")
             if not os.path.isfile(p):
-                raise ValueError("нема такого користувацького градієнта")
+                raise ValueError("no such custom gradient")
             os.remove(p)
             return self._j(200, {"ok": True})
         if path == "/api/full":

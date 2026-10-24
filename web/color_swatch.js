@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { T } from "./svk_i18n.js";
 
 // Кнопка «обрати колір» біля текстових полів, у яких лежить hex.
 //
@@ -51,7 +52,7 @@ app.registerExtension({
                 this.widgets.splice(i + 1, 0, btn);
 
                 if (name === "tint") {
-                    const off = this.addWidget("button", "✕ без фарбування", null, () => {
+                    const off = this.addWidget("button", T("✕ no tint"), null, () => {
                         w.value = "";
                         app.graph.setDirtyCanvas(true, true);
                     });

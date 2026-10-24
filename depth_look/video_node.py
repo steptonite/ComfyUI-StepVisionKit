@@ -13,11 +13,11 @@ import look_params
 import depth_motion
 
 from .core import (SIZE_ORIGINAL, OUTPUT_SIZES, GRADE_TYPE, PREVIEW_SIDE, parse_output_size, check_inputs,
-                   params_from_grade, out_shape, watermark)
+                   legacy, validate_legacy, params_from_grade, out_shape, watermark)
 from .render_proc import tensors_to_numpy, make_progress, render, to_result, stage
 
-QUALITY_PREVIEW = "превʼю (швидко)"
-QUALITY_FINAL = "фінал"
+QUALITY_PREVIEW = "preview (fast)"
+QUALITY_FINAL = "final"
 _DEF = None
 
 
@@ -103,11 +103,15 @@ class DepthLookVideo:
     FUNCTION = "run"
     CATEGORY = "StepVisionKit/Depth"
 
+    @classmethod
+    def VALIDATE_INPUTS(cls, quality=None, output_size=None):
+        return validate_legacy(quality=(quality, [QUALITY_PREVIEW, QUALITY_FINAL]), output_size=(output_size, OUTPUT_SIZES))
+
     def run(self, image, depth, grade, fps, start_time, output_size, max_side, quality, preview_every,
             unique_id=None, fps_in=None, **anim):
         if fps_in is not None:                                 # сокет fps (напр. від Video Info) має перевагу над полем
             fps = float(fps_in)
-        preview = str(quality).startswith("прев")
+        preview = str(legacy(quality)).startswith("preview")
         g = grade
         params_from_grade(g)                                   # ранній зрозумілий виняток, якщо підключили не те
         stage(unique_id, "read", n=int(image.shape[0]))

@@ -8,6 +8,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import * as M from "./depth_grade_math.js";
+import { T, LANG } from "./svk_i18n.js";
 import {
     VIDEO, C, GAP, CTRL_H, MONO, TONE_KEYS, ensureStyles, h, place, setText, icon, btn, setIcon,
     presetRow, findSource, rawOf, paramValues, widgetOf, toneSig, registerPanel, unregisterPanel,
@@ -31,11 +32,11 @@ const TRACK_H = 16;      // доріжка кліпу, px
 const STATUS_H = 40;     // рядок статусу (смужка + текст + підказка), px
 const BAR_H = 2 * CTRL_H + 6;
 const ERR = C.err;
-const PLAY_TITLE = "Відтворити фрагмент по колу (швидкість — fps ноди)";
-const HINT = "Clarity / texture / смуги на малому прев'ю видно слабше — точно покаже Run.";
-const STILL_HINT = "Статика показує тон: рівні, криву, hero, стелю. Clarity, texture, smooth banding і deflicker видно в Програванні.";
-const EMPTY_NO_SRC = "Під'єднай depth від ноди Depth Grade";
-const EMPTY_NO_RUN = "Натисни Run один раз — далі прев'ю рахується саме, без Run.";
+const PLAY_TITLE = T("Loop the clip fragment (speed = node fps)");
+const HINT = T("Clarity / texture / banding look weaker in a small preview — Run shows them exactly.");
+const STILL_HINT = T("Still shows the tone: levels, curve, hero, ceiling. Clarity, texture, smooth banding and deflicker are visible in Playback.");
+const EMPTY_NO_SRC = T("Connect depth from the Depth Grade node");
+const EMPTY_NO_RUN = T("Press Run once — after that the preview computes itself, no Run needed.");
 
 function clampStart(s, total, count) {
     return Math.max(0, Math.min(Math.floor(s) || 0, Math.max(0, total - count)));
@@ -136,9 +137,9 @@ class VideoPanel {
         // ── рядок 1: перемикач режимів, Пуск/Пауза і лічильник; До/після, розмір, фрагмент праворуч
         const r1 = h("div");
         r1.className = "svk-row";
-        this.modeStill = btn("Статика", "Один кадр: тон рахується миттєво в браузері, без запитів на кожен повзунок",
+        this.modeStill = btn(T("Still"), T("One frame: the tone is computed instantly in the browser, no request per slider"),
             () => this.setMode("still"));
-        this.modePlay = btn("Програвання", "Фрагмент кліпу рахує сервер: Пуск/Пауза, швидкість — fps ноди",
+        this.modePlay = btn(T("Playback"), T("The server computes a clip fragment: Play/Pause, speed = node fps"),
             () => this.setMode("play"));
         const modeSeg = h("div");
         modeSeg.className = "svk-seg";
@@ -148,12 +149,12 @@ class VideoPanel {
         this.counter.className = "svk-num";
         const end = h("div");
         end.className = "svk-end";
-        this.cmp = icon("split", "До / після: ліва частина — вхід без грейду; лінію можна тягнути", () => this.toggleCompare());
-        this.sizeSel = makeSelect(SIZES.map((s) => [String(s), `${s} px`]), "Розмір прев'ю (довша сторона)",
+        this.cmp = icon("split", T("Before / after: the left part is the input without the grade; the line can be dragged"), () => this.toggleCompare());
+        this.sizeSel = makeSelect(SIZES.map((s) => [String(s), `${s} px`]), T("Preview size (long side)"),
             (v) => { this.setProp("svkPreviewSize", +v); this.queue(); });
-        this.fragSel = makeSelect(FRAGMENTS.map((n) => [String(n), `${n} кадрів`]), "Скільки кадрів у фрагменті",
+        this.fragSel = makeSelect(FRAGMENTS.map((n) => [String(n), T("{n} frames").replace("{n}", n)]), T("How many frames in the fragment"),
             (v) => { this.setProp("svkFragment", +v); this.queue(); });
-        this.curveBtn = icon("curve", "Криві: гістограма, крива і маркери Ч / Б / Г / С (у режимі Статика)", () => this.toggleCurve());
+        this.curveBtn = icon("curve", T("Curves: histogram, curve and B / W / H / F markers (Still mode)"), () => this.toggleCurve());
         end.append(this.cmp, this.curveBtn, this.sizeSel, this.fragSel);
         r1.append(modeSeg, this.playBtn, this.counter, end);
 
@@ -396,12 +397,12 @@ class VideoPanel {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ key: String(raw.cache_key), i: this.frame(), size: this.size() }),
             });
-            if (!res.ok) throw new Error(`сервер відповів ${res.status}`);
+            if (!res.ok) throw new Error(T("server replied {s}").replace("{s}", res.status));
             const j = await res.json();
             if (this.disposed || gen !== this.stillGen || !this.isStill()) return;
             if (!j.ok) {
                 if (j.reason === "no_cache") this.noCache = true;
-                else this.errMsg = j.message || "помилка обчислення";
+                else this.errMsg = j.message || T("computation error");
                 return;
             }
             const s = M.decodePreview(j);
@@ -444,13 +445,13 @@ class VideoPanel {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(body),
             });
-            if (!res.ok) throw new Error(`сервер відповів ${res.status}`);
+            if (!res.ok) throw new Error(T("server replied {s}").replace("{s}", res.status));
             const j = await res.json();
             if (this.disposed || this.isStill() || gen < this.appliedGen) return;
             if (!j.ok) {
                 if (j.reason === "superseded") return;
                 if (j.reason === "no_cache") this.noCache = true;
-                else this.errMsg = j.message || "помилка обчислення";
+                else this.errMsg = j.message || T("computation error");
                 return;
             }
             await this.apply(j, gen);
@@ -465,7 +466,7 @@ class VideoPanel {
     async apply(j, gen) {
         const [after, before] = await Promise.all([loadAll(j.after), loadAll(j.before)]);
         if (this.disposed || this.isStill() || gen < this.appliedGen) return;
-        if (!after.length || after.some((im) => !im)) throw new Error("кадри не декодувалися");
+        if (!after.length || after.some((im) => !im)) throw new Error(T("frames failed to decode"));
         this.appliedGen = gen;
         this.after = after;
         this.before = before;
@@ -639,8 +640,8 @@ class VideoPanel {
         if (!m || !this.hasImage()) { setText(this.counter, ""); return; }
         const n = this.isStill() ? 1 : this.after.length;
         setText(this.counter, m.total
-            ? `кадр ${m.start + this.vi + 1} з ${m.total}`
-            : `кадр ${this.vi + 1} з ${n}`);
+            ? T("frame {i} of {n}").replace("{i}", m.start + this.vi + 1).replace("{n}", m.total)
+            : T("frame {i} of {n}").replace("{i}", this.vi + 1).replace("{n}", n));
         this.placeTrack();
     }
 
@@ -816,7 +817,7 @@ class VideoPanel {
             if (!A) empty = EMPTY_NO_SRC;
             else if (!this.raw?.cache_key || this.noCache) empty = EMPTY_NO_RUN;
             else if (this.errMsg) empty = this.errMsg;
-            else empty = "Рахую прев'ю…";
+            else empty = T("Computing preview…");
         }
         setText(this.emptyTxt, empty);
         this.emptyTxt.style.color = !has && this.errMsg ? ERR : C.dim;
@@ -826,15 +827,15 @@ class VideoPanel {
         // рядок статусу
         let st = "";
         if (this.errMsg) st = this.errMsg;
-        else if (this.noCache) st = "Кеш застарів — натисни Run";
+        else if (this.noCache) st = T("Cache is stale — press Run");
         else if (has) {
             const m = this.meta;
             const px = `${Math.max(m.w, m.h)} px`;
             st = still
-                ? `${px} · статика`
-                : `${px} · ${n} кадрів · ${(m.ms / 1000).toFixed(2).replace(".", ",")} с`;
+                ? T("{px} · still").replace("{px}", px)
+                : T("{px} · {n} frames · {s} s").replace("{px}", px).replace("{n}", n).replace("{s}", LANG === "uk" ? (m.ms / 1000).toFixed(2).replace(".", ",") : (m.ms / 1000).toFixed(2));
         }
-        if (busy) st = st ? `${st} · рахую…` : "рахую…";
+        if (busy) st = st ? `${st} · ${T("computing…")}` : T("computing…");
         setText(this.statusLine, st);
         this.statusLine.style.color = this.errMsg ? ERR : C.dim;
         this.busyEl.style.visibility = busy ? "visible" : "hidden";
@@ -852,7 +853,7 @@ class VideoPanel {
             setIcon(this.playBtn, playState);
             this.iconState = playState;
         }
-        this.playBtn.title = this.playing ? "Пауза" : PLAY_TITLE;
+        this.playBtn.title = this.playing ? T("Pause") : PLAY_TITLE;
         this.playBtn.disabled = n < 2;
         this.cmp.disabled = !has;
         this.curveBtn.style.display = still ? "" : "none";

@@ -138,46 +138,46 @@ class LexHUDSprite:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boxes": (any_type, {"tooltip": "BOUNDING_BOX / BOXES / BBOX — вихід LexYOLODetect"}),
+                "boxes": (any_type, {"tooltip": "BOUNDING_BOX / BOXES / BBOX — output of LexYOLODetect"}),
                 "mode": (["largest", "index", "all"], {"default": "largest"}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 64}),
                 "margin_pct": ("FLOAT", {"default": 25.0, "min": -50.0, "max": 400.0, "step": 1.0,
-                               "tooltip": "HUD більший за бокс на N% — щоб рамка НЕ зрізала об'єкт"}),
+                               "tooltip": "make the HUD N% larger than the box so the frame does NOT clip the subject"}),
                 "margin_px": ("INT", {"default": 0, "min": -512, "max": 512}),
                 "aspect": (ASPECTS, {"default": "box",
-                           "tooltip": "🥇 'box' = рамка бере форму самого бокса YOLO: обличчя вертикальне — рамка вертикальна. Решта форсує пропорцію, коротша сторона добудовується (об'єкт не обрізається). 'png' = пропорція самого файлу рамки: не деформується взагалі"}),
+                           "tooltip": "'box' = the frame takes the shape of the YOLO box itself: a vertical face gives a vertical frame. The other options force a ratio and the shorter side is extended (the subject is never cropped). 'png' = the aspect of the frame file itself: no deformation at all"}),
                 "min_width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8,
-                              "tooltip": "мінімальна роздільність HUD у пікселях кадру"}),
+                              "tooltip": "minimum HUD size in frame pixels"}),
                 "min_height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8}),
                 "offset_x": ("INT", {"default": 0, "min": -4096, "max": 4096}),
                 "offset_y": ("INT", {"default": 0, "min": -4096, "max": 4096}),
                 "smooth": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 0.98, "step": 0.02,
-                           "tooltip": "0 = сирий бокс (стрибає), 0.5–0.8 = плавно веде. Не діє в режимі 'all'"}),
+                           "tooltip": "0 = raw box (jumpy), 0.5–0.8 = smooth follow. Has no effect in 'all' mode"}),
                 "nine_slice": ("INT", {"default": 0, "min": 0, "max": 512, "step": 4,
-                               "tooltip": "px кутів, які НЕ розтягувати. 0 = звичайний ресайз"}),
+                               "tooltip": "px of the corners that must NOT be stretched. 0 = plain resize"}),
                 "hole": (["none", "box", "hud_rect"], {"default": "box",
-                         "tooltip": "що вирізати з відео: нічого / сам бокс YOLO / весь прямокутник HUD"}),
+                         "tooltip": "what to cut out of the video: nothing / the YOLO box itself / the whole HUD rectangle"}),
                 "hole_feather": ("INT", {"default": 0, "min": 0, "max": 128}),
                 "alpha_mode": (["loadimage", "mask_direct", "luma", "opaque"], {"default": "loadimage",
-                               "tooltip": "loadimage = MASK з LoadImage (він інвертований!). mask_direct = MASK уже є альфою"}),
+                               "tooltip": "loadimage = MASK from LoadImage (it is inverted!). mask_direct = the MASK is already the alpha"}),
                 "label": ("STRING", {"default": "auto",
-                          "tooltip": "підпис над рамкою. 'auto' = клас від детектора (face/hand/person). Порожньо = без підпису. Будь-який інший текст = дослівно"}),
+                          "tooltip": "label above the frame. 'auto' = class from the detector (face/hand/person). Empty = no label. Any other text is used verbatim"}),
                 "label_scale": ("FLOAT", {"default": 1.0, "min": 0.2, "max": 4.0, "step": 0.1,
-                                "tooltip": "розмір підпису відносно висоти рамки"}),
+                                "tooltip": "label size relative to the frame height"}),
                 "label_conf": ("BOOLEAN", {"default": False,
-                               "tooltip": "дописати впевненість детектора: 'face 0.92'"}),
+                               "tooltip": "append the detector confidence: 'face 0.92'"}),
                 "tint": ("STRING", {"default": "",
-                         "tooltip": "перефарбувати рамку, hex #RRGGBB. Порожньо = лишити колір як є. Яскравість малюнка зберігається, змінюється лише відтінок"}),
+                         "tooltip": "recolor the frame, hex #RRGGBB. Empty = keep the original color. The artwork's brightness is preserved; only the hue changes"}),
                 "tint_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                  "tooltip": "0 = оригінальний колір, 1 = повністю у колір tint"}),
+                                  "tooltip": "0 = original color, 1 = fully the tint color"}),
                 "emit": (["composite", "hud_only", "both"], {"default": "composite",
-                         "tooltip": "🔴 ЯКІ ВИХОДИ РАХУВАТИ. Вимкнений вихід віддає заглушку 1×1 — якщо hud_rgb/hud_alpha «порожні», причина рівно тут.\n· composite = відео з рамкою і діркою (hud_* мертві)\n· hud_only = сама рамка на прозорому, у розмірі кадру (composite мертвий) — щоб фарбувати/композити HUD окремо від сірої глибини\n· both = і те, і те, вдвічі більше RAM.\nЦіна: кожен увімкнений вихід = ще один повний батч кадрів, 200 кадрів FullHD ≈ 5 ГБ НА КОЖЕН"}),
+                         "tooltip": "WHICH OUTPUTS TO COMPUTE. A disabled output returns a 1×1 placeholder — if hud_rgb/hud_alpha look empty, this is exactly why.\n· composite = video with the frame and cutout (hud_* are dead)\n· hud_only = just the frame on transparent, at frame size (composite is dead) — to grade/composite the HUD separately from the gray depth\n· both = both, twice the RAM.\nCost: every enabled output is one more full batch of frames, 200 FullHD frames ≈ 5 GB EACH"}),
                 "emit_box_mask": ("BOOLEAN", {"default": False,
-                                  "tooltip": "Біла ЗАЛИВКА прямокутника YOLO (не рамки HUD, а самого бокса), чорне навколо — рівно та зона, яку вирізає hole=box.\nНащо: подати далі як маску — вирізати обличчя з іншого шару, підкласти під нього свій солід, загнати в SAM2 чи Cut By Mask, зробити локальну корекцію тільки по обличчю.\nЯкщо нікуди не йде — тримай False: ще +1.7 ГБ на 200 кадрів FullHD"}),
+                                  "tooltip": "A white FILL of the YOLO rectangle (the box itself, not the HUD frame), black around it — exactly the area that hole=box cuts out.\nWhy: pass it on as a mask — cut the face out of another layer, put your own solid under it, feed SAM2 or Cut By Mask, or do a local correction on the face only.\nIf it is not connected anywhere, keep it False: another +1.7 GB per 200 FullHD frames"}),
             },
             "optional": {
-                "images": ("IMAGE", {"tooltip": "фон-відео. Без нього віддає лише HUD на прозорому"}),
-                "hud_image": ("IMAGE", {"tooltip": "кастомна рамка. Батч >1 = анімований HUD (циклом по кадрах)"}),
+                "images": ("IMAGE", {"tooltip": "background video. Without it only the HUD on transparent is returned"}),
+                "hud_image": ("IMAGE", {"tooltip": "custom frame. Batch >1 = animated HUD (looped over frames)"}),
                 "hud_mask": ("MASK",),
             },
         }
@@ -200,7 +200,7 @@ class LexHUDSprite:
         elif hud_image is not None:
             H, W = int(hud_image.shape[1]), int(hud_image.shape[2])
         else:
-            raise ValueError("LexHUDSprite: потрібен або images, або hud_image")
+            raise ValueError("LexHUDSprite: either images or hud_image is required")
 
         # --- спрайт: RGB + альфа
         sprite = None
@@ -357,9 +357,9 @@ class LexHUDSprite:
                 box_m_o[i] = torch.from_numpy(box_mask)
 
         gb = n_frames * H * W * 4 / 2**30
-        info = (f"кадрів {n_frames} · HUD намальовано {drawn} · аспект {aspect or 'box'} · "
-                f"дірка '{hole}' · 9-slice {nine_slice}px · smooth {smooth} · "
+        info = (f"frames {n_frames} · HUD drawn {drawn} · aspect {aspect or 'box'} · "
+                f"cutout '{hole}' · 9-slice {nine_slice}px · smooth {smooth} · "
                 f"emit={emit}{'+boxmask' if emit_box_mask else ''} ≈ "
-                f"{gb * (3 * want_comp + 3 * want_hud + want_comp + want_hud + emit_box_mask):.2f} ГБ виходів")
+                f"{gb * (3 * want_comp + 3 * want_hud + want_comp + want_hud + emit_box_mask):.2f} GB of outputs")
         print(f"[LexHUDSprite] {info}")
         return (comp, comp_a, hud_rgb_o, hud_a_o, box_m_o, info)

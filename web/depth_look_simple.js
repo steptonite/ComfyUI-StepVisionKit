@@ -4,7 +4,7 @@
 // Також тут: стрічка кадрів-превʼю відео-ноди і єдиний колір карток трьох нод. Стилі й токени - svk_ui.css.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { ICON, presetLabel, control, morePanel, moreSummary, keepWheel, onWheel, fitToNode, scrollHint, stageLine, snapUI, restoreUI } from "./svk_ui.js";
+import { ICON, presetLabel, control, morePanel, moreSummary, keepWheel, onWheel, fitToNode, scrollHint, stageLine, snapUI, restoreUI, migrateLegacyValues } from "./svk_ui.js";
 import { T } from "./svk_i18n.js";
 
 const SIMPLE = "DepthLookSimple";
@@ -744,6 +744,7 @@ app.registerExtension({
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
             const r = onConfigure?.apply(this, arguments);
+            migrateLegacyValues(this);
             this.color = NODE_COLOR; this.bgcolor = NODE_BG;
             if (name === SIMPLE && this.__svk) {
                 for (const w of this.widgets || []) if (w.name !== "svk_simple") hideWidget(w);

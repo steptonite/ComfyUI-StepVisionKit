@@ -1,6 +1,7 @@
 // Спільне для обох View Depth Grade: тема, класи кнопок і чіпів, іконки, пресети кривої,
 // реєстр відкритих панелей і пошук джерела за входом depth. Тонова математика — у depth_grade_math.js.
 import { app } from "../../scripts/app.js";
+import { T } from "./svk_i18n.js";
 
 export const NODE = "SVKDepthGrade";
 export const LIVE = "SVKDepthGradeLive";
@@ -117,18 +118,18 @@ export function btn(text, title = "", onclick = null) {
 
 // ── пресети кривої: клік ставить значення у віджети Depth Grade; ключів, яких нема в пресеті, не чіпаємо
 export const PRESETS = [
-    { id: "neutral", label: "Нейтрально", hint: "Вихідний вигляд: базовий об'єм, без зсуву рівнів, героя й стелі.",
+    { id: "neutral", label: T("Neutral"), hint: T("Original look: base volume, no level shift, no hero, no ceiling."),
         values: { foreground_pop: 0.45, blacks: 0, whites: 0, midtones: 0, hero_pop: 0, hero_plane: 0.5,
             foreground_ceiling: 1.0, ceiling_from: 0.75 } },
-    { id: "volume", label: "Об'єм", hint: "Сильніший об'єм: близьке різкіше відокремлюється, середні трохи світліші.",
+    { id: "volume", label: T("Volume"), hint: T("Stronger volume: near areas separate more sharply, midtones slightly brighter."),
         values: { foreground_pop: 0.65, midtones: 0.15 } },
-    { id: "soft", label: "М'яко", hint: "Слабший об'єм без S-кривої героя: м'який перехід між планами.",
+    { id: "soft", label: T("Soft"), hint: T("Weaker volume with no hero S-curve: soft transition between planes."),
         values: { foreground_pop: 0.25, midtones: 0.1, hero_pop: 0 } },
-    { id: "hero", label: "Герой", hint: "Сильніша S-крива навколо героя; положення героя не міняємо.",
+    { id: "hero", label: T("Hero"), hint: T("Stronger S-curve around the hero; the hero position stays put."),
         values: { hero_pop: 6 } },
-    { id: "press", label: "Притиснути передній", hint: "Стеля переднього плану нижча: близьке світлішає менше, не до білого.",
+    { id: "press", label: T("Press foreground"), hint: T("Lower foreground ceiling: near areas brighten less, not up to white."),
         values: { foreground_ceiling: 0.8, ceiling_from: 0.65 } },
-    { id: "deep", label: "Глибокий фон", hint: "Фон темніший: чорна точка піднята, середні тони опущені.",
+    { id: "deep", label: T("Deep background"), hint: T("Darker background: black point raised, midtones lowered."),
         values: { blacks: 0.06, midtones: -0.25 } },
 ];
 

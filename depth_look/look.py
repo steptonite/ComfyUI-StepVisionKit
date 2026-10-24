@@ -79,7 +79,7 @@ def prepare_depth(depth, guide_rgb, light_is_near=True, passes=((4, 1e-4), (10, 
     H, W = guide_rgb.shape[:2]
     dh, dw = d.shape[:2]
     if (dh > dw * 1.1 and W > H * 1.1) or (dw > dh * 1.1 and H > W * 1.1):
-        raise ValueError("depth %dx%d має іншу орієнтацію, ніж кадр %dx%d" % (dw, dh, W, H))
+        raise ValueError("depth %dx%d has a different orientation than the frame %dx%d" % (dw, dh, W, H))
     d = cv2.resize(d, (W, H), interpolation=cv2.INTER_CUBIC)   # трохи інше співвідношення сторін - ок, тягнемо до кадру
     g = cv2.cvtColor(guide_rgb.astype(np.float32), cv2.COLOR_RGB2GRAY)
     g = cv2.GaussianBlur(g, (0, 0), 1.0)

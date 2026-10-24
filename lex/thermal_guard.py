@@ -44,12 +44,12 @@ _job = None                 # None — задачі нема; інакше dict 
 
 def _log(msg):
     # logging, а не print: так рядок потрапляє і в консоль ComfyUI (панель LOGS), і в comfyui.log
-    logging.info("[Термо-сторож] " + msg)
+    logging.info("[Thermal guard] " + msg)
 
 
 def _fmt_s(s):
     s = int(round(s))
-    return "%d с" % s if s < 60 else "%d хв %02d с" % (s // 60, s % 60)
+    return "%d s" % s if s < 60 else "%d min %02d s" % (s // 60, s % 60)
 
 
 def _peak(t):
@@ -157,7 +157,7 @@ def _note_api(ct):
     global _api_noted
     if _api_noted != ct:
         _api_noted = ct
-        _log("працює API-нода %s — паузу й заморозку пропускаю, щоб не обірвати запит" % ct)
+        _log("API node %s is running — skipping pause and freeze so the request is not cut off" % ct)
 
 
 _api_warned = False     # у цій задачі вже сказали в UI, що паузу пропущено
@@ -179,7 +179,7 @@ def _api_guard(ct):
     if d is None or d["t"] is None or d["t"] < _cfg["pause_at"]:
         return
     _api_warned = True
-    _log("%.0f°C ≥ %.0f°C, але працює партнерська нода %s — паузу не ставлю, поки вона не відповість" % (
+    _log("%.0f°C ≥ %.0f°C, but partner node %s is running — not pausing until it responds" % (
         d["t"], _cfg["pause_at"], ct))
     _send("api_hold", t=d["t"], src=d["src"], node=ct, pause_at=_cfg["pause_at"])
 
@@ -236,7 +236,7 @@ def _pause(t, cfg, src="SoC"):
 
     resume_at = cfg["resume_at"]
     start = time.monotonic()
-    _log("%.0f°C (%s) ≥ %.0f — пауза до %.0f°C" % (t, src, cfg["pause_at"], resume_at))
+    _log("%.0f°C (%s) ≥ %.0f — pausing until %.0f°C" % (t, src, cfg["pause_at"], resume_at))
     interrupted = False
     last_t = now_t = t
     with _lock:
@@ -266,19 +266,19 @@ def _pause(t, cfg, src="SoC"):
     paused_s = round(time.monotonic() - start, 1)
     _count("pauses", paused_s)
     if interrupted:
-        _log("пауза перервана скасуванням після %.0f с" % paused_s)
+        _log("pause interrupted by cancellation after %.0f s" % paused_s)
         _send("ok", t=last_t, paused_s=paused_s, interrupted=True)
     elif now_t is None:
-        _log("температуру не прочитати під час паузи — продовжую (пауза %.0f с)" % paused_s)
+        _log("cannot read temperature during pause — resuming (paused %.0f s)" % paused_s)
         _send("ok", t=last_t, paused_s=paused_s)
     else:
-        _log("%.0f°C (%s) — продовжую (пауза %s)" % (last_t, src, _fmt_s(paused_s)))
+        _log("%.0f°C (%s) — resuming (paused %s)" % (last_t, src, _fmt_s(paused_s)))
         _send("ok", t=last_t, paused_s=paused_s)
 
 
 def _job_line(d, head):
     pk = "—" if d["peak"] is None else "%.0f°C" % d["peak"]
-    return "%s: пік %s · пауз %d (%s) · заморозок %d (%s)" % (
+    return "%s: peak %s · pauses %d (%s) · freezes %d (%s)" % (
         head, pk, d["pauses"], _fmt_s(d["paused_s"]), d["freezes"], _fmt_s(d["frozen_s"]))
 
 
@@ -292,7 +292,7 @@ def _job_begin():
                 "peak": t, "start": time.monotonic(), "beat": time.monotonic()}
         _total["jobs"] += 1
     cfg = _cfg
-    _log("задача почалась · %s · пауза з %.0f°C, продовжити з %.0f°C, заморозка з %.0f°C" % (
+    _log("job started · %s · pause at %.0f°C, resume at %.0f°C, freeze at %.0f°C" % (
         "—" if t is None else "%.0f°C (%s)" % (t, src), cfg["pause_at"], cfg["resume_at"], cfg["hard_at"]))
 
 
@@ -302,7 +302,7 @@ def _job_end():
         d, _job = _job, None
     if d is None:
         return
-    _log(_job_line(d, "задача завершена за %s" % _fmt_s(time.monotonic() - d["start"])))
+    _log(_job_line(d, "job finished in %s" % _fmt_s(time.monotonic() - d["start"])))
 
 
 def _patch():
@@ -355,7 +355,7 @@ def _patch():
             execute._svk_thermal = True
             PE.execute = execute
     except Exception as e:
-        _log("підсумок задач вимкнено: %s" % e)
+        _log("job summary disabled: %s" % e)
 
     # Хто з API-нод запущений і ще не відповів — навіть коли ComfyUI тим часом рахує інші ноди.
     try:
@@ -390,7 +390,7 @@ def _patch():
             _async_map_node_over_list._svk_thermal = True
             execution._async_map_node_over_list = _async_map_node_over_list
     except Exception as e:
-        _log("облік фонових API-нод вимкнено: %s" % e)
+        _log("background API-node tracking disabled: %s" % e)
 
 
 # ───────────────────────── фоновий звіт для UI ─────────────────────────
@@ -411,7 +411,7 @@ def _reporter_loop(seen):
                 now = time.monotonic()
                 if now - d["beat"] >= HEARTBEAT_S and _pausing == 0:
                     d["beat"] = now
-                    _log("%s · пік %s · задача йде %s · пауз %d, заморозок %d" % (
+                    _log("%s · peak %s · job running %s · pauses %d, freezes %d" % (
                         "—" if t is None else "%.0f°C" % t,
                         "—" if d["peak"] is None else "%.0f°C" % d["peak"],
                         _fmt_s(now - d["start"]), d["pauses"], d["freezes"]))
@@ -423,7 +423,7 @@ def _reporter_loop(seen):
                 seen = seq
                 secs = float(st["last_stop_s"])
                 _count("freezes", secs)
-                _log("ComfyUI був заморожений на %s (%s ≥ межі %.0f°C), продовжено" % (
+                _log("ComfyUI was frozen for %s (%s ≥ limit %.0f°C), resumed" % (
                     _fmt_s(secs), "—" if st.get("t") is None else "%.0f°C" % st["t"], _cfg["hard_at"]))
                 _send("was_frozen", seconds=secs, t=st.get("t"))
         except Exception:
@@ -444,7 +444,7 @@ def _activate():
         if _active:
             return True
         if thermal.read_max_c() is None:
-            _log("температуру не прочитати — вимкнено")
+            _log("cannot read temperature — disabled")
             return False
         _patch()
         _active = True
@@ -455,11 +455,11 @@ def _activate():
                      name="svk-thermal-reporter").start()
     cfg, det = _cfg, thermal.read_detail()
     t = None if det is None else det["t"]
-    _log("увімкнено · " + ("—" if det is None else det["src"]) + " %s · профіль «%s»: пауза з %.0f°C, продовжити з %.0f°C, заморозка з %.0f°C · наглядач %s" % (
+    _log("enabled · " + ("—" if det is None else det["src"]) + " %s · profile \"%s\": pause at %.0f°C, resume at %.0f°C, freeze at %.0f°C · watcher %s" % (
         "—" if t is None else "%.0f°C" % t,
         thermal.PROFILE_TITLES.get(cfg["profile"], cfg["profile"]),
         cfg["pause_at"], cfg["resume_at"], cfg["hard_at"],
-        "працює" if _watch_alive() else "НЕ запущено"))
+        "running" if _watch_alive() else "NOT running"))
     return True
 
 
@@ -509,7 +509,7 @@ def _register_routes():
         try:
             body = await request.json()
             if not isinstance(body, dict):
-                raise ValueError("тіло запиту має бути обʼєктом")
+                raise ValueError("request body must be an object")
         except Exception as e:
             return _web.json_response({"ok": False, "message": str(e)}, status=400)
         merged = dict(_cfg)
@@ -533,15 +533,15 @@ def install():
     try:
         _cfg = thermal.load_config()
     except Exception as e:
-        _log("конфіг не завантажено: %s" % e)
+        _log("config not loaded: %s" % e)
         return
     try:
         _register_routes()
     except Exception as e:
-        _log("маршрути статусу не зареєстровано: %s" % e)
+        _log("status routes not registered: %s" % e)
     if not _cfg["enabled"]:
         return
     try:
         _activate()
     except Exception as e:
-        _log("не запущено: %s" % e)
+        _log("not started: %s" % e)

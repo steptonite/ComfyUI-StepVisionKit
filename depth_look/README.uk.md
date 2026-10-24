@@ -1,3 +1,5 @@
+🇬🇧 English: [README.md](README.md)
+
 # Depth Look — ноди «Depth Look · повний / простий / відео» (StepVisionKit/Depth)
 
 Лінзовий блюр за глибиною + кольорова палітра, силует, серпанок, шлейф, halation, зерно.

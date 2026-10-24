@@ -9,6 +9,7 @@
 //   host.last          — останній результат M.grade (з полями v, lut, P) або null.
 import { C, MONO, h } from "./depth_grade_ui.js";
 import * as M from "./depth_grade_math.js";
+import { T } from "./svk_i18n.js";
 
 // розкладка кривих — однакова для обох View
 export const CURVE_H = 150;     // висота полотна кривих, px
@@ -28,9 +29,8 @@ export class CurvePanel {
         this.legend = h("div", `position:absolute;display:none;overflow:hidden;color:${C.dim};
             font-size:11px;line-height:1.4`);
         this.legend.innerHTML =
-            "Тягни: Ч / Б — чорне й біле · <b style='color:" + C.accent + "'>Г</b> — герой (вгору — сильніше) · " +
-            "С — звідки пригашувати, кружок справа — наскільки · порожнє місце вгору/вниз — середні тони. " +
-            "Подвійний клік — скинути. Clarity, texture, смуги й deflicker — після Run.";
+            T("Drag: B / W — black and white points · <b>H</b> — hero (up = stronger) · F — where dimming starts, the dot on the right — how much · empty space up/down — midtones. Double-click resets. Clarity, texture, banding and deflicker apply after Run.")
+                .replace("<b>", "<b style='color:" + C.accent + "'>");
 
         this.curve.addEventListener("pointerdown", (e) => this.onCurveDown(e));
         this.curve.addEventListener("pointermove", (e) => this.onCurveMove(e));
@@ -53,10 +53,10 @@ export class CurvePanel {
         const lv = (v) => M.levels(v, P);
         const hv = (v) => M.hero(M.levels(v, P), P);
         return [
-            { id: "black", label: "Ч", v: P.bp },
-            { id: "white", label: "Б", v: P.wp },
-            { id: "hero", label: "Г", v: M.invert(lv, P.heroP), on: P.heroS > 0, accent: true },
-            { id: "from", label: "С", v: M.invert(hv, P.k), on: P.c < 1 },
+            { id: "black", label: T("B"), v: P.bp },
+            { id: "white", label: T("W"), v: P.wp },
+            { id: "hero", label: T("H"), v: M.invert(lv, P.heroP), on: P.heroS > 0, accent: true },
+            { id: "from", label: T("F"), v: M.invert(hv, P.k), on: P.c < 1 },
         ];
     }
 
@@ -77,8 +77,8 @@ export class CurvePanel {
         }
         ctx.fillStyle = C.dim; ctx.font = `10px system-ui,sans-serif`;
         ctx.textBaseline = "alphabetic";
-        ctx.fillText("далеко", X(0) + 3, G.y1 + 11);
-        ctx.textAlign = "right"; ctx.fillText("близько", X(1) - 3, G.y1 + 11); ctx.textAlign = "left";
+        ctx.fillText(T("far"), X(0) + 3, G.y1 + 11);
+        ctx.textAlign = "right"; ctx.fillText(T("near"), X(1) - 3, G.y1 + 11); ctx.textAlign = "left";
         if (!g) return;
 
         // гістограма планів (вхід після об'єму): горб = план сцени
@@ -183,25 +183,25 @@ export class CurvePanel {
         const P = L.P;
         const d = this.drag;
         const host = this.host;
-        if (d.id === "black") { host.set("blacks", Math.min(v, P.wp - 0.02)); d.tip = `чорне від ${v.toFixed(2)}`; }
-        if (d.id === "white") { host.set("whites", 1 - Math.max(v, P.bp + 0.02)); d.tip = `біле від ${v.toFixed(2)}`; }
+        if (d.id === "black") { host.set("blacks", Math.min(v, P.wp - 0.02)); d.tip = T("black from {v}").replace("{v}", v.toFixed(2)); }
+        if (d.id === "white") { host.set("whites", 1 - Math.max(v, P.bp + 0.02)); d.tip = T("white from {v}").replace("{v}", v.toFixed(2)); }
         if (d.id === "hero") {
             host.set("hero_plane", M.levels(v, P));
             const pop = Math.min(14, Math.max(0, d.pop + (d.y - p.y) / 6));
             host.set("hero_pop", pop);
-            d.tip = `герой ${M.levels(v, P).toFixed(2)} · сила ${pop.toFixed(1)}`;
+            d.tip = T("hero {h} · power {p}").replace("{h}", M.levels(v, P).toFixed(2)).replace("{p}", pop.toFixed(1));
         }
         if (d.id === "from") {
             const k = M.hero(M.levels(v, P), P);
             host.set("ceiling_from", k);
             if ((host.widget("foreground_ceiling")?.value ?? 1) >= 1) host.set("foreground_ceiling", k + 0.3 * (1 - k));
-            d.tip = `пригашувати від ${k.toFixed(2)}`;
+            d.tip = T("dim from {k}").replace("{k}", k.toFixed(2));
         }
-        if (d.id === "ceil") { host.set("foreground_ceiling", o); d.tip = `стеля ${o.toFixed(2)}`; }
+        if (d.id === "ceil") { host.set("foreground_ceiling", o); d.tip = T("ceiling {o}").replace("{o}", o.toFixed(2)); }
         if (d.id === "mid") {
             const m = Math.min(2, Math.max(-2, d.mid + (d.y - p.y) / 60));
             host.set("midtones", m);
-            d.tip = `середні тони ${m >= 0 ? "+" : ""}${m.toFixed(2)}`;
+            d.tip = T("midtones {m}").replace("{m}", (m >= 0 ? "+" : "") + m.toFixed(2));
         }
         host.schedule();
     }

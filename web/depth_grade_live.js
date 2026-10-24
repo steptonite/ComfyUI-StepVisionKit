@@ -7,6 +7,7 @@ import {
     resetWidget, resetAllOf, scheduleViews, registerPanel, unregisterPanel, setWidgetValue,
 } from "./depth_grade_ui.js";
 import { CurvePanel, CURVE_H, LEGEND_COL, LEGEND_ROW, SIDE_W, ROW_GAP } from "./depth_grade_curve.js";
+import { T } from "./svk_i18n.js";
 
 // Depth Grade: ноди і спільна тонова математика.
 //  • SVKDepthGrade (нода A) — повні повзунки, «Скинути все», меню правої кнопки. Після Run
@@ -26,10 +27,10 @@ const START_W = 460;     // стартова ширина ноди B
 const BAR_H = 2 * CTRL_H + 6;   // два рядки панелі + проміжок
 
 const TOOLS = [
-    { id: "hero", label: "Герой", hint: "клікни на головний об'єкт — його об'єм підсилиться" },
-    { id: "dim", label: "Пригасити", hint: "клікни на те, що спереду заважає, — воно й усе ближче стане сірим" },
-    { id: "black", label: "Чорне", hint: "клікни на фон — він і все далі піде в чорне" },
-    { id: "white", label: "Біле", hint: "клікни на близьке — воно й усе ближче стане білим" },
+    { id: "hero", label: T("Hero"), hint: T("click the main subject — its volume gets boosted") },
+    { id: "dim", label: T("Dim"), hint: T("click what is in the way up front — it and everything nearer turns gray") },
+    { id: "black", label: T("Black"), hint: T("click the background — it and everything farther goes to black") },
+    { id: "white", label: T("White"), hint: T("click something near — it and everything nearer turns white") },
 ];
 
 // декодування ліниве, з кешем за ідентичністю payload (новий Run = новий об'єкт)
@@ -75,7 +76,7 @@ class ViewPanel {
         r1.className = "svk-row";
         const pick = h("div");
         pick.className = "svk-seg";
-        const lbl = h("span", "", "Піпетка");
+        const lbl = h("span", "", T("Eyedropper"));
         lbl.className = "svk-lbl";
         this.toolBtns = {};
         for (const t of TOOLS) {
@@ -85,14 +86,14 @@ class ViewPanel {
         }
         const end = h("div");
         end.className = "svk-end";
-        this.cmp = icon("split", "До / після: тримай кнопку — покаже вхід без грейду");
+        this.cmp = icon("split", T("Before / after: hold the button to show the input without the grade"));
         const on = () => { this.compare = true; this.schedule(); };
         const off = () => { this.compare = false; this.schedule(); };
         this.cmp.onpointerdown = on;
         this.cmp.onpointerup = off;
         this.cmp.onpointerleave = off;
-        this.curveBtn = icon("curve", "Криві: гістограма, крива і маркери Ч / Б / Г / С", () => this.toggleCurve());
-        this.resetBtn = icon("reset", "Скинути всі повзунки Depth Grade до стандартних",
+        this.curveBtn = icon("curve", T("Curves: histogram, curve and B / W / H / F markers"), () => this.toggleCurve());
+        this.resetBtn = icon("reset", T("Reset all Depth Grade sliders to defaults"),
             () => { if (this.A) resetAllOf(this.A); });
         end.append(this.cmp, this.curveBtn, this.resetBtn);
         r1.append(lbl, pick, end);
@@ -288,8 +289,8 @@ class ViewPanel {
         const row = !!m && ar < 0.95 && (this.showCurve || scrub);   // портрет + криві/кадри — збоку
 
         setText(this.emptyTxt, this.A
-            ? "Натисни Run один раз. Далі тягай повзунки Depth Grade — тут видно одразу, без перегенерації. Clarity, texture, смуги й deflicker видно лише після Run."
-            : "Під'єднай вхід depth до виходу depth ноди Depth Grade");
+            ? T("Press Run once. Then drag the Depth Grade sliders — the result shows here instantly, no regeneration. Clarity, texture, banding and deflicker only show after Run.")
+            : T("Connect the depth input to the depth output of the Depth Grade node"));
         this.empty.style.display = m ? "none" : "flex";
         this.stage.style.display = m ? "block" : "none";
         this.scrub.style.display = scrub ? "flex" : "none";
@@ -347,7 +348,7 @@ class ViewPanel {
         const ki = Math.min(this.ki, p.keys.length - 1);
         const g = M.grade(p, w, ki);
         const key = p.keys[ki];
-        if (p.keys.length > 1) setText(this.scrubLbl, `кадр ${key.i + 1} з ${p.frames}`);
+        if (p.keys.length > 1) setText(this.scrubLbl, T("frame {i} of {n}").replace("{i}", key.i + 1).replace("{n}", p.frames));
         this.last = g;
         const { w: W, h: H } = p;
         const ctx = this.view.getContext("2d");
@@ -393,7 +394,7 @@ class ViewPanel {
         if (!s) return;
         this.hover = s;
         this.readout.style.display = "";
-        this.readout.textContent = `тон ${s.v.toFixed(2)} → ${s.o.toFixed(2)}`;
+        this.readout.textContent = T("tone {v} → {o}").replace("{v}", s.v.toFixed(2)).replace("{o}", s.o.toFixed(2));
         if (this.tool) this.schedule();
     }
 
@@ -423,7 +424,7 @@ function registerSource(nodeType) {
     const onCreated = nodeType.prototype.onNodeCreated;
     nodeType.prototype.onNodeCreated = function () {
         const r = onCreated?.apply(this, arguments);
-        const rb = this.addWidget("button", "↺ Скинути все до стандартних", null, () => resetAllOf(this));
+        const rb = this.addWidget("button", T("↺ Reset all to defaults"), null, () => resetAllOf(this));
         rb.serialize = false;
         // будь-яка зміна тонового повзунка — перемалювати всі ноди-перегляди
         for (const w of this.widgets || []) {
@@ -452,7 +453,7 @@ function registerSource(nodeType) {
         const r = extra?.apply(this, arguments);
         const defaults = getDefaults();
         const changed = (this.widgets || []).filter((w) => w.name in defaults && w.value !== defaults[w.name]);
-        options.push(null, { content: "↺ Скинути все до стандартних", callback: () => resetAllOf(this) });
+        options.push(null, { content: T("↺ Reset all to defaults"), callback: () => resetAllOf(this) });
         for (const w of changed) {
             const cur = typeof w.value === "number" ? +w.value.toFixed(3) : w.value;
             options.push({ content: `↺ ${w.name}: ${cur} → ${defaults[w.name]}`,

@@ -2,7 +2,7 @@
 // (той самий tune.html, що й автономний тюнер). Параметри iframe -> віджет params_json (зберігається у workflow).
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { ICON, control, morePanel, keepWheel, stageLine, snapUI, restoreUI } from "./svk_ui.js";
+import { ICON, control, morePanel, keepWheel, stageLine, snapUI, restoreUI, migrateLegacyValues } from "./svk_ui.js";
 import { T } from "./svk_i18n.js";
 
 const NODE = "DepthLook";
@@ -18,8 +18,8 @@ const PANELS = new Set();          // {node, frame}
 // Старий порядок widgets_values (до 11 значень); у новому fps/start_time нема, тож значення зсуваються.
 const OLD_ORDER = ["preset", "clean_depth", "depth_light_is_near", "overrides", "palette", "fps", "start_time",
                    "params_json", "max_side", "depth_levels", "mode"];
-const NEW_DEFAULTS = { output_size: "як оригінал", max_side: 0, depth_levels: "clip",
-                       mode: "налаштування (швидко, 720)", overrides: "{}", palette: "", params_json: "" };
+const NEW_DEFAULTS = { output_size: "original", max_side: 0, depth_levels: "clip",
+                       mode: "tune (fast, 720)", overrides: "{}", palette: "", params_json: "" };
 function migrateOld(node, info) {
     const v = info?.widgets_values;
     // старий формат: на місці fps (індекс 5) і start_time (6) числа; у новому на 5-му depth_levels (рядок)
@@ -267,6 +267,7 @@ app.registerExtension({
         nodeType.prototype.onConfigure = function (info) {
             const r = onConfigure?.apply(this, arguments);
             migrateOld(this, info);
+            migrateLegacyValues(this);
             hideAll(this);
             startPanel(this);
             return r;

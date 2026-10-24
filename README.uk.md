@@ -1,3 +1,5 @@
+🇬🇧 English: [README.md](README.md)
+
 # StepVisionKit
 
 Детекція, трекінг, HUD-композ і крива глибини для **відео** в ComfyUI.

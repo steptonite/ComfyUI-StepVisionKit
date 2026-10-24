@@ -75,9 +75,16 @@ export function moreSummary(n) {
 }
 
 // людські назви луків замість імен файлів; новий пресет без запису тут - імʼя файлу без префіксів
-const PRESET_LABELS = { "look_v1": T("Look v1"), "test_grade": T("Test"), "00_оригінал": T("Original") };
+const PRESET_LABELS = { "look_v1": T("Look v1"), "test_grade": T("Test"), "00_original": T("Original") };
 export function presetLabel(name) {
     return PRESET_LABELS[name] || String(name).replace(/^\d+_/, "").replace(/^look_/, "").replace(/_/g, " ");
+}
+
+// значення combo до перекладу (жовтень 2026) -> нові; сервер приймає старі теж (depth_look/core.py LEGACY)
+const LEGACY_VALUES = { "як оригінал": "original", "налаштування (швидко, 720)": "tune (fast, 720)", "повний рендер": "full render",
+                        "превʼю (швидко)": "preview (fast)", "фінал": "final", "00_оригінал": "00_original" };
+export function migrateLegacyValues(node) {
+    for (const w of node.widgets || []) if (typeof w.value === "string" && Object.hasOwn(LEGACY_VALUES, w.value)) w.value = LEGACY_VALUES[w.value];
 }
 
 // ---- контроли, привʼязані до нативного віджета (його значення йде у workflow і в Run)

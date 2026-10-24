@@ -24,13 +24,13 @@ import look_params  # noqa: E402
 import look_api  # noqa: E402
 from .core import (DEFAULT_PRESET, _EXTRA_KEYS, parse_palette, build_preset, _params_from_json,  # noqa: E402,F401
                    _work_size, _Lazy, apply_numpy, check_inputs, watermark, SIZE_ORIGINAL, OUTPUT_SIZES,
-                   GRADE_TYPE, parse_output_size, resolve_params, static_params, make_grade, out_shape)
+                   GRADE_TYPE, parse_output_size, legacy, validate_legacy, resolve_params, static_params, make_grade, out_shape)
 from .render_proc import (_interrupted, _render_subproc, tensors_to_numpy, make_progress, stage,  # noqa: E402,F401
                           render as _render, to_result)
 
 
-MODE_TUNE = "налаштування (швидко, 720)"
-MODE_FULL = "повний рендер"
+MODE_TUNE = "tune (fast, 720)"
+MODE_FULL = "full render"
 TUNE_SIDE = 720
 
 
@@ -70,11 +70,17 @@ class DepthLook:
     FUNCTION = "run"
     CATEGORY = "StepVisionKit/Depth"
 
+    @classmethod
+    def VALIDATE_INPUTS(cls, preset=None, output_size=None, mode=None):
+        return validate_legacy(preset=(preset, look_params.list_presets()), output_size=(output_size, OUTPUT_SIZES),
+                               mode=(mode, [MODE_TUNE, MODE_FULL]))
+
     def run(self, image, depth, preset, clean_depth, depth_light_is_near, grade=None, output_size=SIZE_ORIGINAL,
             max_side=0, depth_levels="clip", mode=MODE_FULL, overrides="{}", palette="", params_json="",
             fps=None, start_time=None, unique_id=None):
         # fps/start_time - лише щоб API-запити зі старих workflow не падали: у статичній ноді їх нема (time = 0)
         frames, dep = tensors_to_numpy(image, depth)
+        preset, output_size, mode = legacy(preset), legacy(output_size), legacy(mode)
         full = (mode == MODE_FULL)
         if not full:                                       # швидкий прогін: look на ≤720, назад до рідного розміру
             max_side = min(int(max_side), TUNE_SIDE) if int(max_side or 0) > 0 else TUNE_SIDE

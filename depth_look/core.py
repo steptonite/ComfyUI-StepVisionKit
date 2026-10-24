@@ -20,11 +20,27 @@ import depth_motion  # noqa: E402
 DEFAULT_PRESET = "look_v1"
 _EXTRA_KEYS = {"vp_x", "vp_y", "shift_x", "shift_y", "palette"}
 
-# фінальний розмір рендеру (довга сторона, px). «як оригінал» = розмір входу; max_side - окремо, робоча роздільність
-SIZE_ORIGINAL = "як оригінал"
+# фінальний розмір рендеру (довга сторона, px). "original" = розмір входу; max_side - окремо, робоча роздільність
+SIZE_ORIGINAL = "original"
 OUTPUT_SIZES = [SIZE_ORIGINAL, "3840", "2560", "1920", "1440", "1080", "720"]
 PREVIEW_SIDE = 480            # довга сторона превʼю відео-ноди
 GRADE_TYPE = "DL_GRADE"       # тип сокета між нодами (звичайний dict)
+
+# значення combo до перекладу (жовтень 2026): старі workflow і API-запити несуть їх далі -> мапимо на нові
+LEGACY = {"як оригінал": SIZE_ORIGINAL, "налаштування (швидко, 720)": "tune (fast, 720)", "повний рендер": "full render",
+          "превʼю (швидко)": "preview (fast)", "фінал": "final", **look_params.LEGACY_PRESETS}
+
+
+def legacy(v):
+    return LEGACY.get(v, v) if isinstance(v, str) else v
+
+
+def validate_legacy(**fields):
+    """Для VALIDATE_INPUTS: name=(значення, дозволені). Старе значення з LEGACY - теж ок."""
+    for name, (v, allowed) in fields.items():
+        if v is not None and v not in allowed and legacy(v) not in allowed:
+            return "%s: %r is not one of %s" % (name, v, ", ".join(map(str, allowed)))
+    return True
 
 
 def parse_palette(s):
@@ -92,7 +108,8 @@ def _defaults():
 
 
 def parse_output_size(v):
-    """«як оригінал» / '1920' / 1920 -> довга сторона в px (0 = як вхід)."""
+    """"original" / '1920' / 1920 -> довга сторона в px (0 = як вхід)."""
+    v = legacy(v)
     if v is None or v == SIZE_ORIGINAL:
         return 0
     try:

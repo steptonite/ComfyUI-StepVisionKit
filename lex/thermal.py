@@ -36,7 +36,7 @@ PROFILES = {
     "stand": {"pause_at": 95.0, "resume_at": 85.0, "hard_at": 100.0},   # з підставкою
     "bare": {"pause_at": 90.0, "resume_at": 80.0, "hard_at": 97.0},     # без підставки
 }
-PROFILE_TITLES = {"stand": "з підставкою", "bare": "без підставки", "custom": "свій"}
+PROFILE_TITLES = {"stand": "with cooling stand", "bare": "no stand", "custom": "custom"}
 TEMP_MIN, TEMP_MAX = 30.0, 100.0        # рішення Льоші 10.09.2026: вище 100 ніколи
 DEFAULTS = {"enabled": True, "profile": "stand", "pause_at": 95.0, "resume_at": 85.0,
             "hard_at": 100.0, "poll_s": 2.0}
@@ -48,9 +48,9 @@ def _num(v, name):
     try:
         f = float(v)
     except (TypeError, ValueError):
-        raise ValueError("%s: не число" % name)
+        raise ValueError("%s: not a number" % name)
     if not math.isfinite(f):
-        raise ValueError("%s: не число" % name)
+        raise ValueError("%s: not a number" % name)
     return f
 
 
@@ -62,20 +62,20 @@ def validate(raw):
     """
     try:
         if not isinstance(raw, dict):
-            raise ValueError("конфіг має бути обʼєктом")
+            raise ValueError("config must be an object")
         enabled = bool(raw.get("enabled", DEFAULTS["enabled"]))
         profile = str(raw.get("profile", DEFAULTS["profile"]))
         if profile not in PROFILE_TITLES:
-            raise ValueError("невідомий профіль: %s" % profile)
+            raise ValueError("unknown profile: %s" % profile)
         poll_s = _num(raw.get("poll_s", DEFAULTS["poll_s"]), "poll_s")
         if not (0.5 <= poll_s <= 30.0):
-            raise ValueError("poll_s має бути від 0.5 до 30 с")
+            raise ValueError("poll_s must be between 0.5 and 30 s")
         if profile in PROFILES:
             th = dict(PROFILES[profile])
         else:
             th = {k: _num(raw.get(k, DEFAULTS[k]), k) for k in ("pause_at", "resume_at", "hard_at")}
         if not (TEMP_MIN <= th["resume_at"] < th["pause_at"] <= th["hard_at"] <= TEMP_MAX):
-            raise ValueError("пороги: має бути продовження < пауза ≤ жорстка ≤ 100 °C")
+            raise ValueError("thresholds: must satisfy resume < pause ≤ hard ≤ 100 °C")
     except ValueError as e:
         return None, str(e)
     cfg = {"enabled": enabled, "profile": profile, "poll_s": round(poll_s, 2)}
@@ -93,11 +93,11 @@ def load_config(path=None):
     except FileNotFoundError:
         raw = {}
     except Exception as e:
-        print("[Термо-сторож] thermal_config.json не читається (%s) — беру типові" % e)
+        print("[Thermal guard] thermal_config.json is unreadable (%s) — using defaults" % e)
         raw = {}
     cfg, err = validate({**DEFAULTS, **raw} if isinstance(raw, dict) else DEFAULTS)
     if err:
-        print("[Термо-сторож] конфіг відхилено: %s — беру типові" % err)
+        print("[Thermal guard] config rejected: %s — using defaults" % err)
         cfg, _ = validate(DEFAULTS)
     return cfg
 
@@ -214,7 +214,7 @@ _SMC_CMD_READ_KEYINFO = 9
 def _make_hid_reader():
     """Збирає ctypes-міст до IOKit один раз на процес. Повертає callable -> °C|None."""
     if sys.platform != "darwin":
-        raise OSError("не macOS")
+        raise OSError("not macOS")
     iokit = ctypes.CDLL(ctypes.util.find_library("IOKit"))
     cf = ctypes.CDLL(ctypes.util.find_library("CoreFoundation"))
 
@@ -262,7 +262,7 @@ def _make_hid_reader():
                             cfnum(kHIDUsage_AppleVendor_TemperatureSensor))
     client = iokit.IOHIDEventSystemClientCreate(None)
     if not client:
-        raise RuntimeError("IOHIDEventSystemClientCreate не спрацював")
+        raise RuntimeError("IOHIDEventSystemClientCreate failed")
     iokit.IOHIDEventSystemClientSetMatching(client, match)
 
     def read():
@@ -325,7 +325,7 @@ def _smc_name(num):
 def _smc_open():
     """Відкриває AppleSMC один раз на процес. Повертає call(payload) -> _SMCKeyData | None."""
     if sys.platform != "darwin":
-        raise OSError("не macOS")
+        raise OSError("not macOS")
     iokit = ctypes.CDLL(ctypes.util.find_library("IOKit"))
     libc = ctypes.CDLL(ctypes.util.find_library("c"))
     iokit.IOServiceMatching.restype = ctypes.c_void_p
@@ -343,10 +343,10 @@ def _smc_open():
 
     service = iokit.IOServiceGetMatchingService(0, iokit.IOServiceMatching(b"AppleSMC"))
     if not service:
-        raise RuntimeError("AppleSMC не знайдено")
+        raise RuntimeError("AppleSMC not found")
     conn = ctypes.c_uint(0)
     if iokit.IOServiceOpen(service, libc.mach_task_self(), 0, ctypes.byref(conn)) != 0:
-        raise RuntimeError("IOServiceOpen(AppleSMC) не спрацював")
+        raise RuntimeError("IOServiceOpen(AppleSMC) failed")
 
     def call(payload):
         out = _SMCKeyData()
@@ -373,12 +373,12 @@ def _smc_scan(call):
     """Один раз на процес: перелік ключів Tg/Tp/Te/Tf/Ts з типом flt. [(name, src, size)]."""
     ki = _smc_keyinfo(call, "#KEY")
     if ki is None:
-        raise RuntimeError("#KEY недоступний")
+        raise RuntimeError("#KEY unavailable")
     p = _SMCKeyData()
     p.key, p.data8, p.keyInfo.dataSize = _smc_key("#KEY"), _SMC_CMD_READ_BYTES, ki[0]
     got = call(p)
     if got is None:
-        raise RuntimeError("#KEY не читається")
+        raise RuntimeError("#KEY unreadable")
     total = int.from_bytes(bytes(got.bytes[:4]), "big")
     keys = []
     for i in range(total):

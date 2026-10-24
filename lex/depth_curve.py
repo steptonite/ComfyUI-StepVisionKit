@@ -57,38 +57,38 @@ class LexDepthCurve:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "depth": ("IMAGE", {"tooltip": "вихід DA3Render (або будь-який депсмеп-IMAGE)"}),
+                "depth": ("IMAGE", {"tooltip": "output of DA3Render (or any depth-map IMAGE)"}),
                 "source": (["near_is_white", "raw_distance"], {"default": "near_is_white",
-                           "tooltip": "near_is_white = звичайний депсмеп, близьке світле (DA3Render v2_style / min_max, ControlNet-депс). raw_distance = DA3Render у режимі 'raw', де значення = відстань і далеке більше"}),
+                           "tooltip": "near_is_white = a regular depth map where near is bright (DA3Render v2_style / min_max, ControlNet depth). raw_distance = DA3Render in 'raw' mode, where values are distances and far is larger"}),
                 "mode": (["disparity", "gamma", "none"], {"default": "disparity",
-                         "tooltip": "🥇 disparity = як у Depth Anything V2 (1/відстань): розтягує ближній план, обличчя стає об'ємним. gamma = проста крива. none = лише перенормувати"}),
+                         "tooltip": "disparity = like Depth Anything V2 (1/distance): stretches the foreground so faces look volumetric. gamma = simple curve. none = renormalize only"}),
                 "near_bias": ("FLOAT", {"default": 0.25, "min": 0.02, "max": 2.0, "step": 0.01,
-                              "tooltip": "🎚 сила нелінійності в режимі disparity. Менше = різкіший розділ ближнього плану (0.1 — дуже контрастне обличчя), більше = ближче до лінійного (1.0 ≈ як було)"}),
+                              "tooltip": "strength of the non-linearity in disparity mode. Lower = sharper separation of the foreground (0.1 gives a very contrasty face), higher = closer to linear (1.0 ≈ unchanged)"}),
                 "black_point": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.99, "step": 0.01,
-                                "tooltip": "🎚 ЛІВИЙ повзунок Levels у фотошопі. Усе темніше за це стає чорним, решта РОЗТЯГУЄТЬСЯ. Підіймай, доки фон не провалиться в чорне"}),
+                                "tooltip": "LEFT Levels slider, as in Photoshop. Everything darker than this becomes black, the rest is STRETCHED. Raise it until the background drops to black"}),
                 "white_point": ("FLOAT", {"default": 1.0, "min": 0.01, "max": 1.0, "step": 0.01,
-                                "tooltip": "🎚 ПРАВИЙ повзунок Levels. Усе світліше стає білим. Опускай, доки найближчий об'єкт не вибілиться. Що вужча щілина black↔white — то більше провалів між планами"}),
+                                "tooltip": "RIGHT Levels slider. Everything brighter becomes white. Lower it until the nearest object blows out to white. The narrower the black↔white gap, the more gaps appear between depth planes"}),
                 "gamma": ("FLOAT", {"default": 1.0, "min": 0.2, "max": 4.0, "step": 0.05,
-                           "tooltip": "СЕРЕДНІЙ повзунок Levels. <1 висвітлює середні тони, >1 затемнює"}),
+                           "tooltip": "MIDDLE Levels slider. <1 brightens the midtones, >1 darkens them"}),
                 "focus": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01,
-                          "tooltip": "🥇 ЯКИЙ ПЛАН підсилювати: тон, на якому лежить потрібний об'єкт (0 = найдальше, 1 = найближче). Дивись гістограму в консолі — три горби = три плани, став focus на потрібний"}),
+                          "tooltip": "WHICH PLANE to emphasize: the tone your subject sits at (0 = farthest, 1 = nearest). Check the histogram in the console — three humps = three planes; put focus on the one you want"}),
                 "focus_strength": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 14.0, "step": 0.5,
-                                   "tooltip": "🥇 наскільки крута крива навколо focus. Це S-крива Curves: тони НАВКОЛО плану розтягуються, решта м'яко стискається — на відміну від black/white point, які інші плани просто зрізають у чорне/біле. 4–8 робоче"}),
+                                   "tooltip": "how steep the curve is around focus. This is a Curves-style S-curve: tones AROUND the plane are stretched and the rest is softly compressed — unlike black/white point, which simply clip other planes to black/white. 4–8 works well"}),
                 "clarity": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                            "tooltip": "🥇 Clarity: локальний контраст (CLAHE). Ліплення всередині фігури — складки тканини, вилиці. Глобальні рівні цього НЕ вміють. 0.3–0.5 робоче"}),
+                            "tooltip": "Clarity: local contrast (CLAHE). Sculpts form inside a shape — cloth folds, cheekbones. Global levels cannot do this. 0.3–0.5 works well"}),
                 "detail": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.1,
-                           "tooltip": "мікроконтраст (unsharp малим радіусом): дрібні складочки й кромки. 0.3–0.5"}),
+                           "tooltip": "micro-contrast (unsharp mask with a small radius): fine folds and edges. 0.3–0.5"}),
                 "deband": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                           "tooltip": "🥇 прибрати СХОДИНКИ-полоси, не розмиваючи картинку. Білатеральний фільтр: рівняє дрібні перепади всередині плану, силует і межі планів лишає різкими. 0.3–0.5. Йде ПЕРЕД clarity, тому clarity вже не має що підсилювати"}),
+                           "tooltip": "remove stair-step BANDING without blurring the image. Bilateral filter: smooths small steps inside a plane and keeps the silhouette and plane boundaries sharp. 0.3–0.5. Runs BEFORE clarity, so clarity has nothing left to amplify"}),
                 "deband_edge": ("FLOAT", {"default": 0.12, "min": 0.01, "max": 0.5, "step": 0.01,
-                                "tooltip": "яку висоту перепаду вважати «сміттям», а не справжньою межею. 0.06 — тільки сходинки-полоси · 0.12 дефолт · 0.2–0.35 бере й клоччя на листі, але вже підточує різкість силуету"}),
+                                "tooltip": "what step height counts as noise rather than a real edge. 0.06 — banding only · 0.12 default · 0.2–0.35 also catches ragged leaf clutter but starts to erode silhouette sharpness"}),
                 "clip_low": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.5,
-                             "tooltip": "нижній квантиль обрізання, %"}),
+                             "tooltip": "lower clipping percentile, %"}),
                 "clip_high": ("FLOAT", {"default": 99.0, "min": 80.0, "max": 100.0, "step": 0.5}),
                 "invert": ("BOOLEAN", {"default": False,
-                           "tooltip": "перевернути результат, якщо близьке вийшло темним"}),
+                           "tooltip": "invert the result if near came out dark"}),
                 "normalize": (["batch", "per_frame"], {"default": "batch",
-                              "tooltip": "🥇 ВІДЕО: 'batch' — чорна й біла точки рахуються ОДИН раз на всю пачку кадрів. Саме це прибирає мерехтіння яскравості депсу. 'per_frame' — по кожному кадру окремо (старa поведінка; годиться для одиночних фото)"}),
+                              "tooltip": "VIDEO: 'batch' — black and white points are computed ONCE for the whole batch of frames. This is what removes depth brightness flicker. 'per_frame' — per frame separately (old behavior; fine for single stills)"}),
             },
         }
 
@@ -192,17 +192,17 @@ class LexDepthCurve:
         t = torch.from_numpy(out)
         # підказка, куди ставити рівні: де насправді лежить сюжет
         q = np.percentile(out[0], [2, 25, 50, 75, 98])
-        info = (f"кадрів {n} · {mode}"
+        info = (f"frames {n} · {mode}"
                 + (f" · near_bias {near_bias}" if mode == "disparity" else "")
-                + f" · рівні {black_point}–{white_point} · gamma {gamma}"
+                + f" · levels {black_point}–{white_point} · gamma {gamma}"
                 + (f" · focus {focus}×{focus_strength}" if focus_strength > 0 else "")
-                + f" · clarity {clarity} · detail {detail} · норм. {normalize}"
-                + " · тони на виході p2/25/50/75/98: "
+                + f" · clarity {clarity} · detail {detail} · norm. {normalize}"
+                + " · output tones p2/25/50/75/98: "
                 + "/".join(f"{v:.2f}" for v in q))
         # ГІСТОГРАМА планів: кожен горб = окремий план сцени. Куди ставити focus —
         # видно прямо тут, гадати по повзунку не треба.
         h = np.histogram(out[0], bins=10, range=(0.0, 1.0))[0] / out[0].size
         bars = "".join(" ▁▂▃▄▅▆▇█"[min(8, int(p * 8 / max(h.max(), 1e-6) + 0.5))] for p in h)
         print(f"[LexDepthCurve] {info}")
-        print(f"[LexDepthCurve] плани 0.0→1.0: |{bars}|  (focus став на потрібний горб)")
+        print(f"[LexDepthCurve] planes 0.0→1.0: |{bars}|  (put focus on the hump you want)")
         return (t.unsqueeze(-1).repeat(1, 1, 1, 3), t, info)

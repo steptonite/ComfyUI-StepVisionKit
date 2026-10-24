@@ -11,7 +11,7 @@ import look_api
 import look_params
 
 from .core import (DEFAULT_PRESET, SIZE_ORIGINAL, OUTPUT_SIZES, GRADE_TYPE, parse_output_size, check_inputs,
-                   resolve_params, static_params, make_grade, out_shape)
+                   legacy, validate_legacy, resolve_params, static_params, make_grade, out_shape)
 from .render_proc import tensors_to_numpy, make_progress, render, to_result, stage
 
 # (група, ключ сили, id віджета). Сила групи = перший ключ GROUP_POWER; множник 0..2 лягає на нього
@@ -95,10 +95,15 @@ class DepthLookSimple:
     FUNCTION = "run"
     CATEGORY = "StepVisionKit/Depth"
 
+    @classmethod
+    def VALIDATE_INPUTS(cls, preset=None, output_size=None):
+        return validate_legacy(preset=(preset, look_params.list_presets()), output_size=(output_size, OUTPUT_SIZES))
+
     def run(self, image, depth, preset, output_size=SIZE_ORIGINAL, max_side=0, clean_depth=True,
             depth_light_is_near=True, look_mix=1.0, extra_json="{}", unique_id=None, **switches):
         sw = {key: (bool(switches.get(key + "_on", True)), float(switches.get(key + "_power", 1.0)))
               for _g, key in POWER_GROUPS}
+        preset = legacy(preset)
         p = static_params(apply_groups(resolve_params(preset), sw, parse_extra(extra_json)))
         g = make_grade(p, preset, clean_depth, depth_light_is_near, "clip")
         stage(unique_id, "read", n=int(image.shape[0]))

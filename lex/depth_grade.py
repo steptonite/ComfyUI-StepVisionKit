@@ -347,19 +347,19 @@ def _grade_array(x, p, motion=None, progress=None, clip_lohi=None):
     if jit_in is not None:
         # «після»: вихід, зведений до лінійної шкали входу, — щоб криві грейду не міняли мірило
         so = np.stack([cv2.resize(out[i], (sw, sh), interpolation=cv2.INTER_AREA) for i in range(n)])
-        jit_note = f" · тремтіння ×1000: вхід {jit_in:.1f} → вихід {_jitter(list(_stretch(so, *_lohi(so, 1.0, 99.0))), bw):.1f}"
+        jit_note = f" · jitter ×1000: in {jit_in:.1f} → out {_jitter(list(_stretch(so, *_lohi(so, 1.0, 99.0))), bw):.1f}"
 
     q = np.percentile(out[0], [2, 25, 50, 75, 98])
-    info = (f"кадрів {n} · {look} pop {foreground_pop}"
+    info = (f"frames {n} · {look} pop {foreground_pop}"
             + f" · blacks {blacks} whites {whites} midtones {midtones}"
-            + (f" · стеля {c} від {k}" if c < 1.0 else "")
-            + (f" · герой {hero_plane}×{hero_pop}" if hero_pop > 0 else "")
+            + (f" · ceiling {c} from {k}" if c < 1.0 else "")
+            + (f" · hero {hero_plane}×{hero_pop}" if hero_pop > 0 else "")
             + scale_note + jit_note
-            + " · тони p2/25/50/75/98: " + "/".join(f"{v:.2f}" for v in q))
+            + " · tones p2/25/50/75/98: " + "/".join(f"{v:.2f}" for v in q))
     hist = np.histogram(out[0], bins=10, range=(0.0, 1.0))[0] / out[0].size
     bars = "".join(" ▁▂▃▄▅▆▇█"[min(8, int(p * 8 / max(hist.max(), 1e-6) + 0.5))] for p in hist)
     print(f"[DepthGrade] {info}")
-    print(f"[DepthGrade] плани 0.0→1.0: |{bars}|  (hero_plane став на горб героя)")
+    print(f"[DepthGrade] planes 0.0→1.0: |{bars}|  (put hero_plane on the hero hump)")
     return out, info
 
 
@@ -450,49 +450,49 @@ class SVKDepthGrade:
         F = "FLOAT"
         return {
             "required": {
-                "depth": ("IMAGE", {"tooltip": "карта глибини: вихід DA3Render або будь-який депсмеп"}),
+                "depth": ("IMAGE", {"tooltip": "depth map: output of DA3Render or any depth map"}),
                 "depth_is": (["near is white", "far is white (raw)"], {"default": "near is white",
-                             "tooltip": "звичайний депсмеп = близьке світле. 'far is white' — сирий DA3 (режим raw), де значення = відстань"}),
+                             "tooltip": "regular depth map = near is bright. 'far is white' — raw DA3 (raw mode), where values are distances"}),
                 "look": (["V2 volume", "linear"], {"default": "V2 volume",
-                         "tooltip": "🥇 V2 volume = як Depth Anything V2: передній план отримує більше тонів, обличчя об'ємне. linear = як є"}),
+                         "tooltip": "V2 volume = like Depth Anything V2: the foreground gets more tones, faces look volumetric. linear = as is"}),
                 "foreground_pop": (F, {"default": 0.45, "min": 0.0, "max": 1.0, "step": 0.01,
-                                   "tooltip": "скільки тонів віддати передньому плану (лише V2 volume). 0 = майже лінійно · 0.45 звично · 1.0 = максимум, усе далеке провалюється в темне"}),
+                                   "tooltip": "how many tones to give the foreground (V2 volume only). 0 = almost linear · 0.45 typical · 1.0 = maximum, everything far falls into the dark"}),
                 "blacks": (F, {"default": 0.0, "min": 0.0, "max": 0.99, "step": 0.01,
-                           "tooltip": "лівий повзунок Levels: заганяє ДАЛЬНІЙ план у чорне. Підіймай, доки фон не зникне"}),
+                           "tooltip": "left Levels slider: crushes the FAR plane to black. Raise it until the background disappears"}),
                 "whites": (F, {"default": 0.0, "min": 0.0, "max": 0.99, "step": 0.01,
-                           "tooltip": "правий повзунок Levels: заганяє НАЙБЛИЖЧЕ в біле. Чим вища — тим ширша біла пляма"}),
+                           "tooltip": "right Levels slider: pushes the NEAREST to white. The higher it is, the wider the white area"}),
                 "midtones": (F, {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.05,
-                             "tooltip": "середній повзунок Levels. + світліше середні плани, − темніше"}),
+                             "tooltip": "middle Levels slider. + brightens the midtones, − darkens them"}),
                 "foreground_ceiling": (F, {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01,
-                                       "tooltip": "🆕 ПРИГАСИТИ ПЕРЕДНІЙ ПЛАН. Яким сірим стане найближче: 1.0 = біле (вимкнено), 0.7 = машини/речі впритул до камери стають сірими. Нижче за ceiling_from — найближче стає ТЕМНІШИМ за героя"}),
+                                       "tooltip": "TAME THE FOREGROUND. How gray the nearest becomes: 1.0 = white (off), 0.7 = cars/objects right at the camera turn gray. Below ceiling_from — the nearest becomes DARKER than the hero"}),
                 "ceiling_from": (F, {"default": 0.75, "min": 0.0, "max": 1.0, "step": 0.01,
-                                 "tooltip": "з якого тону починається пригашування. Став трохи ВИЩЕ тону героя — тоді герой лишається як був, а все, що ближче, м'яко лягає під стелю"}),
+                                 "tooltip": "the tone where dimming starts. Set it slightly ABOVE the hero tone — then the hero stays as it was, and everything closer settles softly under the ceiling"}),
                 "hero_plane": (F, {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01,
-                               "tooltip": "🥇 на якому тоні стоїть твій герой (0 = найдальше, 1 = найближче). Підказка — гістограма планів у консолі: горб = план"}),
+                               "tooltip": "the tone your hero sits at (0 = farthest, 1 = nearest). Hint: the plane histogram in the console — one hump = one plane"}),
                 "hero_pop": (F, {"default": 0.0, "min": 0.0, "max": 14.0, "step": 0.5,
-                             "tooltip": "🥇 виділити героя: S-крива навколо hero_plane. Його тони розтягуються, решта м'яко стискається, але не обрізається. 4–8 робоче, 0 = вимкнено"}),
+                             "tooltip": "emphasize the hero: S-curve around hero_plane. Its tones are stretched, the rest is softly compressed but not clipped. 4–8 works well, 0 = off"}),
                 "clarity": (F, {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                            "tooltip": "як Clarity у Lightroom: ліплення форм усередині об'єкта (вилиці, складки), без ореолу по силуету. 0.3–0.5"}),
+                            "tooltip": "like Clarity in Lightroom: sculpts form inside the object (cheekbones, folds) without a halo around the silhouette. 0.3–0.5"}),
                 "texture": (F, {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.1,
-                            "tooltip": "як Texture у Lightroom: дрібні складочки й кромки. 0.3–0.5"}),
+                            "tooltip": "like Texture in Lightroom: fine folds and edges. 0.3–0.5"}),
                 "smooth_banding": (F, {"default": 0.0, "min": 0.0, "max": 2.0, "step": 0.05,
-                                   "tooltip": "прибрати сходинки-смуги в плавних переходах; силует лишається різким. 0.2–0.5 дрібні · 1.0–2.0 широкі смуги (туман, небо, стіни)"}),
+                                   "tooltip": "remove stair-step banding in smooth gradients; the silhouette stays sharp. 0.2–0.5 fine · 1.0–2.0 wide bands (fog, sky, walls)"}),
                 "banding_edge": (F, {"default": 0.12, "min": 0.01, "max": 0.5, "step": 0.01,
-                                 "tooltip": "який перепад вважати смугою, а не межею. 0.06 — лише смуги · 0.12 звично · 0.25+ з'їдає й листя, але тупить силует"}),
+                                 "tooltip": "what step counts as a band rather than an edge. 0.06 — bands only · 0.12 typical · 0.25+ also eats foliage but dulls the silhouette"}),
                 "trim_far": (F, {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.5,
-                             "tooltip": "ігнорувати % найдальших пікселів, коли рахуються рівні (небо, викиди)"}),
+                             "tooltip": "ignore the farthest % of pixels when computing levels (sky, outliers)"}),
                 "trim_near": (F, {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.5,
-                              "tooltip": "ігнорувати % найближчих пікселів, коли рахуються рівні (пилинка на об'єктиві, рука в кадрі)"}),
-                "flip": ("BOOLEAN", {"default": False, "tooltip": "перевернути: близьке темне, далеке світле"}),
+                              "tooltip": "ignore the nearest % of pixels when computing levels (dust on the lens, a hand in frame)"}),
+                "flip": ("BOOLEAN", {"default": False, "tooltip": "invert: near dark, far bright"}),
                 "levels_scope": (["whole clip", "per frame"], {"default": "whole clip",
-                                 "tooltip": "відео: whole clip = одні рівні на весь кліп (без стрибків яскравості). per frame = кожен кадр сам по собі (для фото)"}),
+                                 "tooltip": "video: whole clip = one set of levels for the entire clip (no brightness jumps). per frame = each frame on its own (for stills)"}),
                 "deflicker": (F, {"default": 0.6, "min": 0.0, "max": 1.0, "step": 0.05,
-                              "tooltip": "🆕 ВІДЕО: гасить дрібне тремтіння поверхонь (стіни, асфальт, шкіра). 0 = вимкнено · 0.6 звично · 1.0 = максимум. Там, де потік ненадійний (швидка панорама, перекриття), фільтр сам не тягне кадри"}),
+                              "tooltip": "VIDEO: suppresses fine surface jitter (walls, asphalt, skin). 0 = off · 0.6 typical · 1.0 = maximum. Where optical flow is unreliable (fast pans, occlusions) the filter backs off on its own"}),
                 "motion_guard": (F, {"default": 0.08, "min": 0.01, "max": 0.4, "step": 0.01,
-                                 "tooltip": "ВІДЕО: який стрибок тону вважати справжнім рухом, а не мерехтінням. Менше = нуль шлейфів, але й гасить слабше; більше = гасить сильніше, ризик шлейфу за рухом"}),
+                                 "tooltip": "VIDEO: what tone jump counts as real motion rather than flicker. Lower = no trails but weaker suppression; higher = stronger suppression, risk of trailing behind motion"}),
             },
             "optional": {
-                "motion_guide": ("IMAGE", {"tooltip": "ВІДЕО: підключи СВОЄ оригінальне відео (ті самі кадри). Рух тоді рахується по картинці, а не по депсу — точніше, менше шлейфів"}),
+                "motion_guide": ("IMAGE", {"tooltip": "VIDEO: connect your OWN original video (the same frames). Motion is then computed from the picture rather than from depth — more accurate, fewer trails"}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -545,7 +545,7 @@ class SVKDepthGrade:
             try:
                 _cache_put(str(unique_id), x, motion, n)
             except Exception as e:
-                print(f"[DepthGrade] кеш для живого прев'ю не записано: {e}")
+                print(f"[DepthGrade] live preview cache not written: {e}")
 
         tt = torch.from_numpy(np.ascontiguousarray(out, dtype=np.float32))
         return {"ui": {"svk_depth_preview": [preview]},
@@ -555,12 +555,12 @@ class SVKDepthGrade:
 class SVKDepthGradeView:
     """Калібрування кадру. Під'єднай вхід до виходу depth ноди Depth Grade: вихід віддає той самий депс далі,
     тож ланцюжок не рветься. Панель у ноді — піпетки, До/після і криві пишуть у повзунки Depth Grade."""
-    DESCRIPTION = ("Калібрування кадру: під'єднай до виходу depth ноди Depth Grade. Вхід іде на вихід без змін, "
-                   "тож ланцюжок не рветься. Піпетки й криві пишуть у ті самі повзунки Depth Grade.")
+    DESCRIPTION = ("Frame calibration: connect to the depth output of the Depth Grade node. The input passes through unchanged, "
+                   "so the chain is not broken. Eyedroppers and curves write to the same Depth Grade sliders.")
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})},
+        return {"required": {"depth": ("IMAGE", {"tooltip": "depth output of the Depth Grade node"})},
                 "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
@@ -575,16 +575,16 @@ class SVKDepthGradeView:
 
 class SVKDepthGradeVideoView:
     """Живе прев'ю відео: фрагмент кліпу перераховується сам при зміні повзунків Depth Grade."""
-    DESCRIPTION = ("Живе прев'ю відео: під'єднай до виходу depth ноди Depth Grade, натисни Run один раз — "
-                   "далі прев'ю перераховується саме при зміні повзунків, у зменшеному розмірі. "
-                   "Clarity, texture і smooth_banding на малому розмірі видно слабше — точний вигляд дає Run.")
+    DESCRIPTION = ("Live video preview: connect to the depth output of the Depth Grade node and press Run once — "
+                   "after that the preview recomputes by itself when sliders change, at reduced size. "
+                   "Clarity, texture and smooth_banding look weaker at small size — Run gives the exact result.")
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"depth": ("IMAGE", {"tooltip": "вихід depth ноди Depth Grade"})},
+            "required": {"depth": ("IMAGE", {"tooltip": "depth output of the Depth Grade node"})},
             "optional": {"fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 1.0,
-                                           "tooltip": "швидкість відтворення прев'ю"})},
+                                           "tooltip": "preview playback speed"})},
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
@@ -621,7 +621,7 @@ def _coerce_params(raw):
         v = raw.get(name, _DEFAULTS[name])
         if name in _CHOICES:
             if v not in _CHOICES[name]:
-                raise ValueError(f"{name}: неочікуване значення {v!r}")
+                raise ValueError(f"{name}: unexpected value {v!r}")
             p[name] = v
         elif name == "flip":
             p[name] = bool(v)
@@ -661,12 +661,12 @@ def _preview_job(body):
         start = int(body.get("start", 0))
         count = int(body.get("count", 48))
         if size not in _PREVIEW_SIZES:
-            return fail("error", "size має бути 256, 384, 512 або 768")
+            return fail("error", "size must be 256, 384, 512 or 768")
         if not 1 <= count <= 96:
-            return fail("error", "count має бути від 1 до 96")
+            return fail("error", "count must be between 1 and 96")
         raw = body.get("params")
         if not isinstance(raw, dict):
-            return fail("error", "params має бути обʼєктом")
+            return fail("error", "params must be an object")
         p = _coerce_params(raw)
 
         with _LOCK:
@@ -676,10 +676,10 @@ def _preview_job(body):
                 cur = _LATEST.get(key)
                 now = time.monotonic()
                 if cur is not None and gen < cur[0] and now - cur[1] < _STALE_SEC:
-                    return fail("superseded", "новіший запит уже йде")
+                    return fail("superseded", "a newer request is already running")
                 _LATEST[key] = (gen, now)
         if entry is None:
-            return fail("no_cache", "немає кадрів у кеші: натисни Run на Depth Grade один раз")
+            return fail("no_cache", "no frames in cache: press Run on Depth Grade once")
 
         x16, m16, n_orig, stride = entry
         nc = int(x16.shape[0])
@@ -711,7 +711,7 @@ def _preview_job(body):
                 "before": [_jpeg_b64(f) for f in before],
                 "ms": int(round((time.perf_counter() - t0) * 1000))}
     except _Superseded:
-        return fail("superseded", "новіший запит уже йде")
+        return fail("superseded", "a newer request is already running")
     except Exception as e:
         return fail("error", str(e) or type(e).__name__)
 
@@ -731,14 +731,14 @@ def _frame_job(body):
 
     try:
         if size not in _PREVIEW_SIZES:
-            return {"ok": False, "reason": "error", "message": "size має бути 256, 384, 512 або 768"}
+            return {"ok": False, "reason": "error", "message": "size must be 256, 384, 512 or 768"}
         with _LOCK:
             entry = _CACHE.get(key)
             if entry is not None:
                 _CACHE.move_to_end(key)
         if entry is None:
             return {"ok": False, "reason": "no_cache",
-                    "message": "немає кадрів у кеші: натисни Run на Depth Grade один раз"}
+                    "message": "no frames in cache: press Run on Depth Grade once"}
 
         x16, _m16, n_orig, stride = entry
         nc = int(x16.shape[0])
@@ -768,7 +768,7 @@ try:
         try:
             body = await request.json()
             if not isinstance(body, dict):
-                raise ValueError("тіло запиту має бути обʼєктом")
+                raise ValueError("request body must be an object")
         except Exception as e:
             return _web.json_response({"ok": False, "gen": 0, "reason": "error", "message": str(e)})
         loop = asyncio.get_running_loop()
@@ -779,10 +779,10 @@ try:
         try:
             body = await request.json()
             if not isinstance(body, dict):
-                raise ValueError("тіло запиту має бути обʼєктом")
+                raise ValueError("request body must be an object")
         except Exception as e:
             return _web.json_response({"ok": False, "reason": "error", "message": str(e)})
         loop = asyncio.get_running_loop()
         return _web.json_response(await loop.run_in_executor(None, _frame_job, body))
 except Exception as _e:
-    print(f"[DepthGrade] маршрут живого прев'ю не зареєстровано: {_e}")
+    print(f"[DepthGrade] live preview route not registered: {_e}")

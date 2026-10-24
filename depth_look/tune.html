@@ -1081,7 +1081,7 @@ $("photoSel").addEventListener("change", e => {
 });
 $("sizeSel").addEventListener("change", scheduleRender);
 $("btnReset").addEventListener("click", () => { adopt(loaded); scheduleRender(); });
-$("btnZero").addEventListener("click", () => loadPreset("00_оригінал"));
+$("btnZero").addEventListener("click", () => loadPreset("00_original"));
 $("btnGrade").addEventListener("click", () => loadPreset("look_v1"));
 
 // ---------- збереження / повний рендер ----------
@@ -1655,7 +1655,7 @@ function notesToTitles() {
     if (ts && st.node_frame && st.frames.length && st.fps !== undefined) ts.hi = Math.max(ts.hi, (+st.start_time || 0) + st.frames[st.frames.length - 1] / Math.max(+st.fps || 24, 1e-6));
   }
   const ps = $("presetSel");
-  const LABELS = { "look_v1": "Look v1", "test_grade": "Test", "00_оригінал": "Original" };   // = presetLabel у web/svk_ui.js
+  const LABELS = { "look_v1": "Look v1", "test_grade": "Test", "00_original": "Original" };   // = presetLabel у web/svk_ui.js
   st.presets.forEach(n => { const o = new Option((LABELS[n] || n) + (st.locked.includes(n) ? " 🔒" : ""), n); o.title = n; ps.add(o); });
   ps.value = st.preset_name;
   if (st.photos && st.photos.length) {

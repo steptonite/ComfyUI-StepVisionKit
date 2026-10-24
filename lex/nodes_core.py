@@ -12,6 +12,7 @@ import torch
 
 
 from .boxes import AnyType, any_type, _to_xyxy_frames, _select, lab_text  # noqa: F401
+from ..vk.boxes import ON_MISSING, SORT_BY  # спільні списки з VK-половини паку
 
 
 # ---------------------------------------------------------------- nodes
@@ -24,16 +25,16 @@ class LexBoxesToBBOX:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boxes": (any_type, {"tooltip": "BOUNDING_BOX (ядро), BOXES (ComfyUI-YOLO) або BBOX"}),
+                "boxes": (any_type, {"tooltip": "BOUNDING_BOX (core), BOXES (ComfyUI-YOLO) or BBOX"}),
                 "mode": (["largest", "all", "index"], {"default": "largest",
-                         "tooltip": "largest = найбільший бокс у кадрі, КЛАС ІГНОРУЄТЬСЯ (рятує на CG, де YOLO каже 'kite')"}),
+                         "tooltip": "largest = the biggest box in the frame, CLASS IS IGNORED (saves you on CG renders where YOLO says 'kite')"}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 64}),
-                "pad": ("INT", {"default": 0, "min": -256, "max": 256, "tooltip": "розширити бокс на N пікселів"}),
+                "pad": ("INT", {"default": 0, "min": -256, "max": 256, "tooltip": "expand the box by N pixels"}),
                 "format_in": (["auto", "xyxy", "xywh_topleft", "xywh_center"], {"default": "auto"}),
                 "on_miss": (["previous", "full_frame", "empty"], {"default": "previous",
-                            "tooltip": "SAM2 падає, якщо на кадрі нема бокса — тримай 'previous'"}),
+                            "tooltip": "SAM2 fails if a frame has no box — keep 'previous'"}),
             },
-            "optional": {"image": ("IMAGE", {"tooltip": "щоб обрізати бокси по межах кадру"})},
+            "optional": {"image": ("IMAGE", {"tooltip": "clamp boxes to the frame bounds"})},
         }
 
     RETURN_TYPES = ("BBOX", "STRING")
@@ -62,7 +63,7 @@ class LexBoxesToBBOX:
                 out = [f if f else [list(b) for b in nxt] for f in out]
         n = min((len(f) for f in out), default=0)
         out = [f[:n] for f in out]
-        info = f"кадрів: {len(out)} · з боксом: {hits} · по {n} бокс(ів)/кадр"
+        info = f"frames: {len(out)} · with box: {hits} · {n} box(es)/frame"
         print(f"[LexBoxesToBBOX] {info}")
         return (out, info)
 
@@ -121,7 +122,11 @@ class LexHUDBoxes:
 
 
 class LexYOLODetect:
-    """YOLO з models/yolov8 напряму на MPS. Віддає ОБИДВА формати боксів одразу.
+    """YOLO + ByteTrack + вибір потрібного бокса + важіль плавності — усе в одній ноді.
+
+    Зібрано 24.08.2026 з трьох місць (`LexYOLODetect` + `VKDetect` + `VKSelectBox`), щоб не
+    тягнути ланцюг із трьох нод заради одного бокса. VK-ноди лишились на місці для старих
+    воркфлоу, але для нових ця нода самодостатня.
 
     class_filter лишай порожнім: на CG-рендерах YOLO зве фігуру 'kite', і фільтр
     по 'person' викидає ~15 кадрів із 20 (заміряно 08.08).
@@ -139,15 +144,31 @@ class LexYOLODetect:
                 "images": ("IMAGE",),
                 "model_name": (models or ["yolo11n.pt"],),
                 "device": (["auto", "mps", "cpu", "cuda"], {"default": "auto",
-                           "tooltip": "🔴 auto = сам бере cuda на орендованій NVIDIA і mps на Маку. Жорсткий 'mps' у збереженому воркфлоу впаде на чужій машині"}),
+                           "tooltip": "auto = picks cuda on a rented NVIDIA box and mps on a Mac. A hard-coded 'mps' in a saved workflow will fail on someone else's machine"}),
                 "conf": ("FLOAT", {"default": 0.25, "min": 0.01, "max": 0.95, "step": 0.01}),
                 "imgsz": ("INT", {"default": 640, "min": 320, "max": 1280, "step": 32}),
-                "class_filter": ("STRING", {"default": "", "tooltip": "порожньо = БЕЗ фільтра по класу (так треба для рендерів)"}),
-                "max_boxes": ("INT", {"default": 10, "min": 1, "max": 100}),
-                "on_miss": (["previous", "full_frame", "empty"], {"default": "previous",
-                            "tooltip": "кадр без детекції: взяти бокс попереднього / весь кадр / лишити пустим. SAM2 падає на пустих кадрах — тримай 'previous'"}),
+                "class_filter": ("STRING", {"default": "", "tooltip": "empty = NO class filter (needed for renders)"}),
+                "track": ("BOOLEAN", {"default": True,
+                          "tooltip": "SMOOTHNESS LEVER #1. true = ByteTrack: every object gets a stable id, and an internal Kalman filter PREDICTS the position — the box moves smoothly and lags slightly behind sudden motion. false = raw per-frame YOLO: jittery, but shows exactly what the detector saw on THIS frame; there are no ids and select=track_id does not work"}),
+                "smooth": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 0.95, "step": 0.05,
+                           "tooltip": "SMOOTHNESS LEVER #2 — smoothing (EMA) on top of the result. 0.0 = untouched. 0.3-0.5 = noticeably calmer. 0.8+ = sluggish and laggy. Also works with track=false: removes part of the jitter without enabling Kalman"}),
+                "sort_by": (SORT_BY, {"default": "area",
+                            "tooltip": "how to rank the boxes — this sets the #0/#1 numbers in the preview. Warning: on video 'area' reshuffles the order whenever objects change size; use track_id for stability"}),
+                "select": (["all", "center", "index", "track_id", "largest", "smallest",
+                            "highest_confidence", "nearest_to_point"], {"default": "all",
+                           "tooltip": "which box to pass on. center = closest to the frame center: the easiest way to reject a softbox/reflector at the side. track_id = stick to ONE object through the whole clip (needs track=true). index = take #N from the ranking"}),
+                "pick": ("INT", {"default": 0, "min": 0, "max": 100000,
+                         "tooltip": "number for select: with 'index' it is the #N from the preview, with 'track_id' it is the id:N from the preview. Unused in other modes"}),
+                "point_x": ("INT", {"default": 0, "min": 0, "max": 16384, "tooltip": "only for select=nearest_to_point"}),
+                "point_y": ("INT", {"default": 0, "min": 0, "max": 16384, "tooltip": "only for select=nearest_to_point"}),
+                "max_boxes": ("INT", {"default": 10, "min": 1, "max": 100,
+                              "tooltip": "how many boxes to keep AFTER selection. Usually 1 for SAM2"}),
+                "pad": ("INT", {"default": 0, "min": -512, "max": 512,
+                        "tooltip": "grow (+) or shrink (−) the box by N pixels. A little '+' helps SAM2 not cut off hair at the box edge"}),
+                "on_miss": (ON_MISSING, {"default": "previous",
+                            "tooltip": "frame with no detection: reuse the previous box / use the full frame / leave empty. SAM2 fails on empty frames — keep 'previous'"}),
                 "make_preview": ("BOOLEAN", {"default": False,
-                                 "tooltip": "🔴 прев'ю = ПОВНА друга копія всіх кадрів у RAM (200 кадрів FullHD ≈ 5 ГБ). Вмикай на 1-2 кадрах для підбору conf, вимикай на прогоні"}),
+                                 "tooltip": "Warning: the preview is a FULL second copy of all frames in RAM (200 FullHD frames ≈ 5 GB). Enable it on 1-2 frames to read #N and id:N, then disable it for the real run"}),
             },
         }
 
@@ -157,10 +178,14 @@ class LexYOLODetect:
     CATEGORY = "Lex/bridge"
 
     def detect(self, images, model_name, device, conf, imgsz, class_filter, max_boxes,
-               on_miss="previous", make_preview=False):
-        import os, folder_paths
+               on_miss="previous", make_preview=False, track=True, smooth=0.0,
+               sort_by="area", select="all", pick=0, point_x=0, point_y=0, pad=0):
+        import os
+        import folder_paths
         import torch
         from ultralytics import YOLO
+        from ..vk.boxes import (fill_missing, pad_and_clip, select_frame, sort_frame,
+                                to_bbox, to_core)
 
         if device == "auto":
             device = ("cuda" if torch.cuda.is_available()
@@ -170,49 +195,86 @@ class LexYOLODetect:
         if path not in self._cache:
             self._cache[path] = YOLO(path)
         model = self._cache[path]
-        wanted = [s.strip().lower() for s in class_filter.split(",") if s.strip()]
 
-        core, seen = [], 0
+        if track:
+            # стан трекера живе на об'єкті моделі — без ресету id течуть між прогонами
+            try:
+                for t in getattr(getattr(model, "predictor", None), "trackers", []) or []:
+                    t.reset()
+            except Exception as e:                                   # noqa: BLE001
+                print(f"[LexYOLODetect] tracker reset skipped: {e}")
+
+        wanted = [s.strip().lower() for s in class_filter.split(",") if s.strip()]
+        H, W = int(images.shape[1]), int(images.shape[2])
+        mode = "nearest_to_point" if select == "center" else select
+        point = (W / 2.0, H / 2.0) if select == "center" else (float(point_x), float(point_y))
+        a = float(smooth)
+
+        frames, ranked, ids, seen = [], [], set(), 0
+        carry = {}
+
         for i in range(images.shape[0]):
             frame = (images[i].cpu().numpy() * 255).astype(np.uint8)[:, :, ::-1]
-            r = model.predict(frame, device=device, imgsz=imgsz, conf=conf, verbose=False)[0]
+            if track:
+                r = model.track(frame, device=device, imgsz=imgsz, conf=conf,
+                                persist=True, tracker="bytetrack.yaml", verbose=False)[0]
+            else:
+                r = model.predict(frame, device=device, imgsz=imgsz, conf=conf, verbose=False)[0]
+
             xyxy = r.boxes.xyxy.cpu().numpy()
             names = [r.names[int(c)] for c in r.boxes.cls.cpu().numpy()]
             scores = r.boxes.conf.cpu().numpy().tolist()
-            rows = [{"x": float(b[0]), "y": float(b[1]), "width": float(b[2] - b[0]),
-                     "height": float(b[3] - b[1]), "label": n, "score": float(s)}
-                    for b, n, s in zip(xyxy, names, scores)
-                    if not wanted or n.lower() in wanted]
-            rows.sort(key=lambda d: d["width"] * d["height"], reverse=True)
-            seen += 1 if rows else 0
-            if not rows and on_miss != "empty":
-                if on_miss == "previous" and core and core[-1]:
-                    rows = [dict(d, label=d["label"] + "*") for d in core[-1]]
-                else:
-                    h_, w_ = images.shape[1], images.shape[2]
-                    rows = [{"x": 0.0, "y": 0.0, "width": float(w_), "height": float(h_),
-                             "label": "frame", "score": 0.0}]
-            core.append(rows[:max_boxes])
+            tids = (r.boxes.id.cpu().numpy().astype(int).tolist()
+                    if getattr(r.boxes, "id", None) is not None else [-1] * len(names))
 
-        # кадри на початку могли лишитись пустими — заповнюємо першим знайденим
-        if on_miss == "previous":
-            nxt = next((f for f in core if f), None)
-            if nxt:
-                core = [f if f else [dict(d, label=d["label"] + "*") for d in nxt] for f in core]
+            f = [{"x1": float(b[0]), "y1": float(b[1]), "x2": float(b[2]), "y2": float(b[3]),
+                  "label": nm, "score": float(sc), "id": int(tid)}
+                 for b, nm, sc, tid in zip(xyxy, names, scores, tids)
+                 if not wanted or nm.lower() in wanted]
 
-        # SAM2 вимагає ОДНАКОВУ кількість боксів на кожному кадрі
-        n = min((len(f) for f in core), default=0)
-        bbox = [[[d["x"], d["y"], d["x"] + d["width"], d["y"] + d["height"]] for d in f[:n]] for f in core]
-        labels = sorted({d["label"] for f in core for d in f})
-        info = (f"кадрів {len(core)} · з детекцією {seen} · у BBOX по {n} бокс(ів)/кадр · "
-                f"класи: {', '.join(labels) or '—'}"
-                f"{'' if make_preview else ' · прев\'ю ВИМКНЕНО (RAM)'}")
+            f = sort_frame(f, sort_by)
+            seen += 1 if f else 0
+            ids.update(b["id"] for b in f if b["id"] >= 0)
+
+            # превʼю малює ПОВНИЙ рейтинг з номерами — щоб було по чому обрати pick
+            ranked.append([dict(b, label="#%d %s%s" % (j, b["label"],
+                                (" id:%d" % b["id"]) if b["id"] >= 0 else ""))
+                           for j, b in enumerate(f[:10])])
+
+            f = select_frame(f, mode, index=pick, track_id=pick, point=point)[:max_boxes]
+            f = pad_and_clip(f, pad, W, H)
+
+            if a > 0.0:
+                for k, b in enumerate(f):
+                    key = b["id"] if (track and b["id"] >= 0) else k
+                    prev_xy = carry.get(key)
+                    if prev_xy is not None:
+                        for j, c in enumerate(("x1", "y1", "x2", "y2")):
+                            b[c] = prev_xy[j] * a + b[c] * (1.0 - a)
+                    carry[key] = [b["x1"], b["y1"], b["x2"], b["y2"]]
+
+            frames.append(f)
+
+        frames = fill_missing(frames, on_miss, W, H)
+        core = to_core(frames)
+        bbox = to_bbox(frames, equalise=True)
+        n = min((len(fr) for fr in bbox), default=0)
+        labels = sorted({b["label"] for fr in frames for b in fr})
+        arg = " (%d)" % pick if select in ("index", "track_id") else ""
+        trk = "ByteTrack" if track else "OFF (raw YOLO)"
+        sm = " + smoothing %.2f" % a if a > 0 else ""
+        tail = "" if make_preview else " · preview OFF (RAM)"
+        info = ("frames %d · with detection %d · BBOX %d box(es)/frame · "
+                "rank %s · select %s%s · track %s%s · id: %s · classes: %s%s"
+                % (len(frames), seen, n, sort_by, select, arg, trk, sm,
+                   sorted(ids) if ids else "—", ", ".join(labels) or "—", tail))
         print(f"[LexYOLODetect] {info}")
         if make_preview:
-            (prev,) = LexHUDBoxes().draw(images, core, "corners", 2, 28, "#00FF9C", True, "auto")
+            (prev_img,) = LexHUDBoxes().draw(images, to_core(ranked) if ranked else core,
+                                             "corners", 2, 28, "#00FF9C", True, "auto")
         else:
-            prev = torch.zeros(1, 1, 1, 3)
-        return (core, bbox, prev, info)
+            prev_img = torch.zeros(1, 1, 1, 3)
+        return (core, bbox, prev_img, info)
 
 
 from .hud_sprite import LexHUDSprite

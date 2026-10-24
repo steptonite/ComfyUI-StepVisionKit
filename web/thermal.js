@@ -4,6 +4,7 @@
 // UI лише показує його й пересилає зміни.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { T } from "./svk_i18n.js";
 
 const STATUS_ROUTE = "/svk/thermal/status";
 const CONFIG_ROUTE = "/svk/thermal/config";
@@ -11,7 +12,7 @@ const POLL_MS = 5000;           // опитування статусу, як у 
 const COOL_HOLD_MS = 6000;      // скільки тримати «Охолодження» після останньої події cooling
 const TOAST_MS = 10000;
 const CAT = "StepVisionKit";
-const SUB = "Термо-сторож";
+const SUB = T("Thermal guard");
 
 let server = null;              // остання відповідь сервера (та сама форма, що /status)
 let coolingInfo = null;         // {t, resume_at, since, at} з останньої події cooling
@@ -37,13 +38,13 @@ async function postConfig(patch) {
         });
         const j = await r.json();
         if (!r.ok || !j.ok) {
-            toast("Термо-сторож: " + (j.message || "конфіг не збережено"), true);
+            toast(SUB + ": " + (j.message || T("config not saved")), true);
             return null;
         }
         server = j;
         return j;
     } catch (e) {
-        toast("Термо-сторож: конфіг не збережено (" + e + ")", true);
+        toast(SUB + ": " + T("config not saved") + " (" + e + ")", true);
         return null;
     }
 }
@@ -97,41 +98,41 @@ function badgeWanted() {
 
 const SETTINGS = [
     {
-        id: BADGE_SETTING, name: "Показувати плашку температури",
-        category: [CAT, SUB, "Плашка"], type: "boolean", defaultValue: true,
-        tooltip: "Лише показ у куті екрана. Пауза при перегріві працює й без плашки.",
+        id: BADGE_SETTING, name: T("Show temperature badge"),
+        category: [CAT, SUB, T("Badge")], type: "boolean", defaultValue: true,
+        tooltip: T("Display only, in the screen corner. The overheat pause works without the badge too."),
         onChange: (v) => { showBadge = v !== false; render(); },
     },
     {
-        id: "StepVisionKit.Thermal.Enabled", name: "Пауза при перегріві SoC",
-        category: [CAT, SUB, "Увімкнено"], type: "boolean", defaultValue: true,
+        id: "StepVisionKit.Thermal.Enabled", name: T("Pause on SoC overheat"),
+        category: [CAT, SUB, T("Enabled")], type: "boolean", defaultValue: true,
         onChange: (v) => pushSetting("enabled", !!v),
     },
     {
-        id: "StepVisionKit.Thermal.Profile", name: "Профіль",
-        category: [CAT, SUB, "Профіль"], type: "combo", defaultValue: "stand",
+        id: "StepVisionKit.Thermal.Profile", name: T("Profile"),
+        category: [CAT, SUB, T("Profile")], type: "combo", defaultValue: "stand",
         options: [
-            { value: "stand", text: "з підставкою (95 / 85 / 100 °C)" },
-            { value: "bare", text: "без підставки (90 / 80 / 97 °C)" },
-            { value: "custom", text: "свій (пороги нижче)" },
+            { value: "stand", text: T("with stand (95 / 85 / 100 °C)") },
+            { value: "bare", text: T("without stand (90 / 80 / 97 °C)") },
+            { value: "custom", text: T("custom (thresholds below)") },
         ],
         onChange: (v) => pushSetting("profile", v),
     },
     {
-        id: "StepVisionKit.Thermal.PauseAt", name: "Пауза, °C",
-        category: [CAT, SUB, "Пауза, °C"], type: "number", defaultValue: 95,
+        id: "StepVisionKit.Thermal.PauseAt", name: T("Pause, °C"),
+        category: [CAT, SUB, T("Pause, °C")], type: "number", defaultValue: 95,
         attrs: { min: 30, max: 100, step: 1 },
         onChange: (v) => pushSetting("pause_at", Number(v)),
     },
     {
-        id: "StepVisionKit.Thermal.ResumeAt", name: "Продовжити, °C",
-        category: [CAT, SUB, "Продовжити, °C"], type: "number", defaultValue: 85,
+        id: "StepVisionKit.Thermal.ResumeAt", name: T("Resume, °C"),
+        category: [CAT, SUB, T("Resume, °C")], type: "number", defaultValue: 85,
         attrs: { min: 30, max: 99, step: 1 },
         onChange: (v) => pushSetting("resume_at", Number(v)),
     },
     {
-        id: "StepVisionKit.Thermal.HardAt", name: "Жорстка межа, °C",
-        category: [CAT, SUB, "Жорстка межа, °C"], type: "number", defaultValue: 100,
+        id: "StepVisionKit.Thermal.HardAt", name: T("Hard limit, °C"),
+        category: [CAT, SUB, T("Hard limit, °C")], type: "number", defaultValue: 100,
         attrs: { min: 30, max: 100, step: 1 },
         onChange: (v) => pushSetting("hard_at", Number(v)),
     },
@@ -148,7 +149,7 @@ function ensureBadge() {
         + "border-radius:6px;font:12px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;"
         + "background:rgba(24,24,27,.85);color:#8a8a93;border:1px solid #2e2e33;"
         + "cursor:grab;touch-action:none;user-select:none;display:none";
-    badge.title = "Перетягніть, щоб пересунути. Подвійний клік — повернути на місце.";
+    badge.title = T("Drag to move. Double-click to put it back.");
     document.body.appendChild(badge);
     makeDraggable(badge);
     return badge;
@@ -234,22 +235,22 @@ function render() {
     if (!e._svkPlaced) { e._svkPlaced = true; const p = loadPos(); if (p) placeBadge(e, p); }
     if (!server.enabled) {
         e.style.color = "#8a8a93";
-        e.textContent = "термо-сторож вимкнено";
+        e.textContent = T("thermal guard off");
         return;
     }
     const fresh = coolingInfo && Date.now() - coolingInfo.at < COOL_HOLD_MS;
     if (fresh) {
         e.style.color = "#d9a441";
-        e.textContent = `Охолодження ${srcT(coolingInfo.src, coolingInfo.t)} → ${fmtT(coolingInfo.resume_at)} · ${Math.round(coolingInfo.since)} с`;
+        e.textContent = T("Cooling {src} → {resume} · {s} s").replace("{src}", srcT(coolingInfo.src, coolingInfo.t)).replace("{resume}", fmtT(coolingInfo.resume_at)).replace("{s}", Math.round(coolingInfo.since));
     } else if (server.state === "frozen") {
         e.style.color = "#e0857c";
-        e.textContent = `ComfyUI заморожено · ${srcT(server.src, server.t)}`;
+        e.textContent = T("ComfyUI frozen · {src}").replace("{src}", srcT(server.src, server.t));
     } else if (server.reader_ok) {
         e.style.color = "#8a8a93";
         e.textContent = srcT(server.src, server.t) + statsTail();
     } else {
         e.style.color = "#8a8a93";
-        e.textContent = "SoC: датчик недоступний";
+        e.textContent = T("SoC: sensor unavailable");
     }
 }
 
@@ -257,8 +258,8 @@ function render() {
 function statsTail() {
     const tot = server && server.total;
     if (!tot || (!tot.pauses && !tot.freezes)) return "";
-    let s = ` · пауз ${tot.pauses}`;
-    if (tot.freezes) s += ` · заморозок ${tot.freezes}`;
+    let s = " " + T("· {n} pauses").replace("{n}", tot.pauses);
+    if (tot.freezes) s += " " + T("· {n} freezes").replace("{n}", tot.freezes);
     return s;
 }
 
@@ -281,10 +282,10 @@ function onEvent(d) {
         render();
     } else if (d.state === "was_frozen") {
         const sec = Math.round(Number(d.seconds) || 0);
-        const hot = (d.t !== null && d.t !== undefined) ? ` через ${fmtT(d.t)}` : "";
-        toast(`ComfyUI був заморожений на ${sec} с${hot}. Задача продовжилась після охолодження.`);
+        const hot = (d.t !== null && d.t !== undefined) ? " " + T("due to {t}").replace("{t}", fmtT(d.t)) : "";
+        toast(T("ComfyUI was frozen for {sec} s{hot}. The job resumed after cooling.").replace("{sec}", sec).replace("{hot}", hot));
     } else if (d.state === "api_hold") {
-        toast(`${srcT(d.src, d.t)} — пора б охолонути, але працює партнерська нода ${d.node || ""}. Паузу не ставлю, щоб не обірвати запит; повернеться, щойно вона відповість.`, false, 9000);
+        toast(T("{src} — time to cool down, but partner node {node} is running. Not pausing, so the request is not cut off; the pause comes back as soon as it responds.").replace("{src}", srcT(d.src, d.t)).replace("{node}", d.node || ""), false, 9000);
     }
 }
 
