@@ -1,0 +1,7 @@
+.claude/
+.github/
+CONVENTIONS_UI.md
+depth_look/_cache/
+depth_look/renders/
+*.bak
+*.bak-*

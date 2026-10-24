@@ -1,13 +1,15 @@
 [project]
-name = "comfyui-stepvisionkit"
-description = "Detection, ByteTrack tracking, HUD compositing and depth curves for video in ComfyUI. Mac/MPS and CUDA."
-version = "1.0.0"
+name = "stepvisionkit"
+description = "Depth looks and depth grading, YOLO detection with ByteTrack tracking, HUD compositing, RAW photo input, pro video input and HDR output (EXR, 16-bit PNG, ProRes, HEVC 10-bit) for ComfyUI. Mac (MPS) and CUDA."
+version = "1.1.0"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
-dependencies = ["numpy", "opencv-python", "ultralytics"]
+dependencies = ["numpy", "opencv-python", "ultralytics", "rawpy"]
+classifiers = ["Operating System :: OS Independent"]
 
 [project.urls]
 Repository = "https://github.com/steptonite/ComfyUI-StepVisionKit"
+"Bug Tracker" = "https://github.com/steptonite/ComfyUI-StepVisionKit/issues"
 
 [tool.comfy]
 PublisherId = "steptonite"

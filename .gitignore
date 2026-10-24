@@ -19,3 +19,7 @@ depth_look/_cache/
 depth_look/renders/
 *.npy
 *.exr
+# локальні робочі дерева агентів і бекапи — не в git
+.claude/
+*.bak
+*.bak-*
