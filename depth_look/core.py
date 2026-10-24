@@ -291,10 +291,23 @@ class _NoFork(Exception):
 
 
 def _cpus():
+    """Ядра, які реально дасть планувальник: affinity, урізане квотою cgroup (Vast: контейнер бачить 96, квота 23)."""
     try:
-        return len(os.sched_getaffinity(0))
+        n = len(os.sched_getaffinity(0))
     except Exception:
-        return os.cpu_count() or 1
+        n = os.cpu_count() or 1
+    q = None
+    try:
+        a, b = open("/sys/fs/cgroup/cpu.max").read().split()[:2]
+        q = None if a == "max" else int(a) / int(b)
+    except Exception:
+        try:
+            a = int(open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read())
+            b = int(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read())
+            q = a / b if a > 0 and b > 0 else None
+        except Exception:
+            pass
+    return max(1, min(n, int(q))) if q else n
 
 
 def _mem_budget():
@@ -355,15 +368,22 @@ def _render_parallel(render_frame, out, B, n_workers, progress):
     ctx = mp.get_context("fork")         # діти успадковують масиви/mmap без серіалізації
     print("[DepthLook] %d frame(s) in %d parallel process(es)" % (B, n_workers), flush=True)
     done = 0
-    with ctx.Pool(n_workers, initializer=_pinit, initargs=(render_frame, out)) as pool:
-        for i, res in pool.imap_unordered(_pjob, range(B)):
-            if res is not None:
-                out[i] = res
-            done += 1
-            if progress is not None:
-                progress(done, B)
-        if isinstance(out, np.memmap):
-            out.flush()
+    # fork при живому пулі потоків cv2 (Linux, pthreads) = діти навічно висять на успадкованому замку
+    # (24.10 Vast: 90 процесів по 0% CPU). Гасимо пул у батька до fork, повертаємо після.
+    prev = cv2.getNumThreads()
+    cv2.setNumThreads(1)
+    try:
+        with ctx.Pool(n_workers, initializer=_pinit, initargs=(render_frame, out)) as pool:
+            for i, res in pool.imap_unordered(_pjob, range(B)):
+                if res is not None:
+                    out[i] = res
+                done += 1
+                if progress is not None:
+                    progress(done, B)
+            if isinstance(out, np.memmap):
+                out.flush()
+    finally:
+        cv2.setNumThreads(prev)
     return out
 
 
