@@ -15,6 +15,7 @@ import cv2  # noqa: E402
 import look  # noqa: E402
 import look_params  # noqa: E402
 import look_api  # noqa: E402
+import depth_motion  # noqa: E402
 
 DEFAULT_PRESET = "look_v1"
 _EXTRA_KEYS = {"vp_x", "vp_y", "shift_x", "shift_y", "palette"}
@@ -390,7 +391,7 @@ def _render_parallel(render_frame, out, B, n_workers, progress):
 def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=True,
                 light_is_near=True, overrides="{}", palette="", fps=24.0, start_time=0.0,
                 params_json="", max_side=0, depth_levels="clip", out=None, progress=None,
-                output_size=0, static=False, grade=None, anim=None, frame_step=1, workers=None):
+                output_size=0, static=False, grade=None, anim=None, frame_step=1, workers=None, motion=None):
     """frames_np: (B,H,W,3) float 0..1; depths_np: (B|1,h,w) або (B|1,h,w,C) float (канал 0).
     Кадр i отримує time = start_time + i/fps (анімаційні повзунки: хвиля, пульс глоу, серпанок, шлейф) і
     seed зерна = seed + i (зерно живе; warp_seed стала). Кадри йдуть по одному, без великих проміжних стеків.
@@ -403,6 +404,8 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
     depth_levels="clip": рівні глибини з усього кліпу (look.clip_levels), "frame": покадровий розтяг.
     workers: скільки процесів рахують кадри паралельно (None = авто: ядра за sched_getaffinity, стеля env SVK_WORKERS і RAM;
     результат побітово той самий, що й послідовний - кожен кадр залежить лише від свого номера).
+    motion {dm_*: значення}: «Рух по глибині» (depth_motion.py) - пост-прохід після look у кожному кадрі, на ТОМУ Ж часі
+    кадру, що й анімація; None / усі сили 0 = вимкнено (результат побітово той самий, що без параметра).
     out: готовий (B,Ho,Wo,3) float32 масив для результату (напр. numpy-вʼю torch-тензора). -> out."""
     if not isinstance(frames_np, np.ndarray):
         frames_np = np.asarray(frames_np)
@@ -463,6 +466,8 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
         offs = look.camera_offsets(_Lazy(B, get_rgb), _Lazy(B, small_depth), normalize=True)
     base_ox, base_oy = float(kw.get("grad_offset_x", 0.0)), float(kw.get("grad_offset_y", 0.0))
 
+    motion_on = bool(motion) and not static and depth_motion.active(motion)
+
     def render_frame(i):
         """Кадр i -> (Ho,Wo,3) float32. Залежить ЛИШЕ від i (time, seed, офсети камери) і від спільних levels/offs - тож
         порядок і кількість процесів не змінюють результат."""
@@ -478,6 +483,9 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
         res = look.depth_look_lens(rgb, np.ascontiguousarray(d, np.float32), **k)
         if (Ww, Hw) != (Wo, Ho):
             res = np.clip(cv2.resize(res, (Wo, Ho), interpolation=cv2.INTER_CUBIC), 0, 1)
+        if motion_on:                                              # рух по глибині: глибина - під розмір ФІНАЛЬНОГО кадру
+            dm_d = d if d.shape == (Ho, Wo) else cv2.resize(d, (Wo, Ho), interpolation=cv2.INTER_CUBIC)
+            res = depth_motion.apply(res, np.clip(dm_d, 0, 1), k["time"], motion)
         return res
 
     n_workers = pick_workers(B, Ww * Hw, workers)

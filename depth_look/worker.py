@@ -8,7 +8,7 @@ Python:   потрібні лише numpy + opencv (рушій look.py, look_par
 job_dir має містити:
   args.json   аргументи core.apply_numpy, окрім масивів: preset_name, clean_depth, light_is_near, overrides,
               palette, fps, start_time, params_json, max_side, depth_levels, output_size, static, grade, anim,
-              frame_step (усі необовʼязкові -> дефолти apply_numpy)
+              frame_step, motion (dm_*, depth_motion.py) (усі необовʼязкові -> дефолти apply_numpy)
   img.npy     (B,H,W,3) float32 0..1 (читається mmap-ом, не вантажиться цілком)
   depth.npy   (B|1,h,w) або (B|1,h,w,C) float32 (mmap)
   out.npy     (B,Ho,Wo,3) float32 — ПОВИНЕН бути створений заздалегідь батьком (Ho,Wo = фінальний розмір,
@@ -26,7 +26,7 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)            # `import core` без пакета (воркер запускається як скрипт)
 
 _ARGS = ("preset_name", "clean_depth", "light_is_near", "overrides", "palette", "fps", "start_time",
-         "params_json", "max_side", "depth_levels", "output_size", "static", "grade", "anim", "frame_step")
+         "params_json", "max_side", "depth_levels", "output_size", "static", "grade", "anim", "frame_step", "motion")
 
 
 def main(job):

@@ -10,6 +10,7 @@ import numpy as np
 
 import look_api
 import look_params
+import depth_motion
 
 from .core import (SIZE_ORIGINAL, OUTPUT_SIZES, GRADE_TYPE, PREVIEW_SIDE, parse_output_size, check_inputs,
                    params_from_grade, out_shape, watermark)
@@ -84,6 +85,16 @@ class DepthLookVideo:
         })
         opt = {"fps_in": ("FLOAT", {"forceInput": True, "min": 1.0, "max": 240.0, "step": 0.01,
                                     "tooltip": "Frame rate from another node (e.g. fps from Video Info / Load Video). When connected, it replaces the fps field."})}
+        for key, kind, d, lo, hi, step, label in depth_motion.SPEC:     # «Рух по глибині» (depth_motion.py): сили за замовч. 0
+            tip = "Depth motion · " + label
+            if isinstance(kind, list):
+                opt[key] = (kind, {"default": d, "tooltip": tip})
+            elif kind == "c":
+                opt[key] = ("STRING", {"default": d, "multiline": False, "tooltip": tip + " (hex, e.g. #7fd4ff)"})
+            elif kind == "i":
+                opt[key] = ("INT", {"default": int(d), "min": int(lo), "max": int(hi), "step": int(step), "tooltip": tip})
+            else:
+                opt[key] = ("FLOAT", {"default": float(d), "min": float(lo), "max": float(hi), "step": float(step), "tooltip": tip})
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE", "FLOAT")
@@ -114,6 +125,9 @@ class DepthLookVideo:
                   depth_levels=g.get("depth_levels", "clip"), max_side=ms, output_size=out_size, fps=float(fps),
                   start_time=float(start_time), anim={k: anim[k] for k in look_params.ANIM_KEYS if k in anim},
                   frame_step=step, static=False)
+        motion = {k: anim[k] for k in depth_motion.KEYS if k in anim}
+        if depth_motion.active(motion):                        # старі графи без dm_*: ключа motion у завданні немає взагалі
+            kw["motion"] = motion
         t0 = time.time()
         arr = render(frames, dep, kw, make_progress(frames.shape[0], unique_id),
                      out_shape(frames.shape[0], frames.shape[1], frames.shape[2], out_size))

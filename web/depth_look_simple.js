@@ -411,6 +411,29 @@ const FX = [                       // [параметр, підпис, підп�
     ["trail_wobble", T("Trail wobble, °")],
     ["grain_animate", T("Live grain"), [["grain_fps", T("Grain, frames/s")]]],
 ];
+// «Рух по глибині» (depth_look/depth_motion.py): [сила, підпис, [[параметр, підпис, "c" = hex-колір | {names} = вибір]...]]
+const DM = [
+    ["dm_scan", T("Depth scanner"), [["dm_scan_speed", T("Speed, sweeps/s")], ["dm_scan_width", T("Width")], ["dm_scan_color", T("Colour"), "c"]]],
+    ["dm_par", T("2.5D camera (parallax)"), [["dm_par_speed", T("Speed, loops/s")], ["dm_par_focus", T("Still plane")],
+        ["dm_par_shape", T("Path"), { circle: T("Circle"), figure8: T("Figure-8") }]]],
+    ["dm_focus", T("Focus pull"), [["dm_focus_speed", T("Speed, sweeps/s")], ["dm_focus_range", T("Sharp zone width")]]],
+    ["dm_reveal", T("Reveal / dissolve"), [["dm_reveal_speed", T("Speed, cycles/s")], ["dm_reveal_soft", T("Edge softness")],
+        ["dm_reveal_mode", T("Mode"), { appear_near: T("Appear: near first"), appear_far: T("Appear: far first"), loop_near: T("Loop: near first"), loop_far: T("Loop: far first") }]]],
+    ["dm_iso", T("Depth contour lines"), [["dm_iso_count", T("Lines count")], ["dm_iso_speed", T("Run speed, lines/s")], ["dm_iso_width", T("Thickness, px")], ["dm_iso_color", T("Colour"), "c"]]],
+    ["dm_echo", T("Echo copies"), [["dm_echo_count", T("Copies count")], ["dm_echo_speed", T("Wave speed, waves/s")], ["dm_echo_scale", T("Growth")], ["dm_echo_thresh", T("Near threshold")]]],
+    ["dm_light", T("Relief light"), [["dm_light_speed", T("Rotation, turns/s")], ["dm_light_height", T("Light height")], ["dm_light_relief", T("Relief depth")], ["dm_light_spec", T("Highlight")]]],
+];
+// рядок із вибором кольору, що пише hex прямо в нативний STRING-віджет
+function colorControl(node, name, label, onChange) {
+    const row = el("label", "svk-field");
+    const inp = el("input"); inp.type = "color";
+    const norm = v => { const s = String(v || "").trim(); return /^#[0-9a-fA-F]{6}$/.test(s) ? s.toLowerCase() : "#ffffff"; };
+    inp.oninput = () => { setW(node, name, inp.value); markChanged(); onChange?.(); };
+    row.append(el("span", "t", label), inp);
+    const sync = () => { inp.value = norm(W(node, name)?.value); };
+    sync();
+    return { row, sync };
+}
 const VIDEO_MORE = [["start_time", T("Start, s")], ["preview_every", T("Every Nth frame in preview")],
                     ["output_size", T("Output size")], ["max_side", T("Working resolution")]];
 // верхній рядок відео-ноди: fps + превʼю/фінал. Контроли пишуть прямо у нативні віджети ноди, тож їх можна показати де завгодно
@@ -462,6 +485,22 @@ function buildMotion(node, specs, onChange) {
         for (const [sn, sl] of subs) add(box, sn, sl);
         fxSub.push([name, box]);
     }
+    // рух по глибині: сила - повзунок; уточнення з'являються, коли сила > 0
+    const dm = el("div", "svk-sec");
+    dm.append(el("div", "svk-cap", "<b>" + T("Depth motion") + "</b>"));
+    const dmSub = [];
+    for (const [name, label, subs] of DM) {
+        const c = add(dm, name, label);
+        if (!c) continue;
+        const box = el("div", "svk-sub"); dm.append(box);
+        for (const [sn, sl, kind] of subs) {
+            if (kind === "c") {
+                if (!specs[sn] || !W(node, sn)) continue;
+                const cc = colorControl(node, sn, sl, onChange); box.append(cc.row); ctl.push(cc);
+            } else add(box, sn, sl, kind ? { names: kind } : {});
+        }
+        dmSub.push([name, box]);
+    }
     const more = morePanel(node, specs, VIDEO_MORE);
     const refresh = () => {
         const mode = Number(W(node, "grad_mode")?.value || 0);
@@ -471,10 +510,11 @@ function buildMotion(node, specs, onChange) {
         for (const [n, c] of Object.entries(subCtl)) c.row.style.display = on.has(n) ? "" : "none";
         sub.classList.toggle("is-hidden", !on.size);
         for (const [n, box] of fxSub) box.classList.toggle("is-hidden", !Number(W(node, n)?.value));
+        for (const [n, box] of dmSub) box.classList.toggle("is-hidden", !Number(W(node, n)?.value));
     };
     const sync = () => { ctl.forEach(c => c.sync()); more.sync(); refresh(); };
     refresh();
-    return { els: [col, fx, more], more, ctl, refresh, sync };
+    return { els: [col, fx, dm, more], more, ctl, refresh, sync };
 }
 function setupVideo(node, specs) {
     if (node.__svkv) return;
