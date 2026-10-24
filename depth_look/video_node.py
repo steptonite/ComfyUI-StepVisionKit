@@ -30,7 +30,7 @@ def _anim_specs():
 
 
 STRIP_MAX = 12          # скільки кадрів-превʼю показує стрічка в ноді
-STRIP_SIDE = 320        # довга сторона мініатюри стрічки
+STRIP_SIDE = 960        # довга сторона кадру стрічки (на картці ~340 px; решта - для повноекранного перегляду)
 
 
 def strip_path(unique_id, i):
@@ -82,7 +82,9 @@ class DepthLookVideo:
             "quality": ([QUALITY_PREVIEW, QUALITY_FINAL], {"default": QUALITY_PREVIEW, "tooltip": "Preview: long side %d, every Nth frame, PREVIEW watermark - to check how the gradient moves. Final: size from output_size, all frames." % PREVIEW_SIDE}),
             "preview_every": ("INT", {"default": 3, "min": 1, "max": 60, "step": 1, "tooltip": "Preview only: take every Nth frame. To watch at real speed, set the playback rate to fps/N (second output)."}),
         })
-        return {"required": req, "hidden": {"unique_id": "UNIQUE_ID"}}
+        opt = {"fps_in": ("FLOAT", {"forceInput": True, "min": 1.0, "max": 240.0, "step": 0.01,
+                                    "tooltip": "Frame rate from another node (e.g. fps from Video Info / Load Video). When connected, it replaces the fps field."})}
+        return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE", "FLOAT")
     RETURN_NAMES = ("image", "play_fps")
@@ -91,7 +93,9 @@ class DepthLookVideo:
     CATEGORY = "StepVisionKit/Depth"
 
     def run(self, image, depth, grade, fps, start_time, output_size, max_side, quality, preview_every,
-            unique_id=None, **anim):
+            unique_id=None, fps_in=None, **anim):
+        if fps_in is not None:                                 # сокет fps (напр. від Video Info) має перевагу над полем
+            fps = float(fps_in)
         preview = str(quality).startswith("прев")
         g = grade
         params_from_grade(g)                                   # ранній зрозумілий виняток, якщо підключили не те

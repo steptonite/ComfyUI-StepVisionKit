@@ -113,6 +113,7 @@ function openFull(node) {
     document.body.appendChild(ov);
     const panel = { node, frame, started: true, full: true };
     PANELS.add(panel);
+    const savedSize = node.size ? [node.size[0], node.size[1]] : null;     // у повному екрані нода не повинна змінювати розмір
     const esc = e => { if (e.key === "Escape") close(); };
     function close() {
         PANELS.delete(panel);
@@ -121,16 +122,20 @@ function openFull(node) {
         node.__dlFull = null;
         const inl = node.__dlPanel;
         if (inl) {               // вбудований тюнер повертається й бере поточні params_json
-            inl.frame.parentElement.style.display = "flex";
+            inl.frame.style.visibility = "";
             post(inl, { type: "depth_look_init", params: initParams(node), preset: presetWidget(node)?.value });
             post(inl, { type: "depth_look_refresh" });
         }
+        if (savedSize && node.size && (node.size[0] !== savedSize[0] || node.size[1] !== savedSize[1])) node.setSize(savedSize);
+        const nudge = () => { try { inl?.frame.contentWindow?.dispatchEvent(new Event("resize")); } catch (_) {} };
+        requestAnimationFrame(nudge); setTimeout(nudge, 250);       // тюнер перемірює кадр і сітку під справжній розмір
         markChanged();
     }
     back.onclick = close;
     window.addEventListener("keydown", esc, true);
     node.__dlFull = { close };
-    if (node.__dlPanel) node.__dlPanel.frame.parentElement.style.display = "none";   // без подвійних рендерів
+    // вбудований тюнер ховаємо БЕЗ зміни розміру (display:none обнуляв iframe: тюнер перелічував сітку й кадр у 0×0, нода шрінкалась) - лише visibility
+    if (node.__dlPanel) node.__dlPanel.frame.style.visibility = "hidden";
     frame.src = tunerURL(node);
 }
 
@@ -197,6 +202,7 @@ app.registerExtension({
             const warns = ev.detail?.output?.depth_look_warn || [];     // запобіжники ноди -> плашка в тюнері
             const gr = ev.detail?.output?.depth_look_grade?.[0];        // підключено grade -> база для тюнера
             for (const p of PANELS) if (String(p.node.id) === String(id)) {   // і оверлей теж
+                if (!p.full && p.node.__dlFull) continue;       // вбудований під оверлеєм не оновлюємо: без подвійних рендерів
                 if (gr?.params) {
                     const key = JSON.stringify(gr.params);
                     if (p.node.__dlGradeKey !== key) {                  // грейд змінився - тюнер бере його, якщо власних правок ще нема

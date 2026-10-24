@@ -285,10 +285,92 @@ def watermark(arr, text="PREVIEW 720 - mode: full render for final"):
     return arr
 
 
+# ───────────── паралельний рендер кадрів ─────────────
+class _NoFork(Exception):
+    """ОС без fork - рендеримо послідовно."""
+
+
+def _cpus():
+    try:
+        return len(os.sched_getaffinity(0))
+    except Exception:
+        return os.cpu_count() or 1
+
+
+def _mem_budget():
+    """Скільки байт RAM можна віддати воркерам: min(доступно, ліміт cgroup/контейнера); None = невідомо."""
+    total, avail = _ram()
+    lim = None
+    for p in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            v = open(p).read().strip()
+            if v.isdigit() and int(v) < (1 << 50):
+                lim = int(v)
+                break
+        except Exception:
+            pass
+    cands = [x for x in (avail, lim, total and total * 0.6) if x]
+    return min(cands) if cands else None
+
+
+def pick_workers(B, work_px, requested=None):
+    """Кількість процесів: requested -> env SVK_WORKERS -> ядра; ≤ кадрів; ≤ RAM (GB_PER_MP на Мп робочого кадру)."""
+    if requested is None:
+        requested = _cpus()
+        env = os.environ.get("SVK_WORKERS", "").strip()
+        if env.isdigit() and int(env) > 0:
+            requested = min(requested, int(env))
+    n = max(1, min(int(requested), int(B)))
+    budget = _mem_budget()
+    if n > 1 and budget:
+        per = GB_PER_MP * max(work_px, 1) / 1e6 * 1e9
+        n = max(1, min(n, int(0.7 * budget / per)))
+    return n
+
+
+_PJOB = {}
+
+
+def _pinit(fn, out):
+    _PJOB["fn"], _PJOB["out"] = fn, out
+    try:
+        cv2.setNumThreads(1)             # N процесів по 1 потоку замість N x (всі ядра)
+    except Exception:
+        pass
+
+
+def _pjob(i):
+    res = _PJOB["fn"](i)
+    out = _PJOB["out"]
+    if isinstance(out, np.memmap):       # спільна memmap-сторінка: пишемо прямо, назад нічого не шлемо
+        out[i] = res
+        return i, None
+    return i, res
+
+
+def _render_parallel(render_frame, out, B, n_workers, progress):
+    import multiprocessing as mp
+    if "fork" not in mp.get_all_start_methods():
+        raise _NoFork()
+    ctx = mp.get_context("fork")         # діти успадковують масиви/mmap без серіалізації
+    print("[DepthLook] %d frame(s) in %d parallel process(es)" % (B, n_workers), flush=True)
+    done = 0
+    with ctx.Pool(n_workers, initializer=_pinit, initargs=(render_frame, out)) as pool:
+        for i, res in pool.imap_unordered(_pjob, range(B)):
+            if res is not None:
+                out[i] = res
+            done += 1
+            if progress is not None:
+                progress(done, B)
+        if isinstance(out, np.memmap):
+            out.flush()
+    return out
+
+
 def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=True,
                 light_is_near=True, overrides="{}", palette="", fps=24.0, start_time=0.0,
                 params_json="", max_side=0, depth_levels="clip", out=None, progress=None,
-                output_size=0, static=False, grade=None, anim=None, frame_step=1):
+                output_size=0, static=False, grade=None, anim=None, frame_step=1, workers=None):
     """frames_np: (B,H,W,3) float 0..1; depths_np: (B|1,h,w) або (B|1,h,w,C) float (канал 0).
     Кадр i отримує time = start_time + i/fps (анімаційні повзунки: хвиля, пульс глоу, серпанок, шлейф) і
     seed зерна = seed + i (зерно живе; warp_seed стала). Кадри йдуть по одному, без великих проміжних стеків.
@@ -299,6 +381,8 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
     (довга сторона = max_side від ФІНАЛЬНОГО розміру) і росте назад до фінального.
     frame_step > 1: кадри вже проріджені викликачем (кожен frame_step-й) - time і seed рахуються по справжньому номеру.
     depth_levels="clip": рівні глибини з усього кліпу (look.clip_levels), "frame": покадровий розтяг.
+    workers: скільки процесів рахують кадри паралельно (None = авто: ядра за sched_getaffinity, стеля env SVK_WORKERS і RAM;
+    результат побітово той самий, що й послідовний - кожен кадр залежить лише від свого номера).
     out: готовий (B,Ho,Wo,3) float32 масив для результату (напр. numpy-вʼю torch-тензора). -> out."""
     if not isinstance(frames_np, np.ndarray):
         frames_np = np.asarray(frames_np)
@@ -358,20 +442,32 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
             return look_api.prepare_frame_depth(rgb, get_depth(i), clean_depth, light_is_near, levels)
         offs = look.camera_offsets(_Lazy(B, get_rgb), _Lazy(B, small_depth), normalize=True)
     base_ox, base_oy = float(kw.get("grad_offset_x", 0.0)), float(kw.get("grad_offset_y", 0.0))
-    for i in range(B):
+
+    def render_frame(i):
+        """Кадр i -> (Ho,Wo,3) float32. Залежить ЛИШЕ від i (time, seed, офсети камери) і від спільних levels/offs - тож
+        порядок і кількість процесів не змінюють результат."""
         rgb = get_rgb(i)
         d = look_api.prepare_frame_depth(rgb, get_depth(i), clean_depth, light_is_near, levels)
         si = i * step                                              # справжній номер кадру в кліпі
-        kw["time"] = 0.0 if static else float(start_time) + si / max(float(fps), 1e-6)
-        kw["seed"] = base_seed + si
+        k = dict(kw)
+        k["time"] = 0.0 if static else float(start_time) + si / max(float(fps), 1e-6)
+        k["seed"] = base_seed + si
         if offs is not None:
-            kw["grad_offset_x"] = base_ox + float(offs[i][0])
-            kw["grad_offset_y"] = base_oy + float(offs[i][1])
-        res = look.depth_look_lens(rgb, np.ascontiguousarray(d, np.float32), **kw)
+            k["grad_offset_x"] = base_ox + float(offs[i][0])
+            k["grad_offset_y"] = base_oy + float(offs[i][1])
+        res = look.depth_look_lens(rgb, np.ascontiguousarray(d, np.float32), **k)
         if (Ww, Hw) != (Wo, Ho):
             res = np.clip(cv2.resize(res, (Wo, Ho), interpolation=cv2.INTER_CUBIC), 0, 1)
-        out[i] = res
-        del rgb, d, res
+        return res
+
+    n_workers = pick_workers(B, Ww * Hw, workers)
+    if n_workers > 1:
+        try:
+            return _render_parallel(render_frame, out, B, n_workers, progress)
+        except _NoFork:
+            pass
+    for i in range(B):
+        out[i] = render_frame(i)
         if progress is not None:
             progress(i + 1, B)
         if (i + 1) % 10 == 0:

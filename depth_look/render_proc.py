@@ -27,6 +27,21 @@ def _interrupted():
         return None
 
 
+def _kill_group(proc):
+    """Прибити воркер І його паралельних дітей (група процесу = pid воркера, див. start_new_session)."""
+    try:
+        if proc.poll() is None:
+            os.killpg(proc.pid, 9)
+        elif hasattr(os, "killpg"):
+            os.killpg(proc.pid, 9)                         # воркер вийшов, а діти ще могли лишитись
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+
+
 def _render_subproc(frames, dep, kw, progress, out_shape=None):
     """Рендер у дочірньому процесі worker.py. -> (B,Ho,Wo,3) float32 ndarray; None, якщо воркер не стартував.
     out_shape за замовч. = форма входу. Завдання лежить у _cache/jobs/<id>/ (диск проєкту, не /tmp) і
@@ -48,7 +63,8 @@ def _render_subproc(frames, dep, kw, progress, out_shape=None):
         errf = open(os.path.join(job, "err.txt"), "w")
         try:
             proc = subprocess.Popen([sys.executable, os.path.join(_HERE, "worker.py"), job],
-                                    stdout=subprocess.PIPE, stderr=errf, text=True, bufsize=1)
+                                    stdout=subprocess.PIPE, stderr=errf, text=True, bufsize=1,
+                                    start_new_session=True)   # своя група: kill прибиває й паралельних дітей воркера
         except Exception as e:
             print("[DepthLook] worker failed to start (%s) - computing in the Comfy process" % e)
             return None
@@ -80,8 +96,7 @@ def _render_subproc(frames, dep, kw, progress, out_shape=None):
                 print(line.rstrip())
             mm = _interrupted()
             if mm is not None:
-                proc.kill()
-                proc.wait()
+                _kill_group(proc)
                 raise mm.InterruptProcessingException()
         rc = proc.wait()
         if rc != 0:
@@ -93,9 +108,8 @@ def _render_subproc(frames, dep, kw, progress, out_shape=None):
         del mmr
         return arr
     finally:
-        if proc is not None and proc.poll() is None:
-            proc.kill()
-            proc.wait()
+        if proc is not None:
+            _kill_group(proc)
         shutil.rmtree(job, ignore_errors=True)
 
 
@@ -158,7 +172,7 @@ def render(frames, dep, kw, progress, out_shape):
         arr = _render_subproc(frames, dep, kw, progress, out_shape)
     if arr is None:
         arr = np.empty(tuple(out_shape), np.float32)
-        core.apply_numpy(frames, dep, out=arr, progress=progress, **kw)
+        core.apply_numpy(frames, dep, out=arr, progress=progress, workers=1, **kw)   # у процесі Comfy fork небезпечний
     return arr
 
 

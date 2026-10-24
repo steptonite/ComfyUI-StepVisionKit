@@ -424,7 +424,10 @@ function setupVideo(node, specs) {
     V.capR = el("span", "svk-num", "");
     cap.append(V.capL, V.capR);
     const view = el("div", "svk-frame svk-viewer");
+    V.view = view;
     V.img = el("img"); V.img.alt = ""; V.img.draggable = false; V.img.style.visibility = "hidden";
+    // рамка під пропорції кадру (вертикальне 9:16 і широке), а не завжди 16:9; висоту стримує max-height картки
+    V.img.addEventListener("load", () => { if (V.img.naturalWidth) view.style.aspectRatio = String(clamp(V.img.naturalWidth / V.img.naturalHeight, 0.5, 2.4)); });
     V.empty = el("div", "svk-empty still");
     const run = el("button", "svk-btn primary", ICON.play + " " + T("Preview"));
     run.style.cssText = "display:inline-flex;align-items:center;gap:6px";
@@ -445,12 +448,15 @@ function setupVideo(node, specs) {
     };
     // fps + превʼю/фінал
     const bar = el("div", "svk-bar");
-    if (specs.fps) { const c = control(node, "fps", specs.fps, "fps", { number: true }); c.row.style.flex = "1"; bar.append(c.row); ctl.push(c); }
+    if (specs.fps) { const c = control(node, "fps", specs.fps, "fps", { number: true }); c.row.style.flex = "1"; V.fpsRow = c.row; V.fpsTip = c.row.title; bar.append(c.row); ctl.push(c); }
     if (specs.quality) {
         const vals = specs.quality[0] || [];
         const c = control(node, "quality", specs.quality, "", { seg: { [vals[0]]: T("preview"), [vals[1]]: T("final") }, tip: specs.quality[1]?.tooltip });
         bar.append(c.row); ctl.push(c);
     }
+    V.fullBtn = el("button", "svk-ibtn", ICON.full); V.fullBtn.type = "button"; V.fullBtn.title = T("full screen (Esc — back)");
+    V.fullBtn.onclick = () => openVideoFull(V);
+    bar.append(V.fullBtn);
     // рух кольору: режим словами замість «0 static · 1 camera…», далі лише те, що в ньому діє
     const col = el("div", "svk-sec");
     col.append(el("div", "svk-cap", "<b>" + T("Color motion") + "</b>"));
@@ -479,6 +485,8 @@ function setupVideo(node, specs) {
     root.append(cap, view, V.strip, V.status, bar, col, fx, V.more);
     V.hint = scrollHint(root);
     V.refresh = () => {
+        const linked = fpsLinked(node);                    // fps прийшов із сокета - поле не діє
+        if (V.fpsRow) { V.fpsRow.style.opacity = linked ? ".4" : ""; V.fpsRow.style.pointerEvents = linked ? "none" : ""; V.fpsRow.title = linked ? T("fps comes from the connected input") : V.fpsTip; }
         const mode = Number(W(node, "grad_mode")?.value || 0);
         modeSel.value = String(mode);
         if (amt) amt.row.style.display = mode ? "" : "none";
@@ -497,21 +505,75 @@ function setupVideo(node, specs) {
     fitToNode(node, root);
     V.refresh();
 }
+const fpsLinked = node => node.inputs?.some(i => i.name === "fps_in" && i.link != null);
 function stripURL(node, i, stamp) { return api.apiURL("/depth_look/strip/" + encodeURIComponent(node.id) + "/" + i + "?v=" + (stamp || 0)); }
 function showShot(V, i) {
     V.sel = i;
     V.img.src = stripURL(V.node, i, V.meta.stamp);
     V.img.style.visibility = "visible"; V.empty.style.display = "none"; V.play.style.display = "inline-flex";
     [...V.strip.children].forEach((c, k) => c.classList.toggle("is-sel", k === i));
+    V.full?.show(i);
 }
 function togglePlay(V) {
-    if (V.timer) { clearInterval(V.timer); V.timer = null; V.play.innerHTML = ICON.play; V.play.classList.remove("is-on"); return; }
+    if (V.timer) { clearInterval(V.timer); V.timer = null; V.play.innerHTML = ICON.play; V.play.classList.remove("is-on"); V.full?.paintPlay(); return; }
     const fps = clamp(V.meta?.play_fps || 8, 1, 12);
     V.play.innerHTML = ICON.pause; V.play.classList.add("is-on");
     V.timer = setInterval(() => showShot(V, (V.sel + 1) % V.meta.n), 1000 / fps);
+    V.full?.paintPlay();
+}
+// повний екран відео-ноди: той самий механізм, що в тюнера DepthLook (оверлей поверх графа, Esc - назад)
+function openVideoFull(V) {
+    if (V.full || !V.meta?.n) return;
+    const ov = el("div");
+    ov.style.cssText = "position:fixed;inset:0;z-index:100000;background:#0e0e10;display:flex;flex-direction:column;color:#ccc;font:13px system-ui";
+    const bar = el("div");
+    bar.style.cssText = "display:flex;align-items:center;gap:12px;padding:6px 12px;background:#18181b";
+    const play = el("button", "svk-ibtn", ICON.play); play.type = "button"; play.title = T("play the strip");
+    const cnt = el("span", "svk-num");
+    const back = el("button", null, T("✕ back to graph (Esc)"));
+    back.style.cssText = "margin-left:auto;padding:5px 14px;border:1px solid #444;border-radius:6px;background:#26262b;color:#eee;cursor:pointer";
+    bar.append(el("span", null, T("Depth Look · video node #") + V.node.id), play, cnt, back);
+    const stage = el("div"); stage.style.cssText = "flex:1;min-height:0;position:relative";
+    const img = el("img"); img.alt = ""; img.draggable = false;
+    img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block";
+    stage.append(img);
+    const strip = el("div", "svk-strip"); strip.style.cssText += ";padding:8px 12px;justify-content:center";
+    for (let i = 0; i < V.meta.n; i++) {
+        const b = el("button", "svk-shot"); b.type = "button"; b.style.width = "88px";
+        b.innerHTML = '<div class="th"><img alt="" draggable="false"></div><div class="nm"></div>';
+        const th = b.querySelector(".th"); th.style.cssText = "width:88px;height:88px";
+        b.querySelector("img").src = stripURL(V.node, i, V.meta.stamp);
+        b.querySelector(".nm").textContent = "#" + (V.meta.frames?.[i] ?? i);
+        b.onclick = () => showShot(V, i);
+        strip.append(b);
+    }
+    ov.append(bar, stage, strip);
+    document.body.appendChild(ov);
+    const esc = e => {
+        if (e.key === "Escape") { e.stopPropagation(); close(); }
+        else if (e.key === "ArrowRight") showShot(V, (V.sel + 1) % V.meta.n);
+        else if (e.key === "ArrowLeft") showShot(V, (V.sel - 1 + V.meta.n) % V.meta.n);
+        else if (e.key === " ") { e.preventDefault(); togglePlay(V); }
+    };
+    function close() {
+        window.removeEventListener("keydown", esc, true);
+        ov.remove();
+        V.full = null;
+    }
+    V.full = {
+        close,
+        show(i) { img.src = stripURL(V.node, i, V.meta.stamp); cnt.textContent = (i + 1) + " / " + V.meta.n; [...strip.children].forEach((c, k) => c.classList.toggle("is-sel", k === i)); },
+        paintPlay() { play.innerHTML = V.timer ? ICON.pause : ICON.play; play.classList.toggle("is-on", !!V.timer); },
+    };
+    play.onclick = () => togglePlay(V);
+    back.onclick = close;
+    window.addEventListener("keydown", esc, true);
+    V.full.paintPlay();
+    V.full.show(V.sel);
 }
 function applyStrip(node, meta) {
     const V = node.__svkv; if (!V || !meta || !meta.n) return;
+    V.full?.close();
     if (V.timer) togglePlay(V);
     V.meta = meta;
     V.capR.textContent = meta.n + " / " + meta.total;
@@ -581,11 +643,18 @@ app.registerExtension({
             }
             return r;
         };
+        const onConn = nodeType.prototype.onConnectionsChange;
+        nodeType.prototype.onConnectionsChange = function () {
+            const r = onConn?.apply(this, arguments);
+            if (name === VIDEO) this.__svkv?.refresh?.();
+            return r;
+        };
         const onRemoved = nodeType.prototype.onRemoved;
         nodeType.prototype.onRemoved = function () {
             if (this.__svk?.blobURL) URL.revokeObjectURL(this.__svk.blobURL);
             if (this.__svk) this.__svk.thumbToken++;
             if (this.__svkv?.timer) clearInterval(this.__svkv.timer);
+            this.__svkv?.full?.close();
             return onRemoved?.apply(this, arguments);
         };
     },
