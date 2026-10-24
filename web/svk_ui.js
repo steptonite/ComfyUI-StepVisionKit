@@ -17,6 +17,21 @@ export function hideWidget(w) {
     w.computeLayoutSize = () => ({ minHeight: 0, maxHeight: 0, minWidth: 0 });
     if (w.element?.style) w.element.style.display = "none";
 }
+// Знімок того, що бачить користувач на ноді (назва вже в мові паку, підписи, сховані віджети). Повноекранний режим нічого з цього
+// не міняє, але фронтенд міг за цей час перемалювати ноду з англійськими базовими підписами - тож після виходу повертаємо знімок.
+export function snapUI(node) {
+    return { title: node.title, labels: (node.widgets || []).map(w => [w, w.label, !!w.hidden]) };
+}
+export function restoreUI(node, s, after) {
+    if (!s) return;
+    if (s.title != null && node.title !== s.title) node.title = s.title;
+    for (const [w, label, hidden] of s.labels) {
+        if (w.label !== label) w.label = label;
+        if (hidden && !w.hidden) hideWidget(w);
+    }
+    try { after?.(); } catch (_) {}
+    try { app.graph?.setDirtyCanvas(true, true); } catch (_) {}
+}
 export function markChanged() {
     try { app.graph?.setDirtyCanvas(true, true); } catch (_) {}
     try { app.extensionManager?.workflow?.activeWorkflow?.changeTracker?.checkState(); } catch (_) {}

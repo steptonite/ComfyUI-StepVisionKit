@@ -4,7 +4,7 @@
 // Також тут: стрічка кадрів-превʼю відео-ноди і єдиний колір карток трьох нод. Стилі й токени - svk_ui.css.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { ICON, presetLabel, control, morePanel, moreSummary, keepWheel, onWheel, fitToNode, scrollHint, stageLine } from "./svk_ui.js";
+import { ICON, presetLabel, control, morePanel, moreSummary, keepWheel, onWheel, fitToNode, scrollHint, stageLine, snapUI, restoreUI } from "./svk_ui.js";
 import { T } from "./svk_i18n.js";
 
 const SIMPLE = "DepthLookSimple";
@@ -413,6 +413,69 @@ const FX = [                       // [параметр, підпис, підп�
 ];
 const VIDEO_MORE = [["start_time", T("Start, s")], ["preview_every", T("Every Nth frame in preview")],
                     ["output_size", T("Output size")], ["max_side", T("Working resolution")]];
+// верхній рядок відео-ноди: fps + превʼю/фінал. Контроли пишуть прямо у нативні віджети ноди, тож їх можна показати де завгодно
+function buildTop(node, specs, onChange) {
+    const bar = el("div", "svk-bar");
+    const ctl = [];
+    let fpsRow = null, fpsTip = "";
+    if (specs.fps) { const c = control(node, "fps", specs.fps, "fps", { number: true, onChange }); c.row.style.flex = "1"; fpsRow = c.row; fpsTip = c.row.title; bar.append(c.row); ctl.push(c); }
+    if (specs.quality) {
+        const vals = specs.quality[0] || [];
+        const c = control(node, "quality", specs.quality, "", { seg: { [vals[0]]: T("preview"), [vals[1]]: T("final") }, tip: specs.quality[1]?.tooltip, onChange });
+        bar.append(c.row); ctl.push(c);
+    }
+    const paintFps = () => {
+        const linked = fpsLinked(node);
+        if (fpsRow) { fpsRow.style.opacity = linked ? ".4" : ""; fpsRow.style.pointerEvents = linked ? "none" : ""; fpsRow.title = linked ? T("fps comes from the connected input") : fpsTip; }
+    };
+    return { bar, ctl, fpsRow, fpsTip, paintFps };
+}
+// рух кольору + рух ефектів + «ще»: один збірник і для картки в ноді, і для панелі повного екрана
+function buildMotion(node, specs, onChange) {
+    const ctl = [];
+    const add = (parent, name, label, opts = {}) => {
+        if (!specs[name] || !W(node, name)) return null;
+        const c = control(node, name, specs[name], label, { ...opts, onChange });
+        parent.append(c.row); ctl.push(c); return c;
+    };
+    // рух кольору: режим словами замість «0 static · 1 camera…», далі лише те, що в ньому діє
+    const col = el("div", "svk-sec");
+    col.append(el("div", "svk-cap", "<b>" + T("Color motion") + "</b>"));
+    const modeRow = el("label", "svk-field"); modeRow.title = specs.grad_mode?.[1]?.tooltip || "";
+    const modeSel = el("select");
+    for (const [v, lb] of GRAD_MODES) modeSel.append(new Option(lb, v));
+    modeSel.onchange = () => { setW(node, "grad_mode", Number(modeSel.value)); markChanged(); onChange?.(); };
+    modeRow.append(el("span", "t", T("Mode")), modeSel);
+    col.append(modeRow);
+    const amt = add(col, "grad_amount", T("Strength"));
+    const sub = el("div", "svk-sub"); col.append(sub);
+    const subCtl = {};
+    for (const name of new Set(Object.values(GRAD_SUB).flat())) { const c = add(sub, name, GRAD_LABELS[name] || name); if (c) subCtl[name] = c; }
+    // рух ефектів: кожен ефект - один повзунок; уточнення - під ним, коли ефект увімкнено
+    const fx = el("div", "svk-sec");
+    fx.append(el("div", "svk-cap", "<b>" + T("Effect motion") + "</b>"));
+    const fxSub = [];
+    for (const [name, label, subs] of FX) {
+        const c = add(fx, name, label);
+        if (!c || !subs) continue;
+        const box = el("div", "svk-sub"); fx.append(box);
+        for (const [sn, sl] of subs) add(box, sn, sl);
+        fxSub.push([name, box]);
+    }
+    const more = morePanel(node, specs, VIDEO_MORE);
+    const refresh = () => {
+        const mode = Number(W(node, "grad_mode")?.value || 0);
+        modeSel.value = String(mode);
+        if (amt) amt.row.style.display = mode ? "" : "none";
+        const on = new Set(GRAD_SUB[mode] || []);
+        for (const [n, c] of Object.entries(subCtl)) c.row.style.display = on.has(n) ? "" : "none";
+        sub.classList.toggle("is-hidden", !on.size);
+        for (const [n, box] of fxSub) box.classList.toggle("is-hidden", !Number(W(node, n)?.value));
+    };
+    const sync = () => { ctl.forEach(c => c.sync()); more.sync(); refresh(); };
+    refresh();
+    return { els: [col, fx, more], more, ctl, refresh, sync };
+}
 function setupVideo(node, specs) {
     if (node.__svkv) return;
     const V = { node, meta: null, sel: 0, timer: null };
@@ -439,64 +502,25 @@ function setupVideo(node, specs) {
     view.append(V.img, V.empty, V.play);
     V.strip = el("div", "svk-strip");
     V.status = stageLine(node);
-    const ctl = [];
     const refresh = () => V.refresh?.();
-    const add = (parent, name, label, opts = {}) => {
-        if (!specs[name] || !W(node, name)) return null;
-        const c = control(node, name, specs[name], label, { ...opts, onChange: refresh });
-        parent.append(c.row); ctl.push(c); return c;
-    };
-    // fps + превʼю/фінал
-    const bar = el("div", "svk-bar");
-    if (specs.fps) { const c = control(node, "fps", specs.fps, "fps", { number: true }); c.row.style.flex = "1"; V.fpsRow = c.row; V.fpsTip = c.row.title; bar.append(c.row); ctl.push(c); }
-    if (specs.quality) {
-        const vals = specs.quality[0] || [];
-        const c = control(node, "quality", specs.quality, "", { seg: { [vals[0]]: T("preview"), [vals[1]]: T("final") }, tip: specs.quality[1]?.tooltip });
-        bar.append(c.row); ctl.push(c);
-    }
+    // fps + превʼю/фінал; повзунки руху й «ще» - ті самі збірники, що й у повному екрані (openVideoFull)
+    const top = buildTop(node, specs, refresh);
+    const bar = top.bar, ctl = top.ctl;
+    V.fpsRow = top.fpsRow; V.fpsTip = top.fpsTip;
     V.fullBtn = el("button", "svk-ibtn", ICON.full); V.fullBtn.type = "button"; V.fullBtn.title = T("full screen (Esc — back)");
     V.fullBtn.onclick = () => openVideoFull(V);
     bar.append(V.fullBtn);
-    // рух кольору: режим словами замість «0 static · 1 camera…», далі лише те, що в ньому діє
-    const col = el("div", "svk-sec");
-    col.append(el("div", "svk-cap", "<b>" + T("Color motion") + "</b>"));
-    const modeRow = el("label", "svk-field"); modeRow.title = specs.grad_mode?.[1]?.tooltip || "";
-    const modeSel = el("select");
-    for (const [v, lb] of GRAD_MODES) modeSel.append(new Option(lb, v));
-    modeSel.onchange = () => { setW(node, "grad_mode", Number(modeSel.value)); markChanged(); refresh(); };
-    modeRow.append(el("span", "t", T("Mode")), modeSel);
-    col.append(modeRow);
-    const amt = add(col, "grad_amount", T("Strength"));
-    const sub = el("div", "svk-sub"); col.append(sub);
-    const subCtl = {};
-    for (const name of new Set(Object.values(GRAD_SUB).flat())) { const c = add(sub, name, GRAD_LABELS[name] || name); if (c) subCtl[name] = c; }
-    // рух ефектів: кожен ефект - один повзунок; уточнення - під ним, коли ефект увімкнено
-    const fx = el("div", "svk-sec");
-    fx.append(el("div", "svk-cap", "<b>" + T("Effect motion") + "</b>"));
-    const fxSub = [];
-    for (const [name, label, subs] of FX) {
-        const c = add(fx, name, label);
-        if (!c || !subs) continue;
-        const box = el("div", "svk-sub"); fx.append(box);
-        for (const [sn, sl] of subs) add(box, sn, sl);
-        fxSub.push([name, box]);
-    }
-    V.more = morePanel(node, specs, VIDEO_MORE);
-    root.append(cap, view, V.strip, V.status, bar, col, fx, V.more);
+    V.specs = specs;
+    const M = buildMotion(node, specs, refresh);
+    V.more = M.more;
+    root.append(cap, view, V.strip, V.status, bar, ...M.els);
     V.hint = scrollHint(root);
     V.refresh = () => {
-        const linked = fpsLinked(node);                    // fps прийшов із сокета - поле не діє
-        if (V.fpsRow) { V.fpsRow.style.opacity = linked ? ".4" : ""; V.fpsRow.style.pointerEvents = linked ? "none" : ""; V.fpsRow.title = linked ? T("fps comes from the connected input") : V.fpsTip; }
-        const mode = Number(W(node, "grad_mode")?.value || 0);
-        modeSel.value = String(mode);
-        if (amt) amt.row.style.display = mode ? "" : "none";
-        const on = new Set(GRAD_SUB[mode] || []);
-        for (const [n, c] of Object.entries(subCtl)) c.row.style.display = on.has(n) ? "" : "none";
-        sub.classList.toggle("is-hidden", !on.size);
-        for (const [n, box] of fxSub) box.classList.toggle("is-hidden", !Number(W(node, n)?.value));
+        top.paintFps();                                    // fps прийшов із сокета - поле не діє
+        M.refresh();
         V.hint?.();
     };
-    V.sync = () => { ctl.forEach(c => c.sync()); V.more.sync(); V.refresh(); };
+    V.sync = () => { ctl.forEach(c => c.sync()); M.sync(); V.refresh(); };
     V.play.onclick = () => togglePlay(V);
     node.addDOMWidget("svk_strip", "svk_strip", root, { serialize: false, hideOnZoom: false, getMinHeight: () => 380 });
     for (const w of [...node.widgets]) if (w.name !== "svk_strip") hideWidget(w);
@@ -521,59 +545,109 @@ function togglePlay(V) {
     V.timer = setInterval(() => showShot(V, (V.sel + 1) % V.meta.n), 1000 / fps);
     V.full?.paintPlay();
 }
-// повний екран відео-ноди: той самий механізм, що в тюнера DepthLook (оверлей поверх графа, Esc - назад)
+// повний екран відео-ноди: оверлей поверх графа (Esc - назад). Зліва кадр і стрічка, справа ті самі повзунки анімації, що на ноді:
+// контроли пишуть у ті самі нативні віджети, тож крутити можна, не виходячи, а «Запустити» ставить прогін у чергу Comfy.
 function openVideoFull(V) {
-    if (V.full || !V.meta?.n) return;
+    if (V.full) return;
+    const node = V.node, specs = V.specs || {};
+    const savedSize = node.size ? [node.size[0], node.size[1]] : null;
+    const savedUI = snapUI(node);
     const ov = el("div");
     ov.style.cssText = "position:fixed;inset:0;z-index:100000;background:#0e0e10;display:flex;flex-direction:column;color:#ccc;font:13px system-ui";
     const bar = el("div");
     bar.style.cssText = "display:flex;align-items:center;gap:12px;padding:6px 12px;background:#18181b";
     const play = el("button", "svk-ibtn", ICON.play); play.type = "button"; play.title = T("play the strip");
     const cnt = el("span", "svk-num");
+    const stat = el("span", "svk-num"); stat.style.cssText = "margin-left:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0";
+    const runBtn = el("button", "svk-btn primary", ICON.play + " " + T("Run")); runBtn.type = "button";
+    runBtn.style.cssText = "display:inline-flex;align-items:center;gap:6px;margin-left:auto";
+    runBtn.title = T("queue a run with the current settings (a run already in progress is not changed)");
     const back = el("button", null, T("✕ back to graph (Esc)"));
-    back.style.cssText = "margin-left:auto;padding:5px 14px;border:1px solid #444;border-radius:6px;background:#26262b;color:#eee;cursor:pointer";
-    bar.append(el("span", null, T("Depth Look · video node #") + V.node.id), play, cnt, back);
+    back.style.cssText = "padding:5px 14px;border:1px solid #444;border-radius:6px;background:#26262b;color:#eee;cursor:pointer";
+    bar.append(el("span", null, T("Depth Look · video node #") + node.id), play, cnt, stat, runBtn, back);
+    const body = el("div"); body.style.cssText = "flex:1;min-height:0;display:flex";
+    const left = el("div"); left.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column";
     const stage = el("div"); stage.style.cssText = "flex:1;min-height:0;position:relative";
     const img = el("img"); img.alt = ""; img.draggable = false;
     img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block";
-    stage.append(img);
+    const none = el("div", null, T("No frames yet — press Run, the preview strip appears when it finishes"));
+    none.style.cssText = "position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#888";
+    stage.append(img, none);
     const strip = el("div", "svk-strip"); strip.style.cssText += ";padding:8px 12px;justify-content:center";
-    for (let i = 0; i < V.meta.n; i++) {
-        const b = el("button", "svk-shot"); b.type = "button"; b.style.width = "88px";
-        b.innerHTML = '<div class="th"><img alt="" draggable="false"></div><div class="nm"></div>';
-        const th = b.querySelector(".th"); th.style.cssText = "width:88px;height:88px";
-        b.querySelector("img").src = stripURL(V.node, i, V.meta.stamp);
-        b.querySelector(".nm").textContent = "#" + (V.meta.frames?.[i] ?? i);
-        b.onclick = () => showShot(V, i);
-        strip.append(b);
-    }
-    ov.append(bar, stage, strip);
+    left.append(stage, strip);
+    // права панель: ті самі збірники, що й на ноді; зміна тут одразу видна й на ноді (V.sync), і навпаки після виходу
+    const panel = el("div", "svk-card svk-scroll");
+    panel.style.cssText = "flex:none;width:360px;height:100%;max-height:none;border-left:1px solid #2a2a2f;padding:10px 10px 12px;background:#151518";
+    keepWheel(panel);
+    const onChange = () => { V.sync(); M.refresh(); top.paintFps(); };
+    const top = buildTop(node, specs, onChange);
+    const M = buildMotion(node, specs, onChange);
+    panel.append(top.bar, ...M.els);
+    body.append(left, panel);
+    ov.append(bar, body);
     document.body.appendChild(ov);
+    top.paintFps();
+    // рядок стану ноди (етап / кадр k з N) дзеркалимо в шапку, не створюючи другий stageLine (він перехопив би події в ноди)
+    const st = V.status.querySelector(".st"), tm = V.status.querySelector(".tm");
+    const paintStat = () => { stat.textContent = V.status.style.display === "none" ? "" : ((st?.textContent || "") + " " + (tm?.textContent || "")).trim(); };
+    const mo = new MutationObserver(paintStat);
+    mo.observe(V.status, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["style"] });
+    paintStat();
     const esc = e => {
+        const tag = (e.target?.tagName || "").toUpperCase();
+        const typing = tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA";
         if (e.key === "Escape") { e.stopPropagation(); close(); }
+        else if (typing) return;                          // стрілки/пробіл у полях панелі - не гортання кадрів
+        else if (!V.meta?.n) return;
         else if (e.key === "ArrowRight") showShot(V, (V.sel + 1) % V.meta.n);
         else if (e.key === "ArrowLeft") showShot(V, (V.sel - 1 + V.meta.n) % V.meta.n);
         else if (e.key === " ") { e.preventDefault(); togglePlay(V); }
     };
     function close() {
         window.removeEventListener("keydown", esc, true);
+        mo.disconnect();
         ov.remove();
         V.full = null;
+        V.sync();                                        // значення, змінені в оверлеї, - на картку ноди
+        if (savedSize && node.size && (node.size[0] !== savedSize[0] || node.size[1] !== savedSize[1])) node.setSize(savedSize);
+        restoreUI(node, savedUI);
+        setTimeout(() => restoreUI(node, savedUI), 250);
+        markChanged();
+    }
+    function fillStrip() {                               // (пере)будувати плитки: після нового прогону їх кількість інша
+        strip.textContent = "";
+        const m = V.meta;
+        none.style.display = m?.n ? "none" : "flex"; img.style.display = m?.n ? "" : "none";
+        play.style.visibility = m?.n ? "" : "hidden";
+        if (!m?.n) { cnt.textContent = ""; return; }
+        for (let i = 0; i < m.n; i++) {
+            const b = el("button", "svk-shot"); b.type = "button"; b.style.width = "88px";
+            b.innerHTML = '<div class="th"><img alt="" draggable="false"></div><div class="nm"></div>';
+            const th = b.querySelector(".th"); th.style.cssText = "width:88px;height:88px";
+            b.querySelector("img").src = stripURL(node, i, m.stamp);
+            b.querySelector(".nm").textContent = "#" + (m.frames?.[i] ?? i);
+            b.onclick = () => showShot(V, i);
+            strip.append(b);
+        }
     }
     V.full = {
         close,
-        show(i) { img.src = stripURL(V.node, i, V.meta.stamp); cnt.textContent = (i + 1) + " / " + V.meta.n; [...strip.children].forEach((c, k) => c.classList.toggle("is-sel", k === i)); },
+        show(i) {
+            if (!V.meta?.n) return;
+            img.src = stripURL(node, i, V.meta.stamp); cnt.textContent = (i + 1) + " / " + V.meta.n;
+            [...strip.children].forEach((c, k) => c.classList.toggle("is-sel", k === i));
+        },
+        reload() { fillStrip(); this.show(Math.min(V.sel, Math.max(0, (V.meta?.n || 1) - 1))); this.paintPlay(); },   // прийшла нова стрічка
         paintPlay() { play.innerHTML = V.timer ? ICON.pause : ICON.play; play.classList.toggle("is-on", !!V.timer); },
     };
     play.onclick = () => togglePlay(V);
+    runBtn.onclick = () => { markChanged(); try { app.queuePrompt(0, 1); } catch (e) { console.warn("[DepthLook]", e); } };
     back.onclick = close;
     window.addEventListener("keydown", esc, true);
-    V.full.paintPlay();
-    V.full.show(V.sel);
+    V.full.reload();
 }
 function applyStrip(node, meta) {
     const V = node.__svkv; if (!V || !meta || !meta.n) return;
-    V.full?.close();
     if (V.timer) togglePlay(V);
     V.meta = meta;
     V.capR.textContent = meta.n + " / " + meta.total;
@@ -588,6 +662,7 @@ function applyStrip(node, meta) {
         V.strip.append(b);
     }
     showShot(V, 0);
+    V.full?.reload();                                  // повний екран лишається відкритим і підхоплює новий результат
 }
 async function loadStripMeta(node) {          // після перезавантаження сторінки: стрічка з диска
     try {

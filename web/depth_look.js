@@ -2,7 +2,7 @@
 // (той самий tune.html, що й автономний тюнер). Параметри iframe -> віджет params_json (зберігається у workflow).
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { ICON, control, morePanel, keepWheel, stageLine } from "./svk_ui.js";
+import { ICON, control, morePanel, keepWheel, stageLine, snapUI, restoreUI } from "./svk_ui.js";
 import { T } from "./svk_i18n.js";
 
 const NODE = "DepthLook";
@@ -114,6 +114,8 @@ function openFull(node) {
     const panel = { node, frame, started: true, full: true };
     PANELS.add(panel);
     const savedSize = node.size ? [node.size[0], node.size[1]] : null;     // у повному екрані нода не повинна змінювати розмір
+    const after = () => node.__dlBar?.sync();
+    const savedUI = snapUI(node);                                          // ...і мову/підписи (22a): нода після виходу = нода до входу
     const esc = e => { if (e.key === "Escape") close(); };
     function close() {
         PANELS.delete(panel);
@@ -127,7 +129,8 @@ function openFull(node) {
             post(inl, { type: "depth_look_refresh" });
         }
         if (savedSize && node.size && (node.size[0] !== savedSize[0] || node.size[1] !== savedSize[1])) node.setSize(savedSize);
-        const nudge = () => { try { inl?.frame.contentWindow?.dispatchEvent(new Event("resize")); } catch (_) {} };
+        restoreUI(node, savedUI, after);
+        const nudge = () => { restoreUI(node, savedUI, after); try { inl?.frame.contentWindow?.dispatchEvent(new Event("resize")); } catch (_) {} };
         requestAnimationFrame(nudge); setTimeout(nudge, 250);       // тюнер перемірює кадр і сітку під справжній розмір
         markChanged();
     }
