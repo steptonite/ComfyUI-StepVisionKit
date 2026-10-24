@@ -21,6 +21,9 @@ from .lex.depth_curve import LexDepthCurve
 from .lex.depth_grade import SVKDepthGrade, SVKDepthGradeLive, SVKDepthGradeView, SVKDepthGradeVideoView
 from .lex.depth_raw import SVKDepthReceiver, SVKRawDepthLoad, SVKRawDepthSave, SVKSaveDepth16
 from .lex.hud_sprite import LexHUDSprite
+# Depth Look (look v1): лінзовий блюр за глибиною + палітра. Ключі DepthLook* лишились з окремого паку -
+# збережені воркфлоу відкриваються як були, змінилась лише категорія меню.
+from .depth_look import NODE_CLASS_MAPPINGS as DL_NODES, NODE_DISPLAY_NAME_MAPPINGS as DL_DISPLAY
 
 # Термо-сторож: пауза при перегріві SoC (м'яка — всередині процесу, жорстка — окремий наглядач).
 # Помилка сторожа не має ламати пакет: install() сам ловить усе, це страховка на імпорт.
@@ -52,6 +55,7 @@ NODE_CLASS_MAPPINGS = {
     "SVKRawDepthSave": SVKRawDepthSave,
     "SVKRawDepthLoad": SVKRawDepthLoad,
     "SVKSaveDepth16": SVKSaveDepth16,
+    **DL_NODES,
     **VK_DET, **VK_BOX, **VK_DRAW, **VK_OVL, **VK_MASK,
 }
 
@@ -69,6 +73,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "SVKRawDepthSave": "Raw Depth Save (DA3 geometry → EXR float32)",
     "SVKRawDepthLoad": "Raw Depth Load (EXR float32 → DA3 geometry)",
     "SVKSaveDepth16": "Save Depth 16-bit / EXR",
+    **DL_DISPLAY,
     **VKD_DET, **VKD_BOX, **VKD_DRAW, **VKD_OVL, **VKD_MASK,
 }
 
@@ -77,6 +82,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 _SUB = {"LexHUDSprite": "HUD", "LexHUDBoxes": "HUD", "VKDrawBoxes": "HUD",
         "VKOverlayOnBoxes": "HUD", "VKCutByMask": "HUD",
         "LexDepthCurve": "Depth", "SVKDepthGrade": "Depth", "SVKDepthGradeLive": "Depth", "SVKDepthGradeView": "Depth", "SVKDepthGradeVideoView": "Depth",
+        "DepthLook": "Depth", "DepthLookSimple": "Depth", "DepthLookVideo": "Depth",
         "SVKDepthReceiver": "Depth", "SVKRawDepthSave": "Depth", "SVKRawDepthLoad": "Depth", "SVKSaveDepth16": "Depth",
         "LexYOLODetect": "Detect", "VKDetect": "Detect",
         "LexBoxesToBBOX": "Detect", "VKBoxesToBBOX": "Detect", "VKSelectBox": "Detect"}

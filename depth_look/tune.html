@@ -1,0 +1,1678 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тюнер луку</title>
+<link rel="stylesheet" href="/depth_look/svk_ui.css">
+<style>
+:root {   /* спільні токени (js/svk_ui.css); другий аргумент - запасні значення для автономного тюнера без Comfy */
+  --bg: var(--svk-bg, #0e0e10); --panel: var(--svk-card, #151518); --line: var(--svk-line, #2a2a2f); --text: var(--svk-text, #e8e6e3); --dim: var(--svk-dim, #8d8b88);
+  --accent: var(--svk-accent, #e0a458); --field: var(--svk-raise, #1d1d21);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 13px/1.35 system-ui, -apple-system, sans-serif; display: flex; }
+#view { flex: 1; min-width: 0; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px; gap: 8px; }
+#view .imgwrap { flex: 1; min-height: 0; width: 100%; position: relative; overflow: hidden; }
+/* кадр завжди вписаний (contain) у колонку превʼю: будь-яка орієнтація без обрізання й розтягування */
+#img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
+/* зум/панорама кадру: #zoomer несе transform (translate+scale від лівого верху обгортки); усередині — превʼю й різкий шар #hq */
+#zoomer { position: absolute; inset: 0; transform-origin: 0 0; }
+#hq { position: absolute; pointer-events: none; visibility: hidden; display: block; }
+#zoomer.pix #img, #zoomer.pix #hq { image-rendering: pixelated; }
+.imgwrap { touch-action: pan-x pan-y; }
+body.zoomed .imgwrap { touch-action: none; }
+body.zoomed #img, body.spacepan #img, body.spacepan .imgwrap { cursor: grab; }
+body.zoomed.focuspick #img, body.zoomed.eyedrop #img, body.zoomed.shift #img, body.zoomed.alt #img { cursor: crosshair; }
+body.zoomed.loupe #img { cursor: none; }
+body.panning, body.panning * { cursor: grabbing !important; }
+#zoomBox { display: inline-flex; align-items: center; gap: 4px; }
+#zoomBox button { min-width: 30px; }
+#zPct { min-width: 52px; font-variant-numeric: tabular-nums; }
+#zHq { color: var(--dim); font-size: 11px; min-width: 0; }
+#focusMk { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid var(--accent); border-radius: 50%;
+  box-shadow: 0 0 0 1px #000, inset 0 0 0 1px #000; pointer-events: none; opacity: 0; transition: opacity .6s ease; }
+#focusMk::after { content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; background: var(--accent); border-radius: 50%; }
+#focusMk.show { opacity: 1; transition: none; }
+#tools { display: flex; gap: 4px; flex-wrap: nowrap; align-items: center; justify-content: center; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+#tools button { padding: 0; height: 28px; min-width: 30px; display: inline-flex; align-items: center; justify-content: center; color: var(--dim); flex: none; }
+#tools button:hover { color: var(--text); }
+#tools button.on { color: var(--svk-accent-ink, #1a1208); background: var(--accent); border-color: var(--accent); }
+#tools button svg { display: block; }
+#zPct { padding: 0 6px !important; color: var(--text) !important; }
+#tools .sep { width: 1px; height: 18px; background: var(--line); }
+#timeBox { display: none; align-items: center; gap: 6px; color: var(--dim); }
+#timeBox input[type=range] { width: 160px; accent-color: var(--accent); }
+#timeBox output { min-width: 42px; text-align: right; color: var(--text); }
+html.embed #photoSel, html.embed #ownBox { display: none !important; }
+#frameBox { display: none; align-items: center; gap: 6px; color: var(--dim); }
+#frameBox input[type=range] { width: 160px; accent-color: var(--accent); }
+#frameBox output { min-width: 34px; text-align: right; color: var(--text); }
+#needRun { display: none; position: absolute; inset: 0; align-items: center; justify-content: center; text-align: center;
+  color: var(--dim); font-size: 14px; padding: 24px; background: #000; }
+html.embed.needrun #needRun { display: flex; }
+body.focuspick #img { cursor: crosshair; }
+#status { color: var(--dim); font-size: 12px; min-height: 16px; text-align: center; }
+#status.busy { color: var(--accent); }
+#status.err { color: #e06c5a; }
+#panel { width: 360px; flex: none; height: 100vh; overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line); padding: 10px 12px 40px; }
+.row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+select, input[type=number], button {
+  background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+  font: inherit; padding: 4px 7px;
+}
+select { flex: 1; min-width: 0; }
+button { cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .4; cursor: default; }
+button.primary { background: var(--accent); color: #1a1208; border-color: var(--accent); font-weight: 600; }
+#ownBox input[type=text] { flex: 1; min-width: 0; background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 4px; font: inherit; padding: 4px 7px; }
+.path { font-size: 11px; color: var(--dim); word-break: break-all; margin-bottom: 8px; user-select: all; }
+.path.err { color: #e06c5a; }
+h3 { margin: 12px 0 6px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+
+/* градієнт */
+#gradLib { display: flex; flex-wrap: wrap; gap: 4px; max-height: 118px; overflow-y: auto; padding: 2px; background: var(--field); border: 1px solid var(--line); border-radius: 4px; }
+.gsw { position: relative; width: 48px; height: 20px; border: 1px solid #3a3a40; border-radius: 2px; cursor: pointer; flex: none; }
+.gsw canvas { display: block; width: 100%; height: 100%; border-radius: 1px; }
+.gsw:hover { border-color: #aaa; }
+.gsw.on { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+.gsw.mine::after { content: ""; position: absolute; left: 1px; bottom: 1px; width: 4px; height: 4px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 0 1px #000; }
+.gsw .gx { position: absolute; right: -1px; top: -1px; width: 14px; height: 14px; padding: 0; line-height: 11px; font-size: 12px; display: none; background: #000c; color: #fff; border: 0; border-radius: 0 2px 0 4px; }
+.gsw.mine:hover .gx { display: block; }
+.gsw .gx:hover { background: #c33; }
+#gradHint { font-size: 11px; color: var(--dim); min-height: 15px; margin: 3px 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#grad { position: relative; width: 100%; }
+#bar { display: block; width: 100%; height: 36px; border: 1px solid var(--line); border-radius: 3px; cursor: copy; }
+#handles { position: relative; height: 22px; margin: 0 8px; touch-action: none; }
+.stop { position: absolute; top: 3px; width: 14px; height: 16px; margin-left: -7px; border: 2px solid #777; border-radius: 2px; cursor: ew-resize; touch-action: none; }
+.stop::before { content: ""; position: absolute; left: 50%; top: -7px; margin-left: -4px; border: 4px solid transparent; border-bottom-color: #777; border-top: 0; }
+.stop.sel { border-color: var(--accent); z-index: 2; }
+.stop.sel::before { border-bottom-color: var(--accent); }
+.stop.away { opacity: .35; transform: translateY(10px) scale(.9); }
+#stopedit { display: flex; gap: 6px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+#stopedit input[type=number] { width: 70px; }
+#stopedit.off, #pickBox.off .pk { opacity: .4; pointer-events: none; }
+
+/* піпетка / вибір кольору */
+body.eyedrop #img, body.alt #img, body.shift #img { cursor: crosshair; }
+button.on { border-color: var(--accent); color: var(--accent); }
+#pickBox { border-top: 1px solid var(--line); margin-top: 6px; }
+.pkrow { display: flex; gap: 8px; align-items: stretch; }
+#sbWrap { position: relative; flex: 1; height: 140px; min-width: 0; cursor: crosshair; touch-action: none; border: 1px solid var(--line); }
+#sbCv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#sbMk { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #000, inset 0 0 0 1px #000; pointer-events: none; }
+#hueWrap { position: relative; width: 18px; height: 140px; flex: none; cursor: pointer; touch-action: none; border: 1px solid var(--line);
+  background: linear-gradient(to bottom, #f00 0%, #ff0 16.667%, #0f0 33.333%, #0ff 50%, #00f 66.667%, #f0f 83.333%, #f00 100%); }
+#hueMk { position: absolute; left: -3px; right: -3px; height: 6px; margin-top: -3px; border: 2px solid #fff; box-shadow: 0 0 0 1px #000; pointer-events: none; }
+#chip { width: 30px; flex: none; display: flex; flex-direction: column; border: 1px solid var(--line); }
+#chip div { flex: 1; }
+#chipOld { cursor: pointer; }
+.flds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px 8px; margin-top: 8px; }
+.flds label { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 12px; }
+.flds input { width: 100%; min-width: 0; padding: 2px 4px; }
+.flds input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.hexrow { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+.hexrow input[type=text] { width: 84px; background: var(--field); color: var(--text); border: 1px solid var(--line); border-radius: 4px; font: inherit; padding: 2px 5px; text-transform: lowercase; }
+.hexrow input[type=color] { width: 30px; height: 24px; padding: 0; border: 1px solid var(--line); background: none; border-radius: 3px; }
+.swrow { display: flex; flex-wrap: wrap; gap: 3px; margin: 3px 0 6px; min-height: 18px; }
+.swrow button { width: 22px; height: 18px; padding: 0; border: 1px solid #3a3a40; border-radius: 2px; }
+.swrow button:hover { border-color: #fff; }
+.swlab { font-size: 11px; color: var(--dim); margin-top: 8px; }
+
+/* повзунки */
+details { border-top: 1px solid var(--line); }
+summary { cursor: pointer; padding: 8px 0; font-weight: 600; user-select: none; }
+.sl { display: grid; grid-template-columns: 1fr 64px; gap: 0 8px; align-items: center; padding: 4px 0 6px; }
+.sl label { grid-column: 1; grid-row: 1; color: var(--dim); font-size: 12px; user-select: none; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sl label .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl input[type=range] { grid-column: 1 / 3; grid-row: 2; }
+.sl.chg label { color: var(--text); }
+.sl .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); visibility: hidden; }
+.sl.chg .dot { visibility: visible; }
+.sl input[type=range] { width: 100%; margin: 0; accent-color: var(--accent); }
+.sl input[type=number] { grid-column: 2; grid-row: 1; width: 64px; padding: 1px 4px; text-align: right; border-color: transparent; background: transparent;
+  font-family: var(--svk-mono, ui-monospace, monospace); font-size: 12px; color: var(--text); }
+.sl input[type=number]:hover, .sl input[type=number]:focus { border-color: var(--line); background: var(--field); }
+.sl input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* групи: номер, іконка, назва, стан */
+details.grp { border-top: 1px solid var(--line); }
+details.grp > summary { display: flex; align-items: center; gap: 8px; padding: 9px 0; list-style: none; }
+details.grp > summary::-webkit-details-marker { display: none; }
+.gnum { width: 14px; flex: none; text-align: right; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.gi { flex: none; display: flex; color: var(--accent); }
+.gt { flex: 1; min-width: 0; }
+.gchip { display: none; flex: none; font-size: 11px; font-weight: 400; color: var(--dim); border: 1px solid var(--line); border-radius: 9px; padding: 0 7px; }
+.gcar { flex: none; width: 0; height: 0; border: 4px solid transparent; border-left-color: var(--dim); border-right: 0; transition: transform .15s; }
+details.grp[open] > summary .gcar { transform: rotate(90deg); }
+.grp.off > summary .gchip { display: inline-block; }
+.grp.off > summary .gi, .grp.off > summary .gt { opacity: .55; }
+.ghint { display: none; }     /* пояснення групи - у title заголовка */
+.offnote { display: none; }   /* «вимкнено» показує чіп у заголовку, причина - у його title */
+.grp.off .sl:not(.power) { opacity: .38; }
+.prow { display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.prow label { color: var(--dim); font-size: 12px; flex: none; }
+.pnote { display: none; }     /* текст переноситься в title рядка вище */
+#gradBox { margin: 2px 0 6px; padding-bottom: 6px; border-bottom: 1px dashed var(--line); }
+#gradBox h3:first-child { margin-top: 2px; }
+
+/* лупа 100% */
+#loupe { position: absolute; display: none; pointer-events: none; z-index: 5; transform: translate(-50%, -50%); }
+#loupeCv { display: block; box-sizing: content-box; border-radius: 50%; border: 2px solid var(--accent); background: #111; box-shadow: 0 0 0 1px #000, 0 6px 24px #000a; }
+#loupeCv.stale { filter: saturate(.55) brightness(.75); }
+#loupe::after { content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -3px 0 0 -3px; border: 1px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #000; }
+#loupeCap { position: absolute; left: 50%; transform: translateX(-50%); top: calc(100% + 8px); white-space: nowrap; font-size: 11px; line-height: 1.3;
+  background: #000d; color: var(--text); padding: 2px 9px; border-radius: 9px; text-align: center; }
+#loupe.up #loupeCap { top: auto; bottom: calc(100% + 8px); }
+#loupeCap small { display: block; color: var(--dim); font-size: 10px; }
+body.loupe .imgwrap { cursor: none; }
+@media (max-width: 800px) { body { flex-direction: column; } #panel { width: 100%; height: auto; flex: none; } #view { height: 60vh; min-height: 340px; flex: none; } }   /* flex:none — інакше колонка стискала кадр до 0 (виявлено при тесті зуму 700×600) */
+</style>
+</head>
+<body>
+<div id="view">
+  <div class="imgwrap"><div id="zoomer"><img id="img" alt=""><canvas id="hq"></canvas></div><div id="focusMk"></div><div id="needRun"></div>
+    <div id="loupe"><canvas id="loupeCv"></canvas><div id="loupeCap"></div></div></div>
+  <div id="tools">
+    <button id="btnFocusPick" title="Фокус: клік по кадру — клік по кадру ставить площину фокуса в цю точку (те саме — Shift+клік)" aria-label="Фокус: клік по кадру"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M22 12h-4M6 12H2M12 6V2M12 22v-4"/><circle cx="12" cy="12" r="1.5"/></svg></button>
+    <button id="btnHero" title="Різкий герой — герой різкий, фон блюриться" aria-label="Різкий герой"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4.5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg></button>
+    <button id="btnBg" title="Різкий фон — фон різкий, герой блюриться" aria-label="Різкий фон"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 4 4 7 3-3 7 12H2z"/></svg></button>
+    <span class="sep"></span>
+    <button id="btnDepth" title="Показати глибину — карта глибини, як її бачить рушій (світліше = ближче)" aria-label="Показати глибину"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg></button>
+    <button id="btnOrig" title="оригінал без ефекту; утримуй \ — те саме, поки тримаєш" aria-label="Оригінал"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/></svg></button>
+    <span class="sep"></span>
+    <span id="zoomBox"><button id="zOut" title="відʼємне наближення (клавіша −)" aria-label="−"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button><button id="zPct" title="масштаб кадру; клік — вмістити ↔ 100%">—</button><button id="zIn" title="наблизити (клавіша +)" aria-label="+"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg></button><button id="zFit" title="вмістити кадр (0 або подвійний клік)" aria-label="Вмістити"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button><button id="z100" title="100% робочої роздільності (1 або подвійний клік)" aria-label="100%"><span style="font:600 11px var(--svk-mono,monospace)">1:1</span></button><span id="zHq"></span></span>
+    <span class="sep"></span>
+    <button id="btnLoupe" title="лупа 100%: ділянка кадру 1:1 під курсором, щоб бачити зерно й краї (Z — увімкнути/вимкнути)" aria-label="Лупа 100%"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button>
+    <span id="frameBox"><span class="sep"></span><span>кадр</span><input type="range" id="frameSl"><output id="frameOut">0</output></span>
+    <span id="timeBox"><span class="sep"></span><button id="btnPlay" title="крок 1/12 с після кожного рендеру">▶</button>
+      <input type="range" id="timeSl"><span>час, с</span><output id="timeOut">0.00</output></span>
+  </div>
+  <div id="status">завантаження…</div>
+</div>
+
+<div id="panel">
+  <div class="row">
+    <select id="presetSel" title="пресет"></select>
+    <select id="photoSel" title="фото" style="display:none"></select>
+  </div>
+  <div class="row">
+    <button id="btnSave">Зберегти як…</button>
+    <button id="btnFull">Повний рендер</button>
+    <button id="btnReset" title="назад до збереженого стану пресету">Скинути</button>
+    <button id="btnZero" title="усі ефекти в нуль - чистий оригінал, крутиш з нуля">З нуля</button>
+    <button id="btnGrade" title="одразу в зафіксований грейд look v1">Мій грейд</button>
+  </div>
+  <div id="msg" class="path" style="display:none"></div>
+
+  <details id="ownBox">
+    <summary>Свій кадр</summary>
+    <div class="row"><input type="text" id="ownImg" placeholder="/шлях/до/кадру.png" spellcheck="false"></div>
+    <div class="row"><input type="text" id="ownDepth" placeholder="/шлях/до/глибини.png" spellcheck="false"></div>
+    <div class="row"><button id="btnOwn" class="primary">Відкрити</button><span id="ownMsg" class="path" style="margin:0"></span></div>
+    <div class="swlab">png / jpg / tif / webp, будь-яка орієнтація; глибина — сіра карта (світліше = ближче)</div>
+  </details>
+
+  <details id="grpPreview" class="grp">
+    <summary><span class="gnum"></span><span class="gi" id="prevIcon"></span><span class="gt">Превʼю</span><span class="gcar"></span></summary>
+    <div class="ghint" id="prevHint"></div>
+    <div class="prow"><label for="sizeSel">Розмір превʼю</label>
+      <select id="sizeSel" style="flex:none">
+        <option value="480">480</option><option value="720" selected>720</option><option value="1080">1080</option>
+      </select></div>
+    <div class="pnote">лише швидкість превʼю, на фінал не впливає</div>
+    <div class="pnote" id="finalHint"></div>
+    <div class="prow"><label for="loupeSz">Вікно лупи, px</label>
+      <select id="loupeSz" style="flex:none"><option value="200">200</option><option value="240" selected>240</option><option value="320">320</option></select></div>
+    <div class="pnote">Лупа 100% (кнопка під кадром або Z): 1 піксель кадру = 1 піксель екрана. Після зміни параметрів кадр перераховується повністю (≈10 с), далі лупа рухається миттєво.</div>
+  </details>
+
+  <div id="gradBox">
+  <h3>Градієнт</h3>
+  <div id="gradLib"></div>
+  <div id="gradHint"></div>
+  <div class="row">
+    <button id="btnGradNew" title="зберегти поточний градієнт у бібліотеку під новим імʼям">Новий з поточного</button>
+    <button id="btnGradSave" title="перезаписати вибраний власний градієнт" disabled>Зберегти</button>
+  </div>
+  <div id="grad">
+    <canvas id="bar" title="подвійний клік — додати стоп; потягни стоп униз — видалити"></canvas>
+    <div id="handles"></div>
+  </div>
+  <div id="stopedit" class="off">
+    <span style="color:var(--dim)">Позиція</span>
+    <input type="number" id="stopT" min="0" max="100" step="0.1"><span style="color:var(--dim)">%</span>
+    <button id="btnDel" title="Delete / Backspace">Видалити стоп</button>
+  </div>
+  <div class="row">
+    <button id="btnFlip">Перевернути</button>
+    <button id="btnEven">Розподілити рівно</button>
+    <button id="btnEye" title="клік по превʼю бере колір; Alt — те саме без кнопки">Піпетка</button>
+  </div>
+
+  <details id="pickBox" open class="off">
+    <summary>Колір стопа</summary>
+    <div class="pk">
+      <div class="pkrow">
+        <div id="sbWrap"><canvas id="sbCv"></canvas><div id="sbMk"></div></div>
+        <div id="hueWrap"><div id="hueMk"></div></div>
+        <div id="chip"><div id="chipNew" title="поточний"></div><div id="chipOld" title="початковий — клік поверне"></div></div>
+      </div>
+      <div class="flds">
+        <label>H<input type="number" id="fH" min="0" max="360" step="1"></label>
+        <label>S<input type="number" id="fS" min="0" max="100" step="1"></label>
+        <label>B<input type="number" id="fB" min="0" max="100" step="1"></label>
+        <label>R<input type="number" id="fR" min="0" max="255" step="1"></label>
+        <label>G<input type="number" id="fG" min="0" max="255" step="1"></label>
+        <label>B<input type="number" id="fBl" min="0" max="255" step="1"></label>
+      </div>
+      <div class="hexrow">
+        <span style="color:var(--dim)">#</span><input type="text" id="fHex" maxlength="7" spellcheck="false">
+        <input type="color" id="stopColor" title="системний вибір кольору">
+      </div>
+      <div class="swlab">Палітра Pinterest</div>
+      <div class="swrow" id="swFixed"></div>
+      <div class="swlab">Останні</div>
+      <div class="swrow" id="swRecent"></div>
+    </div>
+  </details>
+  </div>
+
+  <div id="groups"></div>
+</div>
+
+<script>
+"use strict";
+// режим ноди ComfyUI: tune.html лежить в iframe (?embed=1&node=<id>); без embed — автономний тюнер, як було
+const QS = new URLSearchParams(location.search);
+const EMBED = QS.has("embed");
+const NODE = QS.get("node") || "0";
+const API = EMBED ? "/depth_look/api/" + encodeURIComponent(NODE) : "/api";
+if (EMBED) document.documentElement.classList.add("embed");
+const $ = id => document.getElementById(id);
+const clone = o => JSON.parse(JSON.stringify(o));
+
+let spec = [];            // опис повзунків із сервера
+let loaded = {};          // пресет як завантажено (для скидання і крапок)
+let params = {};          // поточні параметри (плоскі ключі + palette)
+let stops = [];           // {t, c:[r,g,b]} — робоча копія палітри; порядок може бути не відсортований під час драгу
+let sel = null;           // вибраний стоп (обʼєкт)
+let photo = "";
+const sliders = {};       // name -> {range, num, row}
+
+// ---------- кольори ----------
+const toHex = c => "#" + c.map(v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
+const fromHex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+const clamp01 = v => Math.max(0, Math.min(1, v));
+
+function sortedStops() { return stops.slice().sort((a, b) => a.t - b.t); }
+
+// лінійна інтерполяція в RGB, як numpy interp (поза межами — крайній колір)
+function colorAt(t) {
+  const s = sortedStops();
+  if (t <= s[0].t) return s[0].c.slice();
+  if (t >= s[s.length - 1].t) return s[s.length - 1].c.slice();
+  for (let i = 0; i < s.length - 1; i++) {
+    const a = s[i], b = s[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const k = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t);
+      return a.c.map((v, j) => v + (b.c[j] - v) * k);
+    }
+  }
+  return s[s.length - 1].c.slice();
+}
+
+function setStopsFromPalette(pal) {
+  stops = pal.map(([t, c]) => ({ t: t, c: c.slice() }));
+  sel = stops[0] || null;
+}
+
+// синхронізує stops -> params.palette (відсортовано) і перемальовує
+function paletteChanged(render = true) {
+  params.palette = sortedStops().map(s => [s.t, s.c.slice()]);
+  drawGradient();
+  if (render) scheduleRender();
+}
+
+// ---------- редактор градієнта ----------
+const bar = $("bar"), handles = $("handles");
+let grads = [];           // бібліотека: {name, palette, builtin}
+let curGrad = null;       // вибраний у бібліотеці
+let eyedrop = false;      // режим піпетки (одноразовий)
+let lastSel = null, origC = null;   // для «початкового» кольору в чипі
+const pk = { h: 0, s: 0, v: 0 };    // HSB-стан пікера (h 0..360, s,v 0..1) — зберігає відтінок для сірих
+const PIN_SW = ["#0b0604", "#150e00", "#572e1a", "#672224", "#7c0303", "#c54202", "#01091c", "#03035b", "#050399", "#0025ac", "#ffc9a0", "#ffffff"];
+
+const round3 = v => Math.round(v * 1000) / 1000;
+
+function drawGradient() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(bar.clientWidth * dpr)), h = Math.round(36 * dpr);
+  if (bar.width !== w) bar.width = w;
+  if (bar.height !== h) bar.height = h;
+  const ctx = bar.getContext("2d");
+  const img = ctx.createImageData(w, 1);
+  for (let x = 0; x < w; x++) {
+    const c = colorAt(x / (w - 1));
+    img.data.set([c[0] * 255, c[1] * 255, c[2] * 255, 255], x * 4);
+  }
+  for (let y = 0; y < h; y++) ctx.putImageData(img, 0, y);
+  drawHandles();
+  drawStopEdit();
+}
+
+function drawHandles() {
+  handles.innerHTML = "";
+  stops.forEach(s => {
+    const d = document.createElement("div");
+    d.className = "stop" + (s === sel ? " sel" : "");
+    d.style.left = (s.t * 100) + "%";
+    d.style.background = toHex(s.c);
+    d.addEventListener("pointerdown", e => startDrag(e, s));
+    handles.appendChild(d);
+  });
+}
+
+function delStop(s) {
+  if (stops.length <= 2 || !s) return false;
+  const srt = sortedStops(), i = srt.indexOf(s);
+  stops.splice(stops.indexOf(s), 1);
+  const rest = sortedStops();
+  sel = rest[Math.min(i, rest.length - 1)];
+  paletteChanged();
+  return true;
+}
+
+function startDrag(e, s) {
+  e.preventDefault();
+  sel = s;
+  drawHandles(); drawStopEdit();
+  const rect = handles.getBoundingClientRect();
+  let away = false;
+  const move = ev => {
+    const dy = ev.clientY - (rect.top + rect.height / 2);
+    const out = stops.length > 2 && (dy > 40 || dy < -(36 + 40 + rect.height / 2));   // вниз/геть від смуги = видалити
+    if (out !== away) {
+      away = out;
+      const el = handles.children[stops.indexOf(s)];
+      if (el) el.classList.toggle("away", away);
+    }
+    if (away) return;
+    s.t = clamp01((ev.clientX - rect.left) / rect.width);
+    paletteChanged();
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    if (away) delStop(s);
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+}
+
+function addStopAt(clientX) {
+  const r = bar.getBoundingClientRect();
+  const t = clamp01((clientX - r.left) / r.width);
+  const s = { t: t, c: colorAt(t) };
+  stops.push(s); sel = s;
+  paletteChanged();
+}
+bar.addEventListener("dblclick", e => addStopAt(e.clientX));
+handles.addEventListener("dblclick", e => { if (e.target === handles) addStopAt(e.clientX); });
+
+$("btnDel").addEventListener("click", () => delStop(sel));
+$("btnFlip").addEventListener("click", () => {
+  stops.forEach(s => { s.t = 1 - s.t; });
+  paletteChanged();
+});
+$("btnEven").addEventListener("click", () => {
+  const srt = sortedStops(), n = srt.length;
+  srt.forEach((s, i) => { s.t = n > 1 ? i / (n - 1) : 0; });
+  paletteChanged();
+});
+$("stopT").addEventListener("input", e => {
+  if (!sel || e.target.value === "") return;
+  sel.t = clamp01((parseFloat(e.target.value) || 0) / 100);
+  paletteChanged();
+});
+
+// клавіатура: Delete/Backspace — видалити стоп, ←/→ — зсув (Shift ×5), Esc — вийти з піпетки
+document.addEventListener("keydown", e => {
+  if (e.key === "Alt") document.body.classList.add("alt");
+  const t = e.target, tag = t && t.tagName;
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+  if (e.key === "Escape" && eyedrop) { setEyedrop(false); return; }
+  if (!sel || e.metaKey || e.ctrlKey) return;
+  if (e.key === "Delete" || e.key === "Backspace") {
+    e.preventDefault();
+    delStop(sel);
+  } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !e.altKey) {
+    e.preventDefault();
+    const d = (e.shiftKey ? 0.05 : 0.01) * (e.key === "ArrowLeft" ? -1 : 1);
+    sel.t = round3(clamp01(sel.t + d));
+    paletteChanged();
+  }
+});
+document.addEventListener("keyup", e => { if (e.key === "Alt") document.body.classList.remove("alt"); });
+window.addEventListener("blur", () => document.body.classList.remove("alt"));
+
+// ---------- колір вибраного стопа ----------
+function rgb2hsv(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d > 0) {
+    if (mx === r) h = ((g - b) / d) % 6;
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60; if (h < 0) h += 360;
+  }
+  return { h: h, s: mx === 0 ? 0 : d / mx, v: mx };
+}
+function hsv2rgb(h, s, v) {
+  const k = n => (n + h / 60) % 6;
+  const f = n => v - v * s * Math.max(0, Math.min(k(n), 4 - k(n), 1));
+  return [f(5), f(3), f(1)];
+}
+
+// узгоджує pk зі stop.c; якщо колір збігається з pk — відтінок не чіпаємо
+function syncPicker() {
+  const back = hsv2rgb(pk.h, pk.s, pk.v);
+  if (back.every((v, i) => Math.abs(v - sel.c[i]) < 0.002)) return;
+  const n = rgb2hsv(sel.c[0], sel.c[1], sel.c[2]);
+  if (n.s > 0 && n.v > 0) pk.h = n.h;
+  if (n.v > 0) pk.s = n.s;
+  pk.v = n.v;
+}
+
+const sbCv = $("sbCv");
+let sbKey = "";
+function drawSB() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.round(sbCv.clientWidth * dpr), h = Math.round(sbCv.clientHeight * dpr);
+  if (!w || !h) return;
+  const key = w + "x" + h + "@" + Math.round(pk.h);
+  if (key === sbKey) return;
+  sbKey = key;
+  sbCv.width = w; sbCv.height = h;
+  const ctx = sbCv.getContext("2d");
+  ctx.fillStyle = "hsl(" + pk.h + ",100%,50%)";
+  ctx.fillRect(0, 0, w, h);
+  let g = ctx.createLinearGradient(0, 0, w, 0);
+  g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+  g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, "rgba(0,0,0,0)"); g.addColorStop(1, "rgba(0,0,0,1)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+}
+
+function setField(id, v) {
+  const el = $(id);
+  if (document.activeElement !== el) el.value = v;
+}
+
+function drawStopEdit() {
+  $("stopedit").classList.toggle("off", !sel);
+  $("pickBox").classList.toggle("off", !sel);
+  if (!sel) return;
+  if (sel !== lastSel) { lastSel = sel; origC = sel.c.slice(); }
+  syncPicker();
+  drawSB();
+  $("sbMk").style.left = (pk.s * 100) + "%";
+  $("sbMk").style.top = ((1 - pk.v) * 100) + "%";
+  $("hueMk").style.top = (pk.h / 360 * 100) + "%";
+  const hx = toHex(sel.c), rgb = sel.c.map(v => Math.round(clamp01(v) * 255));
+  setField("fH", Math.round(pk.h) % 360);
+  setField("fS", Math.round(pk.s * 100));
+  setField("fB", Math.round(pk.v * 100));
+  setField("fR", rgb[0]); setField("fG", rgb[1]); setField("fBl", rgb[2]);
+  setField("fHex", hx.slice(1));
+  setField("stopT", (sel.t * 100).toFixed(1));
+  $("stopColor").value = hx;
+  $("chipNew").style.background = hx;
+  $("chipOld").style.background = toHex(origC);
+  $("btnDel").disabled = stops.length <= 2;
+}
+
+function pushRecent(hex) {
+  hex = hex.toLowerCase();
+  recent = [hex].concat(recent.filter(h => h !== hex)).slice(0, 12);
+  try { localStorage.setItem("tune.recent", JSON.stringify(recent)); } catch (_) {}
+  drawRecent();
+}
+let recent = [];
+try { recent = (JSON.parse(localStorage.getItem("tune.recent")) || []).filter(h => /^#[0-9a-f]{6}$/i.test(h)).slice(0, 12); } catch (_) {}
+
+function swatchBtn(hex) {
+  const b = document.createElement("button");
+  b.style.background = hex; b.title = hex;
+  b.addEventListener("click", () => setStopColor(fromHex(hex), true));
+  return b;
+}
+function drawRecent() {
+  const box = $("swRecent");
+  box.innerHTML = "";
+  recent.forEach(h => box.appendChild(swatchBtn(h)));
+}
+function buildSwatches() {
+  const box = $("swFixed");
+  PIN_SW.forEach(h => box.appendChild(swatchBtn(h)));
+  drawRecent();
+}
+
+function setStopColor(c, remember) {
+  if (!sel) return;
+  sel.c = c.map(clamp01);
+  paletteChanged();
+  if (remember) pushRecent(toHex(sel.c));
+}
+function applyHSV() { setStopColor(hsv2rgb(pk.h, pk.s, pk.v), false); }
+
+// перетягування в області (SB-квадрат, смуга відтінку)
+function dragArea(el, cb, done) {
+  el.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    if (!sel) return;
+    const ae = document.activeElement;
+    if (ae && ae !== document.body && ae.blur) ae.blur();   // щоб активне поле не «застрягло» під час драгу
+    el.setPointerCapture(e.pointerId);
+    const at = ev => {
+      const r = el.getBoundingClientRect();
+      cb(clamp01((ev.clientX - r.left) / r.width), clamp01((ev.clientY - r.top) / r.height));
+    };
+    at(e);
+    const mv = ev => at(ev);
+    const up = () => {
+      el.removeEventListener("pointermove", mv);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+      done();
+    };
+    el.addEventListener("pointermove", mv);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  });
+}
+const commitRecent = () => { if (sel) pushRecent(toHex(sel.c)); };
+dragArea($("sbWrap"), (x, y) => { pk.s = x; pk.v = 1 - y; applyHSV(); }, commitRecent);
+dragArea($("hueWrap"), (x, y) => { pk.h = Math.min(359.99, y * 360); applyHSV(); }, commitRecent);
+
+// числові поля
+const numIn = (id, lo, hi, fn) => {
+  const el = $(id);
+  el.addEventListener("input", () => {
+    if (!sel || el.value === "" || isNaN(parseFloat(el.value))) return;
+    fn(Math.max(lo, Math.min(hi, parseFloat(el.value))));
+  });
+  el.addEventListener("change", () => { commitRecent(); drawStopEdit(); });
+};
+numIn("fH", 0, 359.99, v => { pk.h = v; applyHSV(); });
+numIn("fS", 0, 100, v => { pk.s = v / 100; applyHSV(); });
+numIn("fB", 0, 100, v => { pk.v = v / 100; applyHSV(); });
+const fromRGBFields = () => {
+  const g = id => Math.max(0, Math.min(255, parseFloat($(id).value) || 0)) / 255;
+  setStopColor([g("fR"), g("fG"), g("fBl")], false);
+};
+numIn("fR", 0, 255, fromRGBFields);
+numIn("fG", 0, 255, fromRGBFields);
+numIn("fBl", 0, 255, fromRGBFields);
+$("fHex").addEventListener("input", e => {
+  let v = e.target.value.trim().replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(v)) v = v.replace(/./g, "$&$&");
+  if (/^[0-9a-f]{6}$/i.test(v)) setStopColor(fromHex("#" + v), false);
+});
+$("fHex").addEventListener("change", () => { commitRecent(); drawStopEdit(); });
+$("stopColor").addEventListener("input", e => setStopColor(fromHex(e.target.value), false));
+$("stopColor").addEventListener("change", commitRecent);
+$("chipOld").addEventListener("click", () => { if (origC) setStopColor(origC, false); });
+
+// ---------- піпетка ----------
+function setEyedrop(on) {
+  eyedrop = on;
+  document.body.classList.toggle("eyedrop", on);
+  $("btnEye").classList.toggle("on", on);
+  if (on) setStatus("піпетка: клікни по превʼю (Esc — скасувати)");
+}
+$("btnEye").addEventListener("click", () => setEyedrop(!eyedrop));
+
+// колір береться з показаного превʼю (blob того ж походження): середнє 3×3 пікселі, щоб зерно не різало око
+let eyeCv = null;
+function pickFromPreview(e) {
+  const im = $("img");
+  if (!im.naturalWidth) return null;
+  const r = im.getBoundingClientRect(), nw = im.naturalWidth, nh = im.naturalHeight;
+  const sc = Math.min(r.width / nw, r.height / nh);
+  const dw = nw * sc, dh = nh * sc;
+  const x = (e.clientX - (r.left + (r.width - dw) / 2)) / sc, y = (e.clientY - (r.top + (r.height - dh) / 2)) / sc;
+  if (x < 0 || y < 0 || x >= nw || y >= nh) return null;
+  const cx = Math.floor(x), cy = Math.floor(y);
+  const x0 = Math.max(0, cx - 1), y0 = Math.max(0, cy - 1);
+  const w = Math.min(nw, cx + 2) - x0, h = Math.min(nh, cy + 2) - y0;
+  if (!eyeCv) eyeCv = document.createElement("canvas");
+  eyeCv.width = w; eyeCv.height = h;
+  const ctx = eyeCv.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(im, x0, y0, w, h, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data, acc = [0, 0, 0], n = w * h;
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) acc[k] += d[i * 4 + k];
+  return acc.map(v => v / n / 255);
+}
+$("img").draggable = false;
+$("img").addEventListener("click", e => {
+  if (!(eyedrop || e.altKey) || !sel) return;
+  try {
+    const c = pickFromPreview(e);
+    if (c) setStopColor(c, true);
+  } catch (err) { setStatus("піпетка: " + err, "err"); }
+  if (eyedrop) setEyedrop(false);
+});
+
+
+// ---------- фокус по кліку, герой/фон, глибина/оригінал, свій кадр, час ----------
+let viewMode = "render";      // "render" | "depth" | "orig"
+let focusPick = false;        // одноразовий режим «клік по кадру»
+const hasSl = n => !!sliders[n];
+
+// точка кліку в нормалізованих координатах показаного кадру (0..1) + піксельна позиція в обгортці
+function imgPoint(e) {
+  const im = $("img");
+  if (!im.naturalWidth) return null;
+  const r = im.getBoundingClientRect(), nw = im.naturalWidth, nh = im.naturalHeight;
+  const sc = Math.min(r.width / nw, r.height / nh), dw = nw * sc, dh = nh * sc;
+  const ox = (r.width - dw) / 2, oy = (r.height - dh) / 2;
+  const px = e.clientX - r.left - ox, py = e.clientY - r.top - oy;
+  if (px < 0 || py < 0 || px >= dw || py >= dh) return null;
+  const wr = document.querySelector(".imgwrap").getBoundingClientRect();     // left/top — в обгортці (зум-незалежно)
+  return { x: px / dw, y: py / dh, left: e.clientX - wr.left, top: e.clientY - wr.top };
+}
+
+function setSliderClamped(name, v, doRender) {
+  const e = sliders[name];
+  if (!e) return;
+  const s = e.spec;
+  v = Math.max(s.lo, Math.min(s.hi, v));
+  if (s.kind === "i") v = Math.round(v);
+  setSlider(name, v, doRender);
+}
+
+function setFocusPick(on) {
+  focusPick = on;
+  document.body.classList.toggle("focuspick", on);
+  $("btnFocusPick").classList.toggle("on", on);
+  if (on) setStatus("фокус: клікни по кадру (Esc — скасувати)");
+}
+$("btnFocusPick").addEventListener("click", () => setFocusPick(!focusPick));
+
+let mkTimer = null;
+function showMarker(pt) {
+  const m = $("focusMk");
+  m.style.left = pt.left + "px"; m.style.top = pt.top + "px";
+  m.classList.add("show");
+  clearTimeout(mkTimer);
+  mkTimer = setTimeout(() => m.classList.remove("show"), 2000);
+}
+
+async function pickFocus(e) {
+  const pt = imgPoint(e);
+  if (!pt) return;
+  showMarker(pt);
+  try {
+    const r = await post(API + "/depth_at", { x: pt.x, y: pt.y, size: parseInt($("sizeSel").value, 10) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.err || r.status);
+    if (hasSl("blur_target")) setSliderClamped("blur_target", -1, false);   // -1 = фокус із повзунка
+    setSliderClamped("focus", j.depth, true);
+    setStatus("фокус = " + j.depth.toFixed(3) + " (x " + pt.x.toFixed(2) + ", y " + pt.y.toFixed(2) + ")");
+  } catch (err) { setStatus("фокус: " + err, "err"); }
+}
+
+$("img").addEventListener("click", e => {
+  if (e.altKey && !focusPick) return;                  // Alt — піпетка (старий обробник)
+  if (eyedrop) return;
+  if (e.shiftKey || focusPick) {
+    e.preventDefault();
+    if (focusPick) setFocusPick(false);
+    pickFocus(e);
+  }
+});
+
+async function sharpTo(hero) {
+  if (hasSl("blur_target")) { setSliderClamped("blur_target", hero ? 1 : 0, true); return; }
+  try {
+    const j = await (await fetch(API + "/depth_stats?size=" + parseInt($("sizeSel").value, 10) + "&frame=" + curFrame)).json();
+    if (j.err) throw new Error(j.err);
+    setSliderClamped("focus", hero ? j.p95 : j.p5, true);
+  } catch (err) { setStatus("глибина: " + err, "err"); }
+}
+$("btnHero").addEventListener("click", () => sharpTo(true));
+$("btnBg").addEventListener("click", () => sharpTo(false));
+
+// глибина / оригінал
+function showView(mode) {
+  viewMode = mode;
+  if (typeof drawLoupe === "function") drawLoupe();
+  $("btnDepth").classList.toggle("on", mode === "depth");
+  $("btnOrig").classList.toggle("on", mode === "orig");
+  const im = $("img");
+  if (mode === "render") { if (lastUrl) im.src = lastUrl; return; }
+  const sz = parseInt($("sizeSel").value, 10);
+  im.src = (mode === "depth" ? API + "/depth.jpg" : API + "/original.jpg") + "?size=" + sz + "&frame=" + curFrame + "&t=" + Date.now();
+}
+$("btnDepth").addEventListener("click", () => showView(viewMode === "depth" ? "render" : "depth"));
+$("btnOrig").addEventListener("click", () => showView(viewMode === "orig" ? "render" : "orig"));
+
+let heldFrom = null;   // режим до утримування «\»
+document.addEventListener("keydown", e => {
+  const t = e.target, tag = t && t.tagName;
+  if (e.key === "Shift") document.body.classList.add("shift");
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+  if (e.key === "Escape" && focusPick) setFocusPick(false);
+  else if (e.key === "Escape" && loupeOn) setLoupe(false);
+  if (e.code === "KeyZ" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) setLoupe(!loupeOn);
+  if (e.key === "\\" && !e.repeat && heldFrom === null) { heldFrom = viewMode; showView("orig"); }
+});
+document.addEventListener("keyup", e => {
+  if (e.key === "Shift") document.body.classList.remove("shift");
+  if (e.key === "\\" && heldFrom !== null) { const m = heldFrom; heldFrom = null; showView(m); }
+});
+window.addEventListener("blur", () => { document.body.classList.remove("shift"); if (heldFrom !== null) { const m = heldFrom; heldFrom = null; showView(m); } });
+
+// свій кадр
+async function openOwn() {
+  const image = $("ownImg").value.trim(), depth = $("ownDepth").value.trim(), msg = $("ownMsg");
+  msg.classList.remove("err"); msg.textContent = "відкриваю…";
+  $("btnOwn").disabled = true;
+  try {
+    const r = await post(API + "/load", { image: image, depth: depth, size: parseInt($("sizeSel").value, 10) });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.err || r.status);
+    photo = ""; frameName = j.name;
+    $("photoSel").value = "";
+    msg.textContent = j.w + "×" + j.h + " (" + (j.w > j.h ? "горизонтальний" : j.w < j.h ? "вертикальний" : "квадрат") + ")";
+    showView("render");
+    scheduleRender();
+  } catch (err) {
+    msg.classList.add("err"); msg.textContent = String(err.message || err);
+  }
+  $("btnOwn").disabled = false;
+}
+$("btnOwn").addEventListener("click", openOwn);
+["ownImg", "ownDepth"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter") openOwn(); }));
+
+// час (є лише коли рушій має параметр time)
+let playing = false;
+function syncTimeUI() {
+  if (!hasSl("time") || !params) return;
+  const v = +params.time || 0;
+  $("timeSl").value = v; $("timeOut").textContent = v.toFixed(2);
+}
+function setupTimeUI() {
+  const box = $("timeBox");
+  if (!hasSl("time")) { box.style.display = "none"; return; }
+  const s = sliders.time.spec, sl = $("timeSl");
+  sl.min = s.lo; sl.max = s.hi; sl.step = Math.min(s.step, 1 / 12);
+  box.style.display = "flex";
+  sl.addEventListener("input", () => setSliderClamped("time", parseFloat(sl.value), true));
+  $("btnPlay").addEventListener("click", () => {
+    playing = !playing;
+    $("btnPlay").textContent = playing ? "■" : "▶";
+    $("btnPlay").classList.toggle("on", playing);
+    if (playing) { playErr = false; if (!inflight) stepTime(); }
+  });
+  syncTimeUI();
+}
+function stepTime() {
+  const s = sliders.time.spec;
+  let t = (+params.time || 0) + 1 / 12;
+  if (t > s.hi + 1e-9) t = s.lo;
+  setSliderClamped("time", Math.round(t * 1e4) / 1e4, true);
+}
+
+// ---------- бібліотека градієнтів ----------
+function paintThumb(cv, pal) {
+  const dpr = Math.max(1, window.devicePixelRatio || 1), w = Math.round(48 * dpr), h = Math.round(20 * dpr);
+  cv.width = w; cv.height = h;
+  const s = pal.slice().sort((a, b) => a[0] - b[0]);
+  const at = t => {
+    if (t <= s[0][0]) return s[0][1];
+    if (t >= s[s.length - 1][0]) return s[s.length - 1][1];
+    for (let i = 0; i < s.length - 1; i++) {
+      const a = s[i], b = s[i + 1];
+      if (t >= a[0] && t <= b[0]) { const k = b[0] === a[0] ? 0 : (t - a[0]) / (b[0] - a[0]); return a[1].map((v, j) => v + (b[1][j] - v) * k); }
+    }
+    return s[s.length - 1][1];
+  };
+  const ctx = cv.getContext("2d"), img = ctx.createImageData(w, 1);
+  for (let x = 0; x < w; x++) { const c = at(x / (w - 1)); img.data.set([c[0] * 255, c[1] * 255, c[2] * 255, 255], x * 4); }
+  for (let y = 0; y < h; y++) ctx.putImageData(img, 0, y);
+}
+
+function hint(text) { $("gradHint").textContent = text; }
+function baseHint() { hint(curGrad ? "Градієнт: " + curGrad.name + (curGrad.builtin ? "" : " (мій)") : "Клік по градієнту — застосувати"); }
+
+function renderLib() {
+  const box = $("gradLib");
+  box.innerHTML = "";
+  grads.forEach(g => {
+    const w = document.createElement("div");
+    w.className = "gsw" + (curGrad && curGrad.name === g.name ? " on" : "") + (g.builtin ? "" : " mine");
+    w.title = g.name + (g.builtin ? "" : " — мій (ПКМ: видалити)");
+    const cv = document.createElement("canvas");
+    paintThumb(cv, g.palette);
+    w.appendChild(cv);
+    if (!g.builtin) {
+      const x = document.createElement("button");
+      x.className = "gx"; x.textContent = "×"; x.title = "Видалити";
+      x.addEventListener("click", ev => { ev.stopPropagation(); delGrad(g); });
+      w.appendChild(x);
+    }
+    w.addEventListener("click", () => { curGrad = g; applyPalette(clone(g.palette)); renderLib(); updateGradButtons(); });
+    w.addEventListener("contextmenu", ev => { if (!g.builtin) { ev.preventDefault(); delGrad(g); } });
+    w.addEventListener("mouseenter", () => hint(g.name));
+    w.addEventListener("mouseleave", baseHint);
+    box.appendChild(w);
+  });
+  baseHint();
+}
+
+function updateGradButtons() {
+  $("btnGradSave").disabled = !(curGrad && !curGrad.builtin);
+  baseHint();
+}
+
+async function loadGrads(selectName) {
+  const keep = selectName || (curGrad && curGrad.name);
+  try {
+    grads = await (await fetch(API + "/gradients")).json();
+  } catch (e) { showMsg("Бібліотека градієнтів: " + e, true); return; }
+  curGrad = grads.find(g => g.name === keep) || null;
+  renderLib(); updateGradButtons();
+}
+
+async function saveGrad(name) {
+  try {
+    const r = await post(API + "/gradients/save", { name: name, palette: currentParams().palette });
+    const j = await r.json();
+    if (!r.ok) { showMsg("Помилка: " + (j.err || r.status), true); return; }
+    await loadGrads(j.name);
+    showMsg("Градієнт збережено: " + j.path);
+  } catch (e) { showMsg("Помилка: " + e, true); }
+}
+
+async function delGrad(g) {
+  if (g.builtin || !confirm("Видалити градієнт «" + g.name + "»?")) return;
+  try {
+    const r = await post(API + "/gradients/delete", { name: g.name });
+    const j = await r.json();
+    if (!r.ok) { showMsg("Помилка: " + (j.err || r.status), true); return; }
+    if (curGrad && curGrad.name === g.name) curGrad = null;
+    await loadGrads();
+    showMsg("Градієнт видалено: " + g.name);
+  } catch (e) { showMsg("Помилка: " + e, true); }
+}
+
+$("btnGradNew").addEventListener("click", () => {
+  const mine = grads.filter(g => !g.builtin).length;
+  const name = (prompt("Імʼя градієнта:", "Мій градієнт " + (mine + 1)) || "").trim();
+  if (!name) return;
+  const ex = grads.find(g => !g.builtin && g.name.toLowerCase() === name.toLowerCase());
+  if (ex && !confirm("Градієнт «" + ex.name + "» уже є. Перезаписати?")) return;
+  saveGrad(name);
+});
+$("btnGradSave").addEventListener("click", () => { if (curGrad && !curGrad.builtin) saveGrad(curGrad.name); });
+
+function applyPalette(pal) { setStopsFromPalette(pal); paletteChanged(); }
+window.addEventListener("resize", () => { sbKey = ""; drawGradient(); });
+$("pickBox").addEventListener("toggle", () => { sbKey = ""; if (sel) drawStopEdit(); });
+
+// ---------- повзунки ----------
+const decimals = step => {
+  const s = String(step);
+  return s.includes(".") ? s.split(".")[1].length : 0;
+};
+
+let groupsMeta = [];      // з сервера: [{name, icon, hint, power:[ключі]}] у порядку роботи
+const groupEls = {};      // name -> {det, power, off}
+function buildGroups() {
+  const root = $("groups");
+  root.innerHTML = "";
+  const byGroup = {};
+  spec.forEach(s => (byGroup[s.group] = byGroup[s.group] || []).push(s));
+  const order = groupsMeta.map(g => g.name).filter(g => byGroup[g]);
+  Object.keys(byGroup).forEach(g => { if (!order.includes(g)) order.push(g); });
+  const OPEN = order.slice(0, 2);                       // відкриті з початку: перші дві групи
+  order.forEach((g, i) => {
+    const meta = groupsMeta.find(m => m.name === g) || { power: [] };
+    const det = document.createElement("details");
+    det.className = "grp";
+    det.open = OPEN.includes(g);
+    const sm = document.createElement("summary");
+    sm.innerHTML = '<span class="gnum"></span><span class="gi"></span><span class="gt"></span><span class="gchip">вимкнено</span><span class="gcar"></span>';
+    sm.querySelector(".gnum").textContent = i + 1;
+    sm.querySelector(".gi").innerHTML = meta.icon || "";
+    sm.querySelector(".gt").textContent = g;
+    det.appendChild(sm);
+    if (meta.hint) sm.title = meta.hint;                  // пояснення - підказкою на наведенні, без абзацу
+    if (g === "Колір і градієнт") det.appendChild($("gradBox"));          // редактор градієнта живе в групі кольору
+    const power = meta.power || [];
+    byGroup[g].forEach((s, k) => {
+      const row = buildSlider(s);
+      det.appendChild(row);
+      if (k === 0 && power.length) {                    // перший повзунок = «сила» групи
+        row.classList.add("power");
+        const n = document.createElement("div"); n.className = "offnote"; det.appendChild(n);
+        groupEls[g] = { det, power, note: n };
+      }
+    });
+    det.addEventListener("toggle", () => { if (g === "Колір і градієнт" && det.open) { sbKey = ""; drawGradient(); } });
+    root.appendChild(det);
+  });
+}
+
+// група вимкнена, якщо її «сила» = 0 (або будь-який ключ сили = 0): решта повзунків приглушені
+function refreshGroup(g) {
+  const ge = groupEls[g];
+  if (!ge) return;
+  const zero = ge.power.find(k => !(+params[k] > 0));
+  const off = zero !== undefined;
+  ge.det.classList.toggle("off", off);
+  if (off) {
+    const lab = zero === ge.power[0] ? "" : "«" + (sliders[zero] ? sliders[zero].spec.label : zero) + "» = 0 — ";
+    ge.note.textContent = lab + "вимкнено — не рахується";
+    ge.det.querySelector(".gchip").title = ge.note.textContent;
+  }
+}
+function refreshAllGroups() { Object.keys(groupEls).forEach(refreshGroup); }
+
+function fillRange(r, s, v) { r.style.setProperty("--p", ((v - s.lo) / ((s.hi - s.lo) || 1)) * 100 + "%"); }
+function buildSlider(s) {
+  const isInt = s.kind === "i";
+  const dec = isInt ? 0 : Math.max(decimals(s.step), 2);
+  const row = document.createElement("div");
+  row.className = "sl";
+  row.innerHTML = '<label><span class="dot"></span><span class="t"></span></label>';
+  row.querySelector(".t").textContent = s.label;
+  row.querySelector("label").title = s.label + "\nподвійний клік — скинути";
+  const range = document.createElement("input");
+  range.type = "range"; range.min = s.lo; range.max = s.hi; range.step = s.step; range.className = "svk-range";
+  const num = document.createElement("input");
+  num.type = "number"; num.min = s.lo; num.max = s.hi; num.step = s.step;
+  row.append(range, num);
+
+  const commit = v => {
+    if (!isFinite(v)) return;
+    v = Math.max(s.lo, Math.min(s.hi, v));
+    if (isInt) v = Math.round(v);
+    params[s.name] = v;
+    range.value = v; fillRange(range, s, v);
+    if (document.activeElement !== num) num.value = v.toFixed(dec);
+    markChanged(s.name);
+    if (s.name === "time") syncTimeUI();
+    scheduleRender();
+  };
+  range.addEventListener("input", () => { num.value = (+range.value).toFixed(dec); commit(parseFloat(range.value)); });
+  num.addEventListener("change", () => { commit(parseFloat(num.value)); num.value = (+params[s.name]).toFixed(dec); });
+  row.querySelector("label").addEventListener("dblclick", () => {
+    if (loaded[s.name] !== undefined) setSlider(s.name, loaded[s.name], true);
+  });
+  sliders[s.name] = { range, num, row, dec, spec: s };
+  return row;
+}
+
+function setSlider(name, v, doRender) {
+  const e = sliders[name];
+  if (!e) return;
+  params[name] = v;
+  e.range.value = v; fillRange(e.range, e.spec, v);
+  e.num.value = (+v).toFixed(e.dec);
+  markChanged(name);
+  if (name === "time") syncTimeUI();
+  if (doRender) scheduleRender();
+}
+
+function markChanged(name) {
+  const e = sliders[name];
+  if (!e) return;
+  if (!params || !loaded) return;
+  const eps = e.spec.step / 100;
+  e.row.classList.toggle("chg", Math.abs((params[name] ?? 0) - (loaded[name] ?? 0)) > eps);
+  refreshGroup(e.spec.group);
+}
+
+function syncAllSliders() {
+  spec.forEach(s => {
+    if (params[s.name] === undefined) params[s.name] = loaded[s.name] !== undefined ? loaded[s.name] : s.lo;
+    setSlider(s.name, params[s.name], false);
+  });
+}
+
+// ---------- завантаження пресета ----------
+function adopt(preset) {
+  loaded = clone(preset);
+  params = clone(preset);
+  setStopsFromPalette(params.palette);
+  curGrad = null; renderLib(); updateGradButtons();
+  syncAllSliders();
+  refreshAllGroups();
+  paletteChanged(false);
+}
+
+async function loadPreset(name) {
+  setStatus("завантаження пресета…", "busy");
+  const r = await fetch(API + "/preset/" + encodeURIComponent(name));
+  adopt(await r.json());
+  const sel = $("presetSel");
+  if ([...sel.options].some(o => o.value === name)) sel.value = name;
+  if (EMBED) {                // список пресетів у ноді показує, від чого стартували
+    try { window.parent.postMessage({ type: "depth_look_presets", node: NODE, preset: name, list: [...sel.options].map(o => o.value) }, "*"); } catch (_) {}
+  }
+  scheduleRender();
+}
+
+$("presetSel").addEventListener("change", e => loadPreset(e.target.value));
+$("photoSel").addEventListener("change", e => {
+  if (!e.target.value) return;          // «(свій кадр)» — нічого не міняємо
+  photo = e.target.value; frameName = photo;
+  scheduleRender();
+});
+$("sizeSel").addEventListener("change", scheduleRender);
+$("btnReset").addEventListener("click", () => { adopt(loaded); scheduleRender(); });
+$("btnZero").addEventListener("click", () => loadPreset("00_оригінал"));
+$("btnGrade").addEventListener("click", () => loadPreset("look_v1"));
+
+// ---------- збереження / повний рендер ----------
+function showMsg(text, isErr) {
+  const m = $("msg");
+  m.style.display = text ? "block" : "none";
+  m.textContent = text;
+  m.classList.toggle("err", !!isErr);
+}
+
+function currentParams() {
+  const p = clone(params);
+  p.palette = sortedStops().map(s => [s.t, s.c.slice()]);
+  return p;
+}
+
+async function post(url, body) {
+  if (EMBED) body = Object.assign({ frame: curFrame }, body);
+  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+
+$("btnSave").addEventListener("click", async () => {
+  const name = prompt("Імʼя пресету:", $("presetSel").value || "look_tuned");
+  if (!name) return;
+  try {
+    const r = await post(API + "/save", { name: name, params: currentParams() });
+    const j = await r.json();
+    if (!r.ok) return showMsg("Помилка: " + (j.err || r.status), true);
+    showMsg("Збережено: " + j.path);
+    const base = j.path.split("/").pop().replace(/\.json$/, "");
+    const sel2 = $("presetSel");
+    if (![...sel2.options].some(o => o.value === base)) sel2.add(new Option(base, base));
+    sel2.value = base;
+    if (EMBED) {                // нода додає пресет у свій список без перезапуску Comfy
+      try { window.parent.postMessage({ type: "depth_look_presets", node: NODE, preset: base, list: [...sel2.options].map(o => o.value) }, "*"); } catch (_) {}
+    }
+    loaded = currentParams();   // нова база для крапок «змінено»
+    spec.forEach(s => markChanged(s.name));
+  } catch (e) { showMsg("Помилка: " + e, true); }
+});
+
+$("btnFull").addEventListener("click", async () => {
+  const b = $("btnFull");
+  b.disabled = true; showMsg("повний рендер… (може тривати)");
+  try {
+    const r = await post(API + "/full", { params: currentParams() });
+    const j = await r.json();
+    showMsg(r.ok ? "Повний рендер: " + j.path : "Помилка: " + (j.err || r.status), !r.ok);
+  } catch (e) { showMsg("Помилка: " + e, true); }
+  b.disabled = false;
+});
+
+// ---------- рендер із коалесингом ----------
+let inflight = false, pending = false, lastUrl = null;
+let frameName = "", frameDims = null, lastMs = null, playErr = false;
+
+function statusText() {
+  const d = frameDims;
+  return "рендер " + (lastMs || "?") + " мс" + (frameName ? " · " + frameName : "") +
+    (d && d.w ? " · " + d.w + "×" + d.h + (d.pw && d.pw !== d.w ? " (превʼю " + d.pw + "×" + d.ph + ")" : "") : "");
+}
+
+function setStatus(text, cls) {
+  const s = $("status");
+  s.textContent = text;
+  s.className = cls || "";
+}
+
+function scheduleRender() {
+  if (!params) return;
+  loupeParamsChanged();
+  notifyParent();
+  if (inflight) { pending = true; return; }
+  doRender();
+}
+
+async function doRender() {
+  inflight = true; pending = false; playErr = false;
+  setStatus("рендер…", "busy");
+  try {
+    const r = await post(API + "/render", { params: currentParams(), photo: photo, size: parseInt($("sizeSel").value, 10) });
+    if (r.ok) {
+      const g = k => parseInt(r.headers.get(k), 10) || 0;
+      frameDims = { w: g("X-Frame-W"), h: g("X-Frame-H"), pw: g("X-Preview-W"), ph: g("X-Preview-H") };
+    }
+    if (!r.ok) {
+      let msg = r.status, needRun = false;
+      try { const j = await r.json(); msg = j.err || msg; needRun = !!j.need_run; } catch (_) {}
+      if (needRun) showNeedRun(msg);
+      else setStatus("помилка рендеру: " + msg, "err");
+      playErr = true;
+    } else {
+      if (EMBED) hideNeedRun();
+      const ms = r.headers.get("X-Render-Ms");
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      if (viewMode === "render") $("img").src = url;
+      if (lastUrl) URL.revokeObjectURL(lastUrl);
+      lastUrl = url;
+      lastMs = ms;
+      setStatus(statusText());
+    }
+  } catch (e) {
+    setStatus("помилка зʼєднання: " + e, "err");
+  }
+  inflight = false;
+  if (pending) doRender();
+  else if (playing && !playErr) stepTime();
+}
+
+
+// стан зуму/панорами (оголошено тут, до першого scheduleRender)
+let zs = 1, ztx = 0, zty = 0;                       // масштаб відносно «вмістити», зсув у px обгортки
+let hq = { sig: "", W: 0, H: 0, tiles: new Set(), inflight: false, timer: null };
+let pan = null, spaceDown = false, overView = false, zmLast = { clientX: 0, clientY: 0 }, zLastDims = "";
+
+// ---------- лупа 100% ----------
+// Показує ділянку кадру 1:1 (1 піксель кадру = 1 піксель екрана). Рушій рахує кадр цілком, тому перший показ
+// після зміни параметрів повільний (≈10 с): до того в вікні — превʼю, збільшене з підписом «рахую…».
+let loupeOn = false, loupeHeld = null, loupeInflight = false, loupeTimer = null, loupePt = null, loupeMs = 0, sigDirty = true, sigCache = "";
+const LP_EL = $("loupe"), LP_CV = $("loupeCv"), LP_CAP = $("loupeCap");
+const loupeCss = () => parseInt($("loupeSz").value, 10) || 240;
+const loupeDev = () => Math.round(loupeCss() * (window.devicePixelRatio || 1));
+
+function curSig() {
+  if (sigDirty) { sigCache = JSON.stringify(currentParams()) + "|" + curFrame + "|" + photo; sigDirty = false; }
+  return sigCache;
+}
+function hideLoupe() { LP_EL.style.display = "none"; }
+
+function setLoupe(on) {
+  loupeOn = on;
+  document.body.classList.toggle("loupe", on);
+  $("btnLoupe").classList.toggle("on", on);
+  clearTimeout(loupeTimer);
+  if (!on) {
+    hideLoupe(); loupeHeld = null;
+    if (!hq.sig) post(API + "/render_crop", { free: true }).catch(() => {});       // віддати памʼять серверу (якщо різкий шар зуму його не тримає)
+    return;
+  }
+  setStatus("лупа 100%: наведи на кадр (Z або Esc — вимкнути)");
+}
+$("btnLoupe").addEventListener("click", () => setLoupe(!loupeOn));
+$("loupeSz").addEventListener("change", () => { if (loupeOn) { loupeHeld = null; drawLoupe(); scheduleLoupe(); } });
+
+// чи вікно (S×S пікселів кадру навколо точки) лежить цілком у вже отриманій ділянці
+function loupeCovers(h, px, py, S) {
+  const x0 = Math.max(0, px - S / 2), y0 = Math.max(0, py - S / 2), x1 = Math.min(h.W, px + S / 2), y1 = Math.min(h.H, py + S / 2);
+  return h.x0 <= x0 && h.y0 <= y0 && h.x0 + h.w >= x1 && h.y0 + h.h >= y1;
+}
+
+function drawLoupe() {
+  if (!loupeOn || !loupePt || viewMode !== "render" || !frameDims || !frameDims.w) { hideLoupe(); return; }
+  const pt = loupePt, S = loupeDev(), css = loupeCss();
+  if (LP_CV.width !== S) { LP_CV.width = S; LP_CV.height = S; }
+  LP_CV.style.width = css + "px"; LP_CV.style.height = css + "px";
+  LP_EL.style.display = "block";
+  LP_EL.style.left = pt.left + "px"; LP_EL.style.top = pt.top + "px";
+  LP_EL.classList.toggle("up", pt.top > $("img").clientHeight - css - 70);
+  const Wf = frameDims.w, Hf = frameDims.h, px = pt.x * Wf, py = pt.y * Hf;
+  const ctx = LP_CV.getContext("2d");
+  ctx.fillStyle = "#111"; ctx.fillRect(0, 0, S, S);
+  const h = loupeHeld;
+  const fresh = h && h.sig === curSig() && h.W === Wf && h.H === Hf;
+  if (fresh && loupeCovers(h, px, py, S)) {
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(h.bmp, Math.round(h.x0 - px + S / 2), Math.round(h.y0 - py + S / 2));
+    LP_CV.classList.remove("stale");
+    const capped = h.ow > h.W * 1.02;
+    LP_CAP.innerHTML = "100% · кадр " + h.W + "×" + h.H + (capped ? "<small>оригінал " + h.ow + "×" + h.oh + " — лупа показує ×" + (h.W / h.ow).toFixed(2) + " від нього</small>" : "");
+  } else {
+    const im = $("img");
+    if (im.naturalWidth) {                           // тимчасово: превʼю, збільшене до розміру кадру
+      const k = im.naturalWidth / Wf;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(im, px * k - S * k / 2, py * k - S * k / 2, S * k, S * k, 0, 0, S, S);
+    }
+    LP_CV.classList.add("stale");
+    LP_CAP.textContent = loupeInflight || !fresh ? "рахую кадр у 100%…" + (loupeMs ? " (≈" + Math.max(1, Math.round(loupeMs / 1000)) + " с)" : "") : "підвантажую ділянку…";
+  }
+}
+
+function scheduleLoupe() {
+  clearTimeout(loupeTimer);
+  if (!loupeOn || !loupePt || viewMode !== "render" || !frameDims || !frameDims.w) return;
+  const S = loupeDev(), h = loupeHeld;
+  const fresh = h && h.sig === curSig() && h.W === frameDims.w && h.H === frameDims.h;
+  if (fresh && loupeCovers(h, loupePt.x * frameDims.w, loupePt.y * frameDims.h, S)) return;
+  loupeTimer = setTimeout(sendLoupe, fresh ? 50 : 700);   // повний розрахунок — лише коли курсор/повзунки заспокоїлись
+}
+
+async function sendLoupe() {
+  if (!loupeOn || !loupePt) return;
+  if (loupeInflight || inflight || pending || hq.inflight) { loupeTimer = setTimeout(sendLoupe, 300); return; }   // не заважати превʼю
+  loupeInflight = true;
+  const pt = loupePt, sig = curSig(), S = loupeDev(), t0 = performance.now();
+  drawLoupe();
+  try {
+    const r = await post(API + "/render_crop", { params: currentParams(), cx: pt.x, cy: pt.y, size: Math.min(1024, S * 2) });
+    if (!r.ok) {
+      let msg = r.status; try { const j = await r.json(); msg = j.err || msg; } catch (_) {}
+      setStatus("лупа: " + msg, "err"); loupeInflight = false; return;
+    }
+    const g = k => parseInt(r.headers.get(k), 10) || 0;
+    const bmp = await createImageBitmap(await r.blob());
+    if (loupeHeld && loupeHeld.bmp.close) loupeHeld.bmp.close();
+    loupeHeld = { bmp, sig, x0: g("X-Crop-X"), y0: g("X-Crop-Y"), w: g("X-Crop-W"), h: g("X-Crop-H"),
+                  W: g("X-Full-W"), H: g("X-Full-H"), ow: g("X-Orig-W"), oh: g("X-Orig-H") };
+    if (r.headers.get("X-Cached") === "0") loupeMs = performance.now() - t0;
+  } catch (e) { setStatus("лупа: " + e, "err"); }
+  loupeInflight = false;
+  drawLoupe(); scheduleLoupe();
+}
+
+document.querySelector(".imgwrap").addEventListener("mousemove", e => {
+  if (!loupeOn || (pan && pan.moved)) return;
+  loupePt = imgPoint(e);
+  if (!loupePt) { hideLoupe(); return; }
+  drawLoupe(); scheduleLoupe();
+});
+document.querySelector(".imgwrap").addEventListener("mouseleave", () => { loupePt = null; clearTimeout(loupeTimer); hideLoupe(); });
+$("img").addEventListener("load", () => { if (loupeOn) drawLoupe(); });
+function loupeParamsChanged() { sigDirty = true; hqParamsChanged(); if (loupeOn && loupePt) { drawLoupe(); scheduleLoupe(); } }
+
+// ---------- зум і панорама самого кадру ----------
+// Масштаб zs=1 — «вмістити». Жести: колесо/пінч — до курсора; пробіл+тягни, середня кнопка або просто тягни (коли наближено) — рука;
+// 0 вмістити · 1 100% · +/− · подвійний клік вмістити↔100%. Коли екранних пікселів на піксель превʼю >1, видиму ділянку
+// дорахунок через /api/render_crop (тайли 1024 у робочій роздільності) і кладе поверх превʼю (#hq); зміна параметрів — інвалідує.
+const WRAP = document.querySelector(".imgwrap"), ZM = $("zoomer"), HQ = $("hq");
+const ZDPR = () => window.devicePixelRatio || 1;
+const ZMAX_DEV = 8;                                  // стеля: 800% (пікселів екрана на піксель кадру)
+
+function zgeom() {
+  const im = $("img"), Wc = WRAP.clientWidth, Hc = WRAP.clientHeight, nw = im.naturalWidth, nh = im.naturalHeight;
+  if (!nw || !Wc || !Hc) return null;
+  const sc = Math.min(Wc / nw, Hc / nh), dw = nw * sc, dh = nh * sc;
+  const rd = frameDims && frameDims.w;                 // превʼю/глибина/оригінал — той самий кадр, масштаб лічимо від робочої роздільності
+  const Wf = rd ? frameDims.w : nw, Hf = rd ? frameDims.h : nh;
+  return { Wc, Hc, nw, nh, sc, dw, dh, ox: (Wc - dw) / 2, oy: (Hc - dh) / 2, Wf, Hf, fcss: dw / Wf };
+}
+const zMaxS = g => Math.max(1, ZMAX_DEV / (ZDPR() * g.fcss));
+
+function zclamp(g) {
+  zs = Math.max(1, Math.min(zMaxS(g), zs));
+  const sw = g.dw * zs, sh = g.dh * zs;
+  let ax = zs * g.ox + ztx, ay = zs * g.oy + zty;
+  ax = sw <= g.Wc ? (g.Wc - sw) / 2 : Math.min(0, Math.max(g.Wc - sw, ax));
+  ay = sh <= g.Hc ? (g.Hc - sh) / 2 : Math.min(0, Math.max(g.Hc - sh, ay));
+  ztx = ax - zs * g.ox; zty = ay - zs * g.oy;
+}
+
+function zapply() {
+  const g = zgeom();
+  if (!g) return;
+  zclamp(g);
+  if (zs <= 1.001) { zs = 1; ztx = 0; zty = 0; }
+  ZM.style.transform = "translate(" + ztx + "px," + zty + "px) scale(" + zs + ")";
+  const zdev = zs * g.fcss * ZDPR();
+  ZM.classList.toggle("pix", zdev >= 3);
+  document.body.classList.toggle("zoomed", zs > 1.001);
+  $("zPct").textContent = Math.round(zdev * 100) + "%";
+  hqLayout(g);
+  if (hqNeeded(g)) { hqShow(); hqSchedule(hq.sig === curSig() ? 200 : 900); } else hqRelease();
+  if (loupeOn && overView) { loupePt = imgPoint(zmLast); if (loupePt) { drawLoupe(); scheduleLoupe(); } else hideLoupe(); }
+}
+
+function zoomTo(ns, mx, my) {
+  const g = zgeom(); if (!g) return;
+  ns = Math.max(1, Math.min(zMaxS(g), ns));
+  ztx = mx - (mx - ztx) * ns / zs; zty = my - (my - zty) * ns / zs; zs = ns;
+  zapply();
+}
+function zCursor() {                                  // точка зуму: курсор, якщо він над кадром, інакше центр
+  const r = WRAP.getBoundingClientRect();
+  return overView ? [zmLast.clientX - r.left, zmLast.clientY - r.top] : [r.width / 2, r.height / 2];
+}
+function zFit() { zs = 1; ztx = 0; zty = 0; zapply(); }
+function z100(at) {
+  const g = zgeom(); if (!g) return;
+  const [mx, my] = at || zCursor();
+  zoomTo(1 / (ZDPR() * g.fcss), mx, my);
+}
+function zStep(k) { const [mx, my] = zCursor(); zoomTo(zs * k, mx, my); }
+function zToggle(at) { if (zs > 1.001) zFit(); else z100(at); }
+
+$("zFit").addEventListener("click", zFit);
+$("z100").addEventListener("click", () => z100());
+$("zIn").addEventListener("click", () => zStep(1.5));
+$("zOut").addEventListener("click", () => zStep(1 / 1.5));
+$("zPct").addEventListener("click", () => zToggle());
+
+WRAP.addEventListener("wheel", e => {
+  const g = zgeom(); if (!g) return;
+  e.preventDefault();
+  const r = WRAP.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  zmLast = { clientX: e.clientX, clientY: e.clientY }; overView = true;
+  if (!e.ctrlKey && zs > 1.001 && Math.abs(e.deltaX) > Math.abs(e.deltaY)) { ztx -= e.deltaX; zapply(); return; }   // горизонтальний свайп трекпада — панорама
+  let dy = e.deltaY; if (e.deltaMode === 1) dy *= 33; else if (e.deltaMode === 2) dy *= 300;
+  dy = Math.max(-200, Math.min(200, dy));
+  zoomTo(zs * Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0018)), mx, my);            // ctrlKey = пінч трекпада
+}, { passive: false });
+
+WRAP.addEventListener("mousemove", e => { zmLast = { clientX: e.clientX, clientY: e.clientY }; });
+WRAP.addEventListener("mouseenter", () => { overView = true; });
+WRAP.addEventListener("mouseleave", () => { overView = false; });
+WRAP.addEventListener("mousedown", e => { if (e.button === 1) e.preventDefault(); });   // без автоскролу середньою кнопкою
+
+WRAP.addEventListener("pointerdown", e => {
+  const middle = e.button === 1;
+  const left = e.button === 0 && (spaceDown || (zs > 1.001 && !e.shiftKey && !e.altKey && !focusPick && !eyedrop));
+  if (!middle && !left) return;
+  e.preventDefault();
+  pan = { x: e.clientX, y: e.clientY, tx: ztx, ty: zty, moved: false, id: e.pointerId };
+  try { WRAP.setPointerCapture(e.pointerId); } catch (_) {}
+});
+WRAP.addEventListener("pointermove", e => {
+  if (!pan || e.pointerId !== pan.id) return;
+  const dx = e.clientX - pan.x, dy = e.clientY - pan.y;
+  if (!pan.moved && Math.hypot(dx, dy) < 4) return;
+  if (!pan.moved) { pan.moved = true; document.body.classList.add("panning"); hideLoupe(); }
+  ztx = pan.tx + dx; zty = pan.ty + dy;
+  zapply();
+});
+function panEnd(e) {
+  if (!pan || (e && e.pointerId !== pan.id)) return;
+  const moved = pan.moved;
+  try { WRAP.releasePointerCapture(pan.id); } catch (_) {}
+  pan = null; document.body.classList.remove("panning");
+  if (moved) { zSuppress = true; setTimeout(() => { zSuppress = false; }, 0); }
+  if (loupeOn && overView) { loupePt = imgPoint(zmLast); if (loupePt) { drawLoupe(); scheduleLoupe(); } }
+}
+let zSuppress = false;
+WRAP.addEventListener("pointerup", panEnd);
+WRAP.addEventListener("pointercancel", panEnd);
+WRAP.addEventListener("click", e => { if (zSuppress) { e.stopPropagation(); e.preventDefault(); } }, true);   // тягнення не має ставити фокус
+WRAP.addEventListener("dblclick", e => {
+  if (e.shiftKey || e.altKey || focusPick || eyedrop) return;
+  const r = WRAP.getBoundingClientRect();
+  zToggle([e.clientX - r.left, e.clientY - r.top]);
+});
+
+document.addEventListener("keydown", e => {
+  const t = e.target, tag = t && t.tagName;
+  if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.code === "Space") {
+    if (overView) { e.preventDefault(); if (!spaceDown) { spaceDown = true; document.body.classList.add("spacepan"); } }
+    return;
+  }
+  if (e.repeat && (e.key === "0" || e.key === "1")) return;
+  if (e.key === "0") zFit();
+  else if (e.key === "1") z100();
+  else if (e.key === "+" || e.key === "=" || e.code === "NumpadAdd") zStep(1.25);
+  else if (e.key === "-" || e.key === "_" || e.code === "NumpadSubtract") zStep(0.8);
+});
+document.addEventListener("keyup", e => {
+  if (e.code === "Space") {
+    if (spaceDown || overView) e.preventDefault();
+    spaceDown = false; document.body.classList.remove("spacepan");
+  }
+});
+window.addEventListener("blur", () => { spaceDown = false; document.body.classList.remove("spacepan"); });
+if (window.ResizeObserver) new ResizeObserver(() => zapply()).observe(WRAP);
+else window.addEventListener("resize", zapply);
+$("img").addEventListener("load", () => {
+  const im = $("img"), d = im.naturalWidth + "x" + im.naturalHeight;
+  if (d !== zLastDims) { zLastDims = d; zs = 1; ztx = 0; zty = 0; }              // інший кадр/розмір — знову «вмістити»
+  zapply();
+});
+
+// ---- різкий шар
+function hqNeeded(g) {
+  return zs > 1.001 && viewMode === "render" && !!(frameDims && frameDims.w) && g.nw < frameDims.w * 0.98 && g.sc * zs * ZDPR() > 1.02;
+}
+function hqLayout(g) {
+  HQ.style.left = g.ox + "px"; HQ.style.top = g.oy + "px"; HQ.style.width = g.dw + "px"; HQ.style.height = g.dh + "px";
+}
+function hqState(t) { $("zHq").textContent = t || ""; }
+function hqShow() {
+  const g = zgeom();
+  const ok = g && hqNeeded(g) && hq.sig === curSig() && hq.tiles.size > 0;
+  HQ.style.visibility = ok ? "visible" : "hidden";
+}
+function hqReset(W, H, sig) {
+  HQ.width = W; HQ.height = H;
+  hq.tiles = new Set(); hq.sig = sig; hq.W = W; hq.H = H;
+  HQ.style.visibility = "hidden";
+}
+let hqFreeTimer = null;
+function hqRelease() {                                 // зум повернувся до «вмістити»: сховати шар, памʼять — через 40 с простою
+  clearTimeout(hq.timer); hq.timer = null;
+  HQ.style.visibility = "hidden";
+  if (hq.sig && !hqFreeTimer) hqFreeTimer = setTimeout(hqFree, 40000);
+}
+function hqFree() {
+  hqFreeTimer = null;
+  const g = zgeom();
+  if (g && hqNeeded(g)) return;                        // знову наближено — лишаємо
+  const held = !!hq.sig;
+  hq.sig = ""; hq.tiles = new Set(); hq.W = hq.H = 0;
+  if (HQ.width > 1) { HQ.width = 1; HQ.height = 1; }
+  HQ.style.visibility = "hidden"; hqState("");
+  if (held && !loupeOn) post(API + "/render_crop", { free: true }).catch(() => {});       // віддати памʼять серверу
+}
+function hqSchedule(ms) { clearTimeout(hqFreeTimer); hqFreeTimer = null; clearTimeout(hq.timer); hq.timer = setTimeout(hqRun, ms); }
+function hqParamsChanged() {
+  if (!hq.sig) return;
+  HQ.style.visibility = "hidden";                      // старий різкий шар не збігається з новим превʼю
+  const g = zgeom();
+  if (g && hqNeeded(g)) { hqState("різкість: чекаю…"); hqSchedule(900); }
+}
+
+async function hqRun() {
+  hq.timer = null;
+  const g = zgeom();
+  if (!g || !hqNeeded(g)) { hqRelease(); return; }
+  if (loupeInflight || inflight || pending || hq.inflight) { hq.timer = setTimeout(hqRun, 350); return; }
+  const sig = curSig(), W = frameDims.w, H = frameDims.h, T = 1024;
+  if (hq.sig !== sig || hq.W !== W || hq.H !== H) hqReset(W, H, sig);
+  const fx0 = Math.max(0, ((0 - ztx) / zs - g.ox) / g.fcss), fx1 = Math.min(W, ((g.Wc - ztx) / zs - g.ox) / g.fcss);
+  const fy0 = Math.max(0, ((0 - zty) / zs - g.oy) / g.fcss), fy1 = Math.min(H, ((g.Hc - zty) / zs - g.oy) / g.fcss);
+  const mcx = (fx0 + fx1) / 2, mcy = (fy0 + fy1) / 2, need = [];
+  for (let j = Math.floor(fy0 / T); j <= Math.floor((fy1 - 1) / T); j++)
+    for (let i = Math.floor(fx0 / T); i <= Math.floor((fx1 - 1) / T); i++) {
+      const key = i + "," + j;
+      if (hq.tiles.has(key)) continue;
+      const cx = i * T + Math.min(T, W - i * T) / 2, cy = j * T + Math.min(T, H - j * T) / 2;
+      need.push({ key, cx, cy, d: Math.hypot(cx - mcx, cy - mcy) });
+    }
+  if (!need.length) { hqState("різкість: готово"); hqShow(); return; }
+  need.sort((a, b) => a.d - b.d);
+  const t = need[0], t0 = performance.now();
+  hq.inflight = true;
+  hqState(hq.tiles.size ? "різкість: дорахунок…" : "різкість: рахую кадр (≈10 с)…");
+  try {
+    const r = await post(API + "/render_crop", { params: currentParams(), cx: t.cx / W, cy: t.cy / H, size: T });
+    if (!r.ok) {
+      let msg = r.status; try { const j = await r.json(); msg = j.err || msg; } catch (_) {}
+      hqState("різкість: " + msg); hq.inflight = false; return;
+    }
+    const gh = k => parseInt(r.headers.get(k), 10) || 0;
+    const bmp = await createImageBitmap(await r.blob());
+    if (curSig() === sig && hq.sig === sig && gh("X-Full-W") === W && gh("X-Full-H") === H) {
+      HQ.getContext("2d").drawImage(bmp, gh("X-Crop-X"), gh("X-Crop-Y"));
+      hq.tiles.add(t.key);
+    }
+    if (bmp.close) bmp.close();
+  } catch (e) { hqState("різкість: " + e); hq.inflight = false; return; }
+  hq.inflight = false;
+  hqShow();
+  hqSchedule(30);                                      // наступний тайл / перевірка, чи нічого не змінилось
+}
+
+// ---------- режим ноди ComfyUI ----------
+let curFrame = 0, nodeInfo = null, armed = !EMBED, quietOnce = false, ntTimer = null, presetBase = null;
+
+function showNeedRun(msg) {
+  $("needRun").textContent = msg || "запусти граф раз, щоб превʼю взяло твій кадр";
+  document.documentElement.classList.add("needrun");
+  setStatus(msg || "", "");
+}
+function hideNeedRun() { document.documentElement.classList.remove("needrun"); }
+
+// змінені параметри -> батьківській сторінці (нода пише їх у params_json); дебаунс ~150 мс
+function notifyParent() {
+  if (!EMBED || !armed) return;
+  if (quietOnce) { quietOnce = false; return; }
+  clearTimeout(ntTimer);
+  ntTimer = setTimeout(() => {
+    try { window.parent.postMessage({ type: "depth_look_params", node: NODE, params: currentParams() }, "*"); } catch (_) {}
+  }, 150);
+}
+
+function frameTime(info, k) {
+  const idx = info.frames[k] || 0;
+  return (+info.start_time || 0) + idx / Math.max(+info.fps || 24, 1e-6);
+}
+
+function setupFrameUI(info) {
+  nodeInfo = info;
+  const box = $("frameBox");
+  if (!info || !info.node_frame) { box.style.display = "none"; return; }
+  curFrame = Math.max(0, Math.min(curFrame, info.frames.length - 1));
+  const sl = $("frameSl");
+  sl.min = 0; sl.max = info.frames.length - 1; sl.step = 1; sl.value = curFrame;
+  $("frameOut").textContent = info.frames[curFrame];
+  box.style.display = info.frames.length > 1 ? "flex" : "none";
+  if (hasSl("time") && info.fps !== undefined) {   // лише відео-нода: time слідує за кадром (start_time + N/fps)
+    const e = sliders.time;
+    const hi = Math.max(e.spec.hi, frameTime(info, info.frames.length - 1));
+    e.spec.hi = hi; e.range.max = hi; e.num.max = hi; $("timeSl").max = hi;
+    setSliderClamped("time", Math.round(frameTime(info, curFrame) * 1e4) / 1e4, false);
+  }
+}
+$("frameSl").addEventListener("input", () => {
+  curFrame = parseInt($("frameSl").value, 10) || 0;
+  $("frameOut").textContent = nodeInfo.frames[curFrame];
+  if (hasSl("time") && nodeInfo.fps !== undefined) setSliderClamped("time", Math.round(frameTime(nodeInfo, curFrame) * 1e4) / 1e4, false);
+  if (viewMode !== "render") showView(viewMode);
+  scheduleRender();
+});
+
+async function refreshNode() {
+  const st = await (await fetch(API + "/state")).json();
+  if (!st.node_frame) { showNeedRun(st.need_run); setupFrameUI(st); return; }
+  hideNeedRun();
+  setupFrameUI(st);
+  quietOnce = true;
+  if (viewMode !== "render") showView(viewMode);
+  scheduleRender();
+}
+
+function applyInit(m) {
+  const p = m.params && typeof m.params === "object" ? m.params : null;
+  if (p && Object.keys(p).length) {
+    adopt(Object.assign(clone(presetBase), p));
+    loaded = clone(presetBase); spec.forEach(s => markChanged(s.name));
+    quietOnce = true;
+    if (nodeInfo && nodeInfo.node_frame) setupFrameUI(nodeInfo);
+  } else if (m.preset && m.preset !== $("presetSel").value && [...$("presetSel").options].some(o => o.value === m.preset)) {
+    $("presetSel").value = m.preset;
+    quietOnce = true;
+    armed = true;
+    return loadPreset(m.preset);
+  } else quietOnce = true;
+  armed = true;
+  if (nodeInfo && nodeInfo.node_frame) scheduleRender();
+  else quietOnce = false;
+}
+
+if (EMBED) {
+  window.addEventListener("message", ev => {
+    const m = ev.data;
+    if (!m || typeof m !== "object") return;
+    if (m.type === "depth_look_init") applyInit(m);
+    else if (m.type === "depth_look_refresh") refreshNode().catch(e => setStatus("оновлення: " + e, "err"));
+    else if (m.type === "depth_look_warn") showMsg((m.warns || []).length ? "⚠ " + m.warns.join("  ·  ⚠ ") : "", true);
+  });
+  setTimeout(() => { armed = true; }, 4000);   // батько не відповів (iframe відкрито окремо) — працюємо без нього
+}
+
+// ---------- підказки замість абзаців: текст .pnote стає title рядка над ним ----------
+function notesToTitles() {
+  document.querySelectorAll(".pnote").forEach(n => {
+    const row = n.previousElementSibling && n.previousElementSibling.classList.contains("prow") ? n.previousElementSibling : n.parentElement.querySelector("summary");
+    if (row && n.textContent.trim()) row.title = (row.title ? row.title + "\n" : "") + n.textContent.trim();
+  });
+}
+
+// ---------- старт ----------
+(async function init() {
+  const st = await (await fetch(API + "/state")).json();
+  spec = st.spec;
+  groupsMeta = st.groups || [];
+  const px = st.extra_groups && st.extra_groups["Превʼю"];
+  if (px) { $("prevIcon").innerHTML = px.icon || ""; $("prevHint").textContent = px.hint || ""; $("grpPreview").querySelector("summary").title = px.hint || ""; }
+  $("finalHint").textContent = EMBED ? "фінальний розмір — у ноді (за замовч. як оригінал)"
+    : "фінальний розмір: кнопка «Повний рендер» рахує в робочій роздільності кадру";
+  notesToTitles();
+  presetBase = clone(st.preset);
+  if (EMBED && st.spec) {
+    const ts = st.spec.find(s => s.name === "time");
+    if (ts && st.node_frame && st.frames.length && st.fps !== undefined) ts.hi = Math.max(ts.hi, (+st.start_time || 0) + st.frames[st.frames.length - 1] / Math.max(+st.fps || 24, 1e-6));
+  }
+  const ps = $("presetSel");
+  const LABELS = { "look_v1": "Лук v1", "test_grade": "Тестовий", "00_оригінал": "Оригінал" };   // = presetLabel у web/svk_ui.js
+  st.presets.forEach(n => { const o = new Option((LABELS[n] || n) + (st.locked.includes(n) ? " 🔒" : ""), n); o.title = n; ps.add(o); });
+  ps.value = st.preset_name;
+  if (st.photos && st.photos.length) {
+    const sel2 = $("photoSel");
+    sel2.add(new Option("(свій кадр)", ""));
+    st.photos.forEach(n => sel2.add(new Option(n, n)));
+    sel2.value = st.photo;
+    sel2.style.display = "";
+  }
+  photo = st.photo || "";
+  frameName = st.name || "";
+  $("ownImg").value = st.image || ""; $("ownDepth").value = st.depth || "";
+  if (!st.photo) $("ownBox").open = true;
+  buildGroups();
+  buildSwatches();
+  quietOnce = EMBED;                     // перший рендер у ноді не пише params_json (зберігаємо те, що в workflow)
+  adopt(st.preset);
+  setupTimeUI();
+  if (EMBED) {
+    setupFrameUI(st);
+    if (st.node_frame) scheduleRender(); else showNeedRun(st.need_run);
+    quietOnce = false;
+    loadGrads();
+    try { window.parent.postMessage({ type: "depth_look_ready", node: NODE }, "*"); } catch (_) {}
+    return;
+  }
+  scheduleRender();
+  loadGrads();
+})().catch(e => setStatus("помилка ініціалізації: " + (e.stack || e), "err"));
+</script>
+</body>
+</html>

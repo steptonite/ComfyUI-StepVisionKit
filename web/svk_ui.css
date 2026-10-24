@@ -1,0 +1,181 @@
+/* Спільна дизайн-система Depth Look / StepVision: токени + кілька компонентів.
+   Підключають: картка «Depth Look · простий», стрічка відео-ноди (js/depth_look_simple.js) і тюнер (../tune.html).
+   Правила й анатомія: CONVENTIONS_UI.md. Токени --svk-* міняти ТУТ, не у файлах нод. */
+:root {
+  /* поверхні: нейтральний темний, без чистого чорного */
+  --svk-bg: #0e0e10;          /* полотно тюнера, підкладка кадру */
+  --svk-card: #151518;        /* тіло картки ноди */
+  --svk-raise: #1d1d21;       /* поля, чіпи, плитки у спокої */
+  --svk-line: #2a2a2f;        /* рамки й розділювачі */
+  --svk-text: #e8e6e3;
+  --svk-dim: #8d8b88;         /* підписи, допоміжний текст */
+  /* один акцент: приглушений бурштин; заливка сили всередині чіпа - його прозора версія */
+  --svk-accent: #e0a458;
+  --svk-accent-ink: #1a1208;
+  --svk-accent-soft: rgba(224, 164, 88, .26);
+  --svk-danger: #d27b6b;
+  /* стан «вимкнено»: єдиний для чіпів, груп тюнера, плиток */
+  --svk-off-opacity: .4;
+  /* форма */
+  --svk-r-card: 10px;
+  --svk-r-ctl: 8px;
+  --svk-r-sm: 6px;
+  --svk-gap: 8px;
+  /* типографіка: підписи 11/12, тіло 13; числа - моно */
+  --svk-font: "Geist", "SF Pro Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --svk-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --svk-fs-cap: 11px;
+  --svk-fs-ctl: 12px;
+  --svk-fs-body: 13px;
+  --svk-ease: cubic-bezier(.16, 1, .3, 1);
+}
+
+.svk-card, .svk-card * { box-sizing: border-box; }
+.svk-card {
+  width: 100%; height: 100%; display: flex; flex-direction: column; gap: var(--svk-gap);
+  padding: 2px 2px 4px; font: var(--svk-fs-body)/1.35 var(--svk-font); color: var(--svk-text);
+  background: transparent; user-select: none; -webkit-user-select: none; overflow: hidden;
+}
+.svk-cap { font-size: var(--svk-fs-cap); color: var(--svk-dim); letter-spacing: .02em; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.svk-cap b { font-weight: 500; color: var(--svk-text); }
+.svk-num { font-family: var(--svk-mono); font-size: var(--svk-fs-cap); color: var(--svk-dim); font-variant-numeric: tabular-nums; }
+
+/* ---- кадр-превʼю */
+.svk-frame {
+  position: relative; flex: 1 1 auto; min-height: 160px; border-radius: var(--svk-r-card); overflow: hidden;
+  background: var(--svk-bg); border: 1px solid var(--svk-line);
+}
+.svk-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.svk-frame .svk-busy { position: absolute; left: 0; right: 0; top: 0; height: 2px; opacity: 0; transition: opacity .2s; overflow: hidden; }
+.svk-frame.is-busy .svk-busy { opacity: 1; }
+.svk-frame .svk-busy::after { content: ""; position: absolute; inset: 0; width: 40%; background: var(--svk-accent); animation: svk-slide 1.1s var(--svk-ease) infinite; }
+@keyframes svk-slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+.svk-frame.is-busy img.svk-look { filter: saturate(.85); }
+.svk-frame .svk-tag { position: absolute; left: 8px; bottom: 8px; padding: 2px 7px; border-radius: 99px; font-size: var(--svk-fs-cap);
+  background: rgba(14, 14, 16, .72); color: var(--svk-dim); border: 1px solid var(--svk-line); }
+
+/* ---- порожній стан і скелет */
+.svk-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 10px; padding: 18px 20px;
+  background: linear-gradient(100deg, var(--svk-card) 30%, var(--svk-raise) 50%, var(--svk-card) 70%); background-size: 220% 100%; animation: svk-shimmer 2.4s linear infinite; }
+.svk-empty.still { animation: none; background: var(--svk-card); }
+@keyframes svk-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.svk-empty p { margin: 0; color: var(--svk-dim); font-size: var(--svk-fs-ctl); max-width: 30ch; }
+.svk-empty p b { color: var(--svk-text); font-weight: 500; }
+.svk-err { color: var(--svk-danger); }
+
+/* ---- кнопки */
+.svk-btn { font: 500 var(--svk-fs-ctl)/1 var(--svk-font); color: var(--svk-text); background: var(--svk-raise); border: 1px solid var(--svk-line);
+  border-radius: var(--svk-r-ctl); padding: 7px 12px; cursor: pointer; transition: transform .12s var(--svk-ease), border-color .15s; }
+.svk-btn:hover { border-color: #3a3a41; }
+.svk-btn:active { transform: translateY(1px) scale(.98); }
+.svk-btn.primary { background: var(--svk-accent); color: var(--svk-accent-ink); border-color: var(--svk-accent); }
+.svk-btn.ghost { background: transparent; border-color: transparent; color: var(--svk-dim); padding: 4px 6px; }
+.svk-btn.ghost:hover { color: var(--svk-text); }
+
+/* ---- повзунок «сила луку» */
+.svk-mix { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; }
+.svk-range { -webkit-appearance: none; appearance: none; width: 100%; height: 20px; background: transparent; margin: 0; cursor: pointer; }
+.svk-range::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--svk-accent) var(--p, 100%), var(--svk-line) var(--p, 100%)); }
+.svk-range::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%; background: var(--svk-text); border: 0; transition: transform .12s var(--svk-ease); }
+.svk-range:active::-webkit-slider-thumb { transform: scale(1.18); }
+.svk-range::-moz-range-track { height: 4px; border-radius: 2px; background: var(--svk-line); }
+.svk-range::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--svk-accent); }
+.svk-range::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--svk-text); }
+
+/* ---- плитки луків */
+.svk-tiles { display: flex; gap: var(--svk-gap); overflow-x: auto; padding: 2px 1px 6px; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: var(--svk-line) transparent; }
+.svk-tile { flex: 0 0 auto; width: 92px; scroll-snap-align: start; cursor: pointer; background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; }
+.svk-tile .th { position: relative; width: 92px; height: 92px; border-radius: var(--svk-r-ctl); overflow: hidden; background: var(--svk-raise);
+  border: 1px solid var(--svk-line); transition: transform .18s var(--svk-ease), border-color .15s, box-shadow .15s; }
+.svk-tile .th img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .25s; }
+.svk-tile .th img.ok { opacity: 1; }
+.svk-tile .th::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, .05) 50%, transparent 70%); background-size: 220% 100%; animation: svk-shimmer 1.8s linear infinite; }
+.svk-tile .th.done::after { display: none; }
+.svk-tile:hover .th { transform: translateY(-1px); border-color: #3a3a41; }
+.svk-tile:active .th { transform: scale(.97); }
+.svk-tile.is-sel .th { border-color: var(--svk-accent); box-shadow: 0 0 0 1px var(--svk-accent) inset; }
+.svk-tile .nm { margin-top: 5px; font-size: var(--svk-fs-cap); color: var(--svk-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.svk-tile.is-sel .nm { color: var(--svk-text); }
+.svk-tile .th .dot { position: absolute; right: 5px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--svk-accent); display: none; }
+.svk-tile.is-sel.is-mod .th .dot { display: block; }
+
+/* ---- чіпи ефектів: тап = вкл/викл, перетяг по чіпу або колесо = сила 0..2 (заливка) */
+/* чіпи переносяться в наступні рядки: ширина картки визначає, скільки в ряд; підпис не обрізається */
+.svk-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
+.svk-chip { --fill: 50%; position: relative; min-height: 46px; gap: 5px; padding: 6px 7px; border-radius: var(--svk-r-ctl); border: 1px solid var(--svk-line);
+  background: linear-gradient(90deg, var(--svk-accent-soft) var(--fill), var(--svk-raise) var(--fill)); color: var(--svk-text);
+  display: flex; flex-direction: column; justify-content: space-between; cursor: ew-resize; touch-action: none;
+  transition: border-color .15s, opacity .15s, transform .12s var(--svk-ease); font: inherit; text-align: left; }
+.svk-chip svg { width: 15px; height: 15px; display: block; color: var(--svk-accent); }
+.svk-chip .lb { font-size: var(--svk-fs-cap); line-height: 1.15; white-space: normal; overflow-wrap: anywhere; }
+.svk-chip .val { position: absolute; right: 6px; top: 6px; font-family: var(--svk-mono); font-size: 10px; color: var(--svk-dim); }
+.svk-chip:hover { border-color: #3a3a41; }
+.svk-chip:active { transform: scale(.97); }
+.svk-chip.is-off { background: var(--svk-raise); opacity: var(--svk-off-opacity); }
+.svk-chip.is-off svg { color: var(--svk-dim); }
+.svk-chip.is-absent { background: transparent; border-style: dashed; opacity: .62; cursor: pointer; }
+.svk-chip.is-absent svg { color: var(--svk-dim); }
+.svk-chip.is-drag { border-color: var(--svk-accent); }
+.svk-chip.is-drag .val { color: var(--svk-text); }
+
+/* ---- «⋯ ще» */
+.svk-more summary { list-style: none; cursor: pointer; color: var(--svk-dim); font-size: var(--svk-fs-ctl); padding: 2px 0; display: inline-flex; align-items: center; gap: 6px; }
+.svk-more summary:hover { color: var(--svk-text); }
+.svk-more summary::-webkit-details-marker { display: none; }
+.svk-more[open] summary { color: var(--svk-text); }
+.svk-more .body { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; padding: 8px 2px 2px; font-size: var(--svk-fs-ctl); }
+.svk-more select, .svk-more input[type=number] { width: 104px; background: var(--svk-raise); color: var(--svk-text); border: 1px solid var(--svk-line);
+  border-radius: var(--svk-r-sm); font: inherit; padding: 4px 6px; }
+.svk-more input[type=checkbox] { accent-color: var(--svk-accent); width: 15px; height: 15px; justify-self: end; }
+.svk-more .hint { grid-column: 1 / -1; color: var(--svk-dim); font-size: var(--svk-fs-cap); margin-top: -4px; }
+
+/* ---- стрічка кадрів відео-ноди */
+.svk-viewer { position: relative; height: 150px; flex: 0 0 auto; }
+.svk-viewer img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.svk-strip { display: flex; gap: 6px; overflow-x: auto; padding: 2px 1px 6px; scrollbar-width: thin; scrollbar-color: var(--svk-line) transparent; }
+.svk-shot { flex: 0 0 auto; width: 64px; cursor: pointer; background: none; border: 0; padding: 0; color: inherit; font: inherit; }
+.svk-shot .th { width: 64px; height: 64px; border-radius: var(--svk-r-sm); overflow: hidden; border: 1px solid var(--svk-line); background: var(--svk-raise); transition: transform .15s var(--svk-ease), border-color .15s; }
+.svk-shot .th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.svk-shot:hover .th { transform: translateY(-1px); }
+.svk-shot.is-sel .th { border-color: var(--svk-accent); }
+.svk-shot .nm { margin-top: 3px; font-family: var(--svk-mono); font-size: 10px; color: var(--svk-dim); text-align: center; }
+
+/* ---- картка, що гортається колесом (простий, відео): висота ноди не росте, вміст прокручується всередині */
+.svk-card.svk-scroll { overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--svk-line) transparent; padding-right: 4px; }
+.svk-card.svk-scroll > * { flex: 0 0 auto; }
+.svk-card.svk-scroll > .svk-frame { height: var(--svk-frame-h, 200px); min-height: 0; }
+/* Nodes 2.0 (Vue-нода, [data-node-id]) тягне DOM-віджет під вміст - без стелі картка росла б разом з «ще», а не гортала */
+[data-node-id] .svk-card.svk-scroll { max-height: var(--svk-card-max-h, 560px); }
+
+/* ---- іконки замість текстових кнопок: один ряд, пояснення - у title */
+.svk-icons { display: flex; align-items: center; gap: 4px; flex-wrap: nowrap; }
+.svk-ibtn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; flex: none;
+  color: var(--svk-dim); background: var(--svk-raise); border: 1px solid var(--svk-line); border-radius: var(--svk-r-sm); cursor: pointer;
+  transition: color .15s, border-color .15s, transform .12s var(--svk-ease); }
+.svk-ibtn:hover { color: var(--svk-text); border-color: #3a3a41; }
+.svk-ibtn:active { transform: scale(.94); }
+.svk-ibtn.is-on { color: var(--svk-accent-ink); background: var(--svk-accent); border-color: var(--svk-accent); }
+.svk-ibtn svg { display: block; }
+
+/* ---- сегменти (2-3 варіанти: превʼю / фінал) */
+.svk-seg { display: inline-flex; padding: 2px; gap: 2px; background: var(--svk-raise); border: 1px solid var(--svk-line); border-radius: var(--svk-r-ctl); }
+.svk-seg button { font: 500 var(--svk-fs-ctl)/1 var(--svk-font); color: var(--svk-dim); background: transparent; border: 0; border-radius: var(--svk-r-sm); padding: 6px 10px; cursor: pointer; }
+.svk-seg button:hover { color: var(--svk-text); }
+.svk-seg button.is-on { background: var(--svk-card); color: var(--svk-text); box-shadow: inset 0 0 0 1px var(--svk-line); }
+
+/* ---- повзунок з підписом: назва й значення в один рядок, повзунок на всю ширину; подвійний клік по назві - типове */
+.svk-sl { display: flex; flex-direction: column; gap: 2px; }
+.svk-sl .hd { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: var(--svk-fs-ctl); }
+.svk-sl .t { color: var(--svk-text); cursor: default; }
+
+/* ---- поле: назва ліворуч, контрол праворуч */
+.svk-field { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: var(--svk-fs-ctl); }
+.svk-field .t { color: var(--svk-text); }
+.svk-field select, .svk-field input[type=number] { width: 112px; background: var(--svk-raise); color: var(--svk-text); border: 1px solid var(--svk-line);
+  border-radius: var(--svk-r-sm); font: inherit; padding: 4px 6px; }
+.svk-field input[type=checkbox] { accent-color: var(--svk-accent); width: 15px; height: 15px; }
+.svk-more .body.body-col { display: flex; flex-direction: column; gap: 9px; }
+
+/* ---- рядок керування під кадром/тюнером */
+.svk-bar { display: flex; align-items: center; gap: 8px; }
+.svk-bar .grow { flex: 1; }

@@ -1,0 +1,143 @@
+{
+ "focus": 0.8044360141489294,
+ "n_layers": 8,
+ "r_min": 0,
+ "r_max": 0,
+ "lens_gamma": 1,
+ "dispersion": 0,
+ "blur_amount": 0,
+ "blur_target": -1.0,
+ "far_gradient": 0,
+ "gradient_onset": 0.036387037933240586,
+ "near_tint": 0,
+ "luma_keep": 1,
+ "gradient_gain": 1,
+ "subject_map": 0,
+ "subject_contrast": 1,
+ "bg_bands": 0,
+ "band_flip": 0.5214456100051137,
+ "warp": 0,
+ "warp_scale": 0.2,
+ "smear": 0,
+ "smear_angle": 72.88919958656827,
+ "warp_seed": 625,
+ "smear_radial": 0.8484260919442324,
+ "stretch_length": 0.39507136616442773,
+ "stretch_steps": 20,
+ "stretch_blur": 0.02701011302015076,
+ "stretch_opacity": 0,
+ "stretch_fade": 0.598813026994859,
+ "stretch_color_shift": 0.7180019426488304,
+ "stretch_lighten": 0,
+ "silhouette": 0,
+ "sil_lo": 0.66,
+ "sil_hi": 0.8,
+ "sil_bg": 0,
+ "sil_bg_lo": 0.55,
+ "sil_detail": 0.12,
+ "sil_rim": 0,
+ "sil_rim_radius": 0.012,
+ "haze": 0,
+ "haze_start": 0.25,
+ "haze_curve": 1.4,
+ "haze_t": 0.65,
+ "haze_scatter": 0.5,
+ "trail": 0,
+ "trail_angle": 200.0,
+ "trail_length": 0.3,
+ "trail_source": 0.5,
+ "trail_threshold": 0.6,
+ "trail_decay": 2.0,
+ "trail_tint": 0.6,
+ "halation_threshold": 0.62,
+ "halation_radius": 0.008091291512281114,
+ "halation_strength": 0,
+ "chroma_ab": 0,
+ "glow": 0,
+ "glow_radius": 0.04,
+ "glow_threshold": 0.6,
+ "glow_warmth": 0.5,
+ "spark": 0,
+ "spark_threshold": 0.85,
+ "spark_size": 0.012,
+ "spark_rays": 0,
+ "spark_angle": 30.0,
+ "spark_length": 0.08,
+ "grain_amount": 0,
+ "grain_size": 32.119199119578994,
+ "grain_roughness": 15.0,
+ "seed": 6673,
+ "time": 0.0,
+ "grain_animate": 0,
+ "grain_fps": 24.0,
+ "warp_speed": 0.0,
+ "glow_pulse": 0.0,
+ "pulse_hz": 0.5,
+ "haze_drift": 0.0,
+ "trail_wobble": 0.0,
+ "grad_mode": 0,
+ "grad_speed": 0.25,
+ "grad_phase": 0.0,
+ "grad_loop": 0.0,
+ "grad_amount": 0,
+ "grad_angle": 90.0,
+ "grad_wavelength": 0.5,
+ "grad_amp": 0.15,
+ "grad_offset_x": 0.0,
+ "grad_offset_y": 0.0,
+ "vp_x": 0.6287763212478412,
+ "vp_y": 0.16082866621339273,
+ "shift_x": -0.0597818764614627,
+ "shift_y": 0.040287628691834144,
+ "palette": [
+  [
+   0.0,
+   [
+    0.0699685401707528,
+    0.04092628820244499,
+    0.1168383862528923
+   ]
+  ],
+  [
+   0.25499177345854773,
+   [
+    0.2443488528664287,
+    0.0,
+    0.11736751506834128
+   ]
+  ],
+  [
+   0.4627889765204865,
+   [
+    1.0,
+    0.429597867185721,
+    0.16932809616031258
+   ]
+  ],
+  [
+   0.5783755274373286,
+   [
+    1.0,
+    0.66379276905764,
+    0.602470859070084
+   ]
+  ],
+  [
+   0.7909201466586512,
+   [
+    0.616940042577992,
+    0.6352130434267701,
+    0.9606871337628923
+   ]
+  ],
+  [
+   1.0,
+   [
+    0.4074318735090135,
+    0.7796602344505941,
+    1.0
+   ]
+  ]
+ ],
+ "_src": "нуль: усі ефекти вимкнено, лук = оригінал (різниця 0.02/255, _bench/neutral.py, 23.10.2026)"
+}

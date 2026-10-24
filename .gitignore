@@ -14,3 +14,8 @@ thermal_config.json
 thermal_config.json.*.tmp
 .thermal_hold.json
 .thermal_hold.json.*.tmp
+# Depth Look: кеш кадрів/рендери - приватні фото, не в git
+depth_look/_cache/
+depth_look/renders/
+*.npy
+*.exr
