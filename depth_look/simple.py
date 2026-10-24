@@ -12,7 +12,7 @@ import look_params
 
 from .core import (DEFAULT_PRESET, SIZE_ORIGINAL, OUTPUT_SIZES, GRADE_TYPE, parse_output_size, check_inputs,
                    resolve_params, static_params, make_grade, out_shape)
-from .render_proc import tensors_to_numpy, make_progress, render, to_result
+from .render_proc import tensors_to_numpy, make_progress, render, to_result, stage
 
 # (група, ключ сили, id віджета). Сила групи = перший ключ GROUP_POWER; множник 0..2 лягає на нього
 POWER_GROUPS = [(g, look_params.GROUP_POWER[g][0]) for g in look_params.GROUP_ORDER if g in look_params.GROUP_POWER]
@@ -25,9 +25,9 @@ ADD_DEFAULT = {"silhouette": 0.6, "warp": 0.12, "smear": 0.5, "trail": 0.5, "str
                "glow": 0.6, "spark": 0.5, "halation_strength": 1.0, "grain_amount": 20.0}
 
 # людські назви груп для чіпів (без жаргону); повна назва групи лишається підказкою
-CHIP_LABEL = {"Силует": "Силует", "Деформація · хвиля": "Марево", "Деформація · розмаз": "Розмаз", "Шлейф": "Шлейф",
-              "Копії в глибину": "Тунель", "Серпанок": "Серпанок", "Світло · глоу": "Сяйво",
-              "Світло · точковий глоу": "Зірки", "Світло · halation": "Ореол", "Зерно": "Зерно"}
+CHIP_LABEL = {"Silhouette": "Silhouette", "Warp · Wave": "Shimmer", "Warp · Smear": "Smear", "Trail": "Trail",
+              "Depth Copies": "Tunnel", "Haze": "Haze", "Light · Glow": "Glow",
+              "Light · Point Glow": "Stars", "Light · Halation": "Halo", "Grain": "Grain"}
 
 
 def parse_extra(s):
@@ -64,26 +64,26 @@ class DepthLookSimple:
     def INPUT_TYPES(cls):
         presets = look_params.list_presets()
         req = {
-            "image": ("IMAGE", {"tooltip": "Кадр або батч кадрів."}),
-            "depth": ("IMAGE", {"tooltip": "Карта глибини: 1 на весь батч або по одній на кадр. Світле = близько."}),
+            "image": ("IMAGE", {"tooltip": "A frame or a batch of frames."}),
+            "depth": ("IMAGE", {"tooltip": "Depth map: one for the whole batch or one per frame. Bright = near."}),
             "preset": (presets, {"default": DEFAULT_PRESET if DEFAULT_PRESET in presets else presets[0],
-                                 "tooltip": "Готовий лук. Нижче - кожну групу ефектів можна вимкнути або підсилити/послабити."}),
+                                 "tooltip": "Ready-made look. Below, each effect group can be switched off or strengthened/weakened."}),
         }
         for g, key in POWER_GROUPS:
             hint = look_params.GROUP_HINT.get(g, "")
-            req[key + "_on"] = ("BOOLEAN", {"default": True, "label": g + " · увімк", "tooltip": hint})
-            req[key + "_power"] = ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05, "label": g + " · сила ×",
-                                             "tooltip": "Множник сили групи: 1 = як у пресеті, 0 = вимкнено (не рахується), 2 = вдвічі. " + hint})
+            req[key + "_on"] = ("BOOLEAN", {"default": True, "label": g + " · on", "tooltip": hint})
+            req[key + "_power"] = ("FLOAT", {"default": 1.0, "min": 0.0, "max": 2.0, "step": 0.05, "label": g + " · strength ×",
+                                             "tooltip": "Group strength multiplier: 1 = as in the preset, 0 = off (not computed), 2 = double. " + hint})
         return {
             "required": req,
             "optional": {
-                "output_size": (OUTPUT_SIZES, {"default": SIZE_ORIGINAL, "tooltip": "Фінальний розмір кадру (довга сторона, px). «як оригінал» = розмір входу."}),
-                "max_side": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8, "tooltip": "Робоча роздільність: рахується на кадрі з такою довгою стороною і росте до фінального. 0 = одразу у фінальному. Для довгих кліпів на 8 ГБ."}),
-                "clean_depth": ("BOOLEAN", {"default": True, "tooltip": "Сира глибина чиститься (кадр - напрямна). Вимкни, якщо глибина вже чиста 0..1."}),
-                "depth_light_is_near": ("BOOLEAN", {"default": True, "tooltip": "Світле = близько. Вимкни, якщо нода глибини віддає навпаки."}),
+                "output_size": (OUTPUT_SIZES, {"default": SIZE_ORIGINAL, "tooltip": "Final frame size (long side, px). The first option keeps the input size."}),
+                "max_side": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8, "tooltip": "Working resolution: computed on a frame with this long side and then upscaled to the final size. 0 = compute directly at final size. For long clips on 8 GB machines."}),
+                "clean_depth": ("BOOLEAN", {"default": True, "tooltip": "Raw depth is cleaned up (the frame is the guide). Turn off if the depth is already clean 0..1."}),
+                "depth_light_is_near": ("BOOLEAN", {"default": True, "tooltip": "Bright = near. Turn off if your depth node outputs the opposite."}),
                 # нові входи - в кінець, щоб widgets_values старих workflow не зсунулись
-                "look_mix": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "label": "сила луку",
-                                       "tooltip": "Загальний міксер: 0 = оригінал, 1 = повний лук. Діє на вихід image (вихід grade його не несе)."}),
+                "look_mix": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "label": "look strength",
+                                       "tooltip": "Master mix: 0 = original, 1 = full look. Applies to the image output (the grade output does not carry it)."}),
                 "extra_json": ("STRING", {"multiline": False, "default": "{}"}),   # службове: ефекти, додані поверх пресету (пише js)
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
@@ -101,27 +101,31 @@ class DepthLookSimple:
               for _g, key in POWER_GROUPS}
         p = static_params(apply_groups(resolve_params(preset), sw, parse_extra(extra_json)))
         g = make_grade(p, preset, clean_depth, depth_light_is_near, "clip")
+        stage(unique_id, "read", n=int(image.shape[0]))
         frames, dep = tensors_to_numpy(image, depth)
         ui = {}
         if unique_id is not None:          # кадри для живого превʼю картки (кеш під ключем s<id>: не плутається з DepthLook)
             try:
+                stage(unique_id, "cache")
                 meta = look_api.save_node_cache(node_key(unique_id), frames, dep, clean_depth, depth_light_is_near,
                                                 depth_levels="clip")
                 ui = {"depth_look_simple": [{"frames": meta["indices"], "stamp": meta["stamp"]}]}
             except Exception as e:
-                print("[DepthLookSimple] кеш превʼю не записано: %s" % e)
+                print("[DepthLookSimple] preview cache not written: %s" % e)
         out_size = parse_output_size(output_size)
         for w in check_inputs(frames, dep, max_side, out_size):
             print("[DepthLookSimple] ⚠ " + w)
         kw = dict(grade=g, clean_depth=bool(clean_depth), light_is_near=bool(depth_light_is_near),
                   max_side=int(max_side or 0), depth_levels="clip", output_size=out_size, static=True)
         t0 = time.time()
-        arr = render(frames, dep, kw, make_progress(frames.shape[0]),
+        arr = render(frames, dep, kw, make_progress(frames.shape[0], unique_id),
                      out_shape(frames.shape[0], frames.shape[1], frames.shape[2], out_size))
         mix = float(min(max(look_mix, 0.0), 1.0))
         if mix < 1.0:                      # міксер оригінал↔лук: лінійно по кодованих значеннях (так само, як прозорість у превʼю картки)
+            stage(unique_id, "mix")
             arr = mix_with_original(arr, frames, mix)
-        print("[DepthLookSimple] %d кадр(ів) %dx%d -> %dx%d за %.1f с, сила луку %.2f" % (
+        stage(unique_id, "done", secs=round(time.time() - t0, 1))
+        print("[DepthLookSimple] %d frame(s) %dx%d -> %dx%d in %.1f s, look strength %.2f" % (
             frames.shape[0], frames.shape[2], frames.shape[1], arr.shape[2], arr.shape[1], time.time() - t0, mix))
         g = dict(g, look_mix=mix)         # сила луку йде далі по grade: повна й відео-нода змішують так само
         return {"ui": ui, "result": (to_result(arr, image), g)}

@@ -100,15 +100,17 @@
 .svk-tile.is-sel.is-mod .th .dot { display: block; }
 
 /* ---- чіпи ефектів: тап = вкл/викл, перетяг по чіпу або колесо = сила 0..2 (заливка) */
-/* чіпи переносяться в наступні рядки: ширина картки визначає, скільки в ряд; підпис не обрізається */
-.svk-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
-.svk-chip { --fill: 50%; position: relative; min-height: 46px; gap: 5px; padding: 6px 7px; border-radius: var(--svk-r-ctl); border: 1px solid var(--svk-line);
+/* чіпи переносяться в наступні рядки цілими чіпами: ширина картки визначає, скільки в ряд.
+   Слово всередині чіпа НЕ ламається (раніше overflow-wrap:anywhere різав «Си/лу/ет» по складах) - довге обрізається «…», повне в title */
+.svk-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; }
+.svk-chip { --fill: 50%; position: relative; min-width: 0; height: 34px; gap: 6px; padding: 0 8px; border-radius: var(--svk-r-ctl); border: 1px solid var(--svk-line);
   background: linear-gradient(90deg, var(--svk-accent-soft) var(--fill), var(--svk-raise) var(--fill)); color: var(--svk-text);
-  display: flex; flex-direction: column; justify-content: space-between; cursor: ew-resize; touch-action: none;
+  display: flex; flex-direction: row; align-items: center; cursor: ew-resize; touch-action: none;
   transition: border-color .15s, opacity .15s, transform .12s var(--svk-ease); font: inherit; text-align: left; }
-.svk-chip svg { width: 15px; height: 15px; display: block; color: var(--svk-accent); }
-.svk-chip .lb { font-size: var(--svk-fs-cap); line-height: 1.15; white-space: normal; overflow-wrap: anywhere; }
-.svk-chip .val { position: absolute; right: 6px; top: 6px; font-family: var(--svk-mono); font-size: 10px; color: var(--svk-dim); }
+.svk-chip svg { width: 15px; height: 15px; display: block; flex: none; color: var(--svk-accent); }
+.svk-chip .lb { order: 1; flex: 1 1 auto; min-width: 0; font-size: var(--svk-fs-ctl); line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  overflow-wrap: normal; word-break: keep-all; hyphens: none; }
+.svk-chip .val { order: 2; flex: none; font-family: var(--svk-mono); font-size: 10px; color: var(--svk-dim); }
 .svk-chip:hover { border-color: #3a3a41; }
 .svk-chip:active { transform: scale(.97); }
 .svk-chip.is-off { background: var(--svk-raise); opacity: var(--svk-off-opacity); }
@@ -119,10 +121,17 @@
 .svk-chip.is-drag .val { color: var(--svk-text); }
 
 /* ---- «⋯ ще» */
-.svk-more summary { list-style: none; cursor: pointer; color: var(--svk-dim); font-size: var(--svk-fs-ctl); padding: 2px 0; display: inline-flex; align-items: center; gap: 6px; }
-.svk-more summary:hover { color: var(--svk-text); }
+/* «ще» на всіх нодах однаковий: останній рядок картки на всю ширину - іконка, «ще», скільки сховано, стрілка праворуч */
+.svk-more { flex: none; }
+.svk-more summary { list-style: none; cursor: pointer; color: var(--svk-dim); font-size: var(--svk-fs-ctl); height: 30px; padding: 0 10px;
+  display: flex; align-items: center; gap: 8px; width: 100%; border: 1px solid var(--svk-line); border-radius: var(--svk-r-ctl); background: var(--svk-raise);
+  transition: color .15s, border-color .15s; }
+.svk-more summary:hover { color: var(--svk-text); border-color: #3a3a41; }
 .svk-more summary::-webkit-details-marker { display: none; }
-.svk-more[open] summary { color: var(--svk-text); }
+.svk-more summary .n { font-family: var(--svk-mono); font-size: 10px; padding: 1px 6px; border-radius: 99px; background: var(--svk-line); color: var(--svk-text); }
+.svk-more summary .chev { margin-left: auto; transition: transform .2s var(--svk-ease); }
+.svk-more[open] summary { color: var(--svk-text); border-color: #3a3a41; }
+.svk-more[open] summary .chev { transform: rotate(180deg); }
 .svk-more .body { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; padding: 8px 2px 2px; font-size: var(--svk-fs-ctl); }
 .svk-more select, .svk-more input[type=number] { width: 104px; background: var(--svk-raise); color: var(--svk-text); border: 1px solid var(--svk-line);
   border-radius: var(--svk-r-sm); font: inherit; padding: 4px 6px; }
@@ -143,8 +152,10 @@
 /* ---- картка, що гортається колесом (простий, відео): висота ноди не росте, вміст прокручується всередині */
 .svk-card.svk-scroll { overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--svk-line) transparent; padding-right: 4px; }
 .svk-card.svk-scroll > * { flex: 0 0 auto; }
-.svk-card.svk-scroll > .svk-frame { height: var(--svk-frame-h, 200px); min-height: 0; }
-/* Nodes 2.0 (Vue-нода, [data-node-id]) тягне DOM-віджет під вміст - без стелі картка росла б разом з «ще», а не гортала */
+/* кадр росте з шириною ноди (пропорція), а не стоїть фіксованими 200px */
+.svk-card.svk-scroll > .svk-frame { height: auto; aspect-ratio: 3 / 2; min-height: 150px; max-height: 420px; }
+.svk-card.svk-scroll > .svk-frame.svk-viewer { aspect-ratio: 16 / 9; min-height: 140px; }
+/* Nodes 2.0 (Vue-нода, [data-node-id]) тягне DOM-віджет під вміст - стелю ставить JS з висоти ноди (fitToNode), 560 - запас */
 [data-node-id] .svk-card.svk-scroll { max-height: var(--svk-card-max-h, 560px); }
 
 /* ---- іконки замість текстових кнопок: один ряд, пояснення - у title */
@@ -174,7 +185,45 @@
 .svk-field select, .svk-field input[type=number] { width: 112px; background: var(--svk-raise); color: var(--svk-text); border: 1px solid var(--svk-line);
   border-radius: var(--svk-r-sm); font: inherit; padding: 4px 6px; }
 .svk-field input[type=checkbox] { accent-color: var(--svk-accent); width: 15px; height: 15px; }
-.svk-more .body.body-col { display: flex; flex-direction: column; gap: 9px; }
+/* stretch обовʼязковий: без нього .body успадковував align-items:center від сітки вище - рядки ставали вузькими й їхали в центр */
+.svk-more .body.body-col { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+
+/* ---- секція ефектів (відео): заголовок + її керування; підпараметри зʼявляються, лише коли діють */
+.svk-sec { display: flex; flex-direction: column; gap: 10px; padding: 10px; border: 1px solid var(--svk-line); border-radius: var(--svk-r-ctl); }
+.svk-sec > .svk-cap { margin-bottom: -2px; }
+.svk-sub { display: flex; flex-direction: column; gap: 10px; padding-left: 10px; border-left: 2px solid var(--svk-line); }
+.svk-sub:empty, .svk-sub.is-hidden { display: none; }
+.svk-sl.is-idle .t, .svk-sl.is-idle .svk-num { color: var(--svk-dim); }
+
+/* ---- рядок стану виконання: етап, кадр k/N, скільки лишилось; смужка - частка готових кадрів */
+.svk-status { position: relative; flex: none; display: flex; align-items: center; gap: 8px; min-height: 24px; padding: 4px 8px; border-radius: var(--svk-r-sm);
+  background: var(--svk-raise); border: 1px solid var(--svk-line); font-size: var(--svk-fs-cap); color: var(--svk-dim); overflow: hidden; }
+.svk-status .st { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--svk-text); }
+.svk-status .tm { flex: none; font-family: var(--svk-mono); font-size: 10px; }
+.svk-status .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--svk-dim); }
+.svk-status.is-run .dot { background: var(--svk-accent); animation: svk-pulse 1s ease-in-out infinite; }
+.svk-status.is-done .dot { background: #8fbf7f; }
+.svk-status.is-err .dot { background: var(--svk-danger); }
+.svk-status.is-err .st { color: var(--svk-danger); }
+.svk-status .bar { position: absolute; left: 0; bottom: 0; height: 2px; width: var(--p, 0%); background: var(--svk-accent); transition: width .3s; }
+@keyframes svk-pulse { 50% { opacity: .35; } }
+
+/* ---- підказка «нижче ще»: напливає знизу картки, поки є що гортати; клік - гортає вниз */
+.svk-below { position: sticky; bottom: 0; align-self: center; flex: none; margin-top: -30px; z-index: 2; display: none; align-items: center; gap: 6px;
+  height: 26px; padding: 0 12px; border-radius: 99px; cursor: pointer; font: 500 var(--svk-fs-cap)/1 var(--svk-font);
+  color: var(--svk-text); background: rgba(29, 29, 33, .94); border: 1px solid #3a3a41; box-shadow: 0 6px 18px rgba(0, 0, 0, .45); }
+.svk-scroll[data-below="1"] > .svk-below { display: inline-flex; }
+
+/* ---- адаптив: картка - контейнер; вузька нода -> щільніше, широка -> плитки й кадр більші */
+.svk-card { container-type: inline-size; min-width: 280px; }
+@container (max-width: 320px) {
+  .svk-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .svk-tile .th { width: 76px; height: 76px; }
+  .svk-seg button { padding: 6px 8px; }
+}
+@container (min-width: 520px) {
+  .svk-chips { grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); }
+}
 
 /* ---- рядок керування під кадром/тюнером */
 .svk-bar { display: flex; align-items: center; gap: 8px; }

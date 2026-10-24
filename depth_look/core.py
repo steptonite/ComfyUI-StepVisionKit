@@ -44,10 +44,10 @@ def parse_palette(s):
             if len(h) == 3:
                 h = "".join(c * 2 for c in h)
             if len(h) != 6:
-                raise ValueError("палітра: поганий колір %r" % part)
+                raise ValueError("palette: bad color %r" % part)
             pal.append([float(t), [int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4)]])
     if len(pal) < 2:
-        raise ValueError("палітра: потрібно щонайменше 2 точки")
+        raise ValueError("palette: at least 2 stops are required")
     return [[float(t), [float(x) for x in c]] for t, c in pal]
 
 
@@ -55,10 +55,10 @@ def build_preset(preset_name, overrides="{}", palette=""):
     p = look_params.load_preset(preset_name)
     ov = json.loads(overrides) if (overrides or "").strip() else {}
     if not isinstance(ov, dict):
-        raise ValueError("overrides має бути JSON-обʼєктом")
+        raise ValueError("overrides must be a JSON object")
     bad = [k for k in ov if k not in look_params.NAMES and k not in _EXTRA_KEYS]
     if bad:
-        raise ValueError("overrides: невідомі ключі %s" % bad)
+        raise ValueError("overrides: unknown keys %s" % bad)
     p.update(ov)
     pal = parse_palette(palette)
     if pal is not None:
@@ -72,7 +72,7 @@ def _params_from_json(params_json):
     """Повні плоскі параметри з вбудованого тюнера (params_json) поверх дефолтів рушія -> dict пресету."""
     p = json.loads(params_json)
     if not isinstance(p, dict):
-        raise ValueError("params_json має бути JSON-обʼєктом")
+        raise ValueError("params_json must be a JSON object")
     base = look_params.defaults()
     base.update(p)
     if isinstance(base.get("palette"), str):
@@ -121,7 +121,7 @@ def make_grade(p, preset="", clean_depth=True, light_is_near=True, depth_levels=
 def params_from_grade(g):
     """grade -> плоскі параметри рушія поверх дефолтів (палітра - список [[t,[r,g,b]],..])."""
     if not isinstance(g, dict) or not isinstance(g.get("params"), dict):
-        raise ValueError("grade має бути виходом нод Depth Look / Depth Look · простий (dict з params)")
+        raise ValueError("grade must be the output of a Depth Look / Depth Look · Simple node (dict with params)")
     base = _defaults()
     base.update(g["params"])
     if g.get("palette") is not None and "palette" not in g["params"]:
@@ -142,15 +142,15 @@ def resolve_params(preset_name=DEFAULT_PRESET, overrides="{}", palette="", param
     if (params_json or "").strip():
         j = json.loads(params_json)
         if not isinstance(j, dict):
-            raise ValueError("params_json має бути JSON-обʼєктом")
+            raise ValueError("params_json must be a JSON object")
         p.update(j)
     else:
         ov = json.loads(overrides) if (overrides or "").strip() else {}
         if not isinstance(ov, dict):
-            raise ValueError("overrides має бути JSON-обʼєктом")
+            raise ValueError("overrides must be a JSON object")
         bad = [k for k in ov if k not in look_params.NAMES and k not in _EXTRA_KEYS]
         if bad:
-            raise ValueError("overrides: невідомі ключі %s" % bad)
+            raise ValueError("overrides: unknown keys %s" % bad)
         p.update(ov)
         pal = parse_palette(palette)
         if pal is not None:
@@ -236,36 +236,36 @@ def check_inputs(frames_np, depths_np, max_side=0, output_size=0):
     B, H, W = frames_np.shape[:3]
     dB = depths_np.shape[0]
     if dB not in (1, B):
-        raise ValueError("глибина: %d кадр(ів), а фото: %d. Треба 1 глибину на все або по одній на кожен кадр" % (dB, B))
+        raise ValueError("depth: %d frame(s) but image: %d. Provide 1 depth for everything or one per frame" % (dB, B))
     dh, dw = depths_np.shape[1:3]
     ra, rd = W / float(H), dw / float(dh)
     if abs(rd - ra) / ra > 0.02:
-        warns.append("пропорції глибини %dx%d не як у фото %dx%d - глибину буде розтягнуто, шари зʼїдуть" % (dw, dh, W, H))
+        warns.append("depth aspect %dx%d does not match the image %dx%d - depth will be stretched and the layers will misalign" % (dw, dh, W, H))
     d0 = np.asarray(depths_np[0], np.float32)
     if d0.ndim == 3:
         d0 = d0[..., 0]
     lv = np.unique(d0[::2, ::2]).size
     if float(d0.max() - d0.min()) < 1e-4:
-        warns.append("глибина пласка (один рівень) - лук без 3D-частини не працює")
+        warns.append("depth is flat (a single level) - the look does not work without the 3D part")
     else:
         if lv <= 256:
-            warns.append("глибина 8-біт (%d рівнів) - будуть сходинки на розмитті. Підключи глибину з DA3 напряму, не через PNG" % lv)
+            warns.append("depth is 8-bit (%d levels) - the blur will show banding. Connect depth from DA3 directly, not through PNG" % lv)
         for i in sorted({0, B // 2}):
             di = depths_np[i if dB > 1 else 0]
             di = di[..., 0] if di.ndim == 3 else di
             c = edge_match(frames_np[i], di)
             if c < EDGE_MIN:
-                warns.append("кадр %d: глибина, схоже, не від цього фото (збіг країв %.2f, норма від %.2f)" % (i, c, EDGE_MIN))
+                warns.append("frame %d: the depth does not seem to belong to this image (edge match %.2f, expected at least %.2f)" % (i, c, EDGE_MIN))
                 break
     Wo, Ho = _out_size(H, W, int(output_size or 0))
     Ww, Hw = _work_size(Ho, Wo, int(max_side or 0))
     need = GB_PER_MP * Ww * Hw / 1e6 * 1e9 + B * (H * W + Ho * Wo) * 3 * 4   # пік воркера + вхід/вихід батча
     total, avail = _ram()
     if total and need > 0.9 * total:
-        raise MemoryError("потрібно ≈%.1f ГБ, а памʼяті всього %.0f ГБ. Постав max_side (напр. 2048) або менше кадрів"
+        raise MemoryError("needs ≈%.1f GB but the machine only has %.0f GB of memory. Set max_side (e.g. 2048) or use fewer frames"
                           % (need / 1e9, total / 1e9))
     if avail and need > max(avail, 0.5 * total):        # macOS занижує «вільно» (кеш, компресор) - не шуміти на звичайних фото
-        warns.append("потрібно ≈%.1f ГБ, вільно %.1f ГБ - буде своп і повільно. Закрий важке або зменш max_side"
+        warns.append("needs ≈%.1f GB, %.1f GB free - it will swap and be slow. Close heavy apps or lower max_side"
                      % (need / 1e9, avail / 1e9))
     return warns
 
@@ -307,7 +307,7 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
     B, H, W = frames_np.shape[:3]
     dB = depths_np.shape[0]
     if dB not in (1, B):
-        raise ValueError("depth: %d кадрів, а image: %d" % (dB, B))
+        raise ValueError("depth: %d frames but image: %d" % (dB, B))
     if grade is not None:
         p = params_from_grade(grade)
     else:
@@ -347,6 +347,7 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
         del preps
     offs = None
     if int(round(float(kw.get("grad_mode", 0)))) == 1 and B > 1:
+        print("STAGE camera", flush=True)                 # воркер -> рядок стану ноди «аналіз руху камери»
         # режим «камера»: рух фону між кадрами -> grad_offset_x/y (раз на батч; глибина для маски далекого — на 720)
         def small_depth(i):
             rgb = get_rgb(i)

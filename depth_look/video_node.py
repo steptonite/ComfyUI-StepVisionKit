@@ -13,7 +13,7 @@ import look_params
 
 from .core import (SIZE_ORIGINAL, OUTPUT_SIZES, GRADE_TYPE, PREVIEW_SIDE, parse_output_size, check_inputs,
                    params_from_grade, out_shape, watermark)
-from .render_proc import tensors_to_numpy, make_progress, render, to_result
+from .render_proc import tensors_to_numpy, make_progress, render, to_result, stage
 
 QUALITY_PREVIEW = "превʼю (швидко)"
 QUALITY_FINAL = "фінал"
@@ -63,11 +63,11 @@ class DepthLookVideo:
         global _DEF
         _DEF = _DEF or look_params.defaults()
         req = {
-            "image": ("IMAGE", {"tooltip": "Кадри відео (B,H,W,3)."}),
-            "depth": ("IMAGE", {"tooltip": "Глибина: по одній на кадр (або одна на весь кліп). Світле = близько."}),
-            "grade": (GRADE_TYPE, {"tooltip": "Грейд зі статичної ноди (Depth Look) або Depth Look · простий. Анімацію нижче додає ця нода."}),
-            "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.01, "tooltip": "Частота кадрів відео: кадр i отримує час start_time + i/fps."}),
-            "start_time": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100000.0, "step": 0.01, "tooltip": "З якої секунди почати відлік анімації."}),
+            "image": ("IMAGE", {"tooltip": "Video frames (B,H,W,3)."}),
+            "depth": ("IMAGE", {"tooltip": "Depth: one per frame (or one for the whole clip). Bright = near."}),
+            "grade": (GRADE_TYPE, {"tooltip": "Grade from a static node (Depth Look) or Depth Look · Simple. This node adds the animation below."}),
+            "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.01, "tooltip": "Video frame rate: frame i gets the time start_time + i/fps."}),
+            "start_time": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100000.0, "step": 0.01, "tooltip": "At which second to start the animation clock."}),
         }
         for key, lo, hi, step, grp, label, is_int in _anim_specs():       # анімація: ключі як у SPEC/пресетах
             d = _DEF.get(key, lo)
@@ -77,10 +77,10 @@ class DepthLookVideo:
             else:
                 req[key] = ("FLOAT", {"default": float(d), "min": float(lo), "max": float(hi), "step": float(step), "tooltip": tip})
         req.update({
-            "output_size": (OUTPUT_SIZES, {"default": SIZE_ORIGINAL, "tooltip": "Фінальний розмір кадру (довга сторона, px). «як оригінал» = розмір входу. У превʼю не діє (там %d)." % PREVIEW_SIDE}),
-            "max_side": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8, "tooltip": "Робоча роздільність: look рахується на кадрі з такою довгою стороною і росте до фінального. 0 = одразу у фінальному. Для довгих кліпів на 8 ГБ."}),
-            "quality": ([QUALITY_PREVIEW, QUALITY_FINAL], {"default": QUALITY_PREVIEW, "tooltip": "Превʼю: довга сторона %d, кожен N-й кадр, напис PREVIEW - щоб глянути, як рухається градієнт. Фінал: розмір за output_size, усі кадри." % PREVIEW_SIDE}),
-            "preview_every": ("INT", {"default": 3, "min": 1, "max": 60, "step": 1, "tooltip": "Лише в превʼю: брати кожен N-й кадр. Для перегляду в реальному темпі став частоту відтворення fps/N (другий вихід)."}),
+            "output_size": (OUTPUT_SIZES, {"default": SIZE_ORIGINAL, "tooltip": "Final frame size (long side, px). The first option keeps the input size. Ignored in preview (it uses %d)." % PREVIEW_SIDE}),
+            "max_side": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8, "tooltip": "Working resolution: the look is computed on a frame with this long side and then upscaled to the final size. 0 = compute directly at final size. For long clips on 8 GB machines."}),
+            "quality": ([QUALITY_PREVIEW, QUALITY_FINAL], {"default": QUALITY_PREVIEW, "tooltip": "Preview: long side %d, every Nth frame, PREVIEW watermark - to check how the gradient moves. Final: size from output_size, all frames." % PREVIEW_SIDE}),
+            "preview_every": ("INT", {"default": 3, "min": 1, "max": 60, "step": 1, "tooltip": "Preview only: take every Nth frame. To watch at real speed, set the playback rate to fps/N (second output)."}),
         })
         return {"required": req, "hidden": {"unique_id": "UNIQUE_ID"}}
 
@@ -95,6 +95,7 @@ class DepthLookVideo:
         preview = str(quality).startswith("прев")
         g = grade
         params_from_grade(g)                                   # ранній зрозумілий виняток, якщо підключили не те
+        stage(unique_id, "read", n=int(image.shape[0]))
         frames, dep = tensors_to_numpy(image, depth)
         step = max(1, int(preview_every)) if preview else 1
         if step > 1:                                           # прорідження ДО збереження завдання: воркер не бачить зайвого
@@ -110,25 +111,28 @@ class DepthLookVideo:
                   start_time=float(start_time), anim={k: anim[k] for k in look_params.ANIM_KEYS if k in anim},
                   frame_step=step, static=False)
         t0 = time.time()
-        arr = render(frames, dep, kw, make_progress(frames.shape[0]),
+        arr = render(frames, dep, kw, make_progress(frames.shape[0], unique_id),
                      out_shape(frames.shape[0], frames.shape[1], frames.shape[2], out_size))
         mix = float(min(max(g.get("look_mix", 1.0), 0.0), 1.0))      # «сила луку» з простої ноди
         if mix < 1.0:
             from .simple import mix_with_original
+            stage(unique_id, "mix")
             arr = mix_with_original(arr, frames, mix)
         ui = {}
         if preview and unique_id is not None:                  # стрічка кадрів у ноді (той самий стиль, що й плитки Simple)
             try:
+                stage(unique_id, "strip")
                 idx = save_strip(unique_id, arr)
                 meta = {"n": len(idx), "frames": [int(k * step) for k in idx], "total": int(arr.shape[0]),
                         "play_fps": float(fps) / step, "every": step, "stamp": time.time_ns()}
                 json.dump(meta, open(strip_meta_path(unique_id), "w"))      # щоб стрічка пережила перезавантаження сторінки
                 ui = {"depth_look_strip": [meta]}
             except Exception as e:
-                print("[DepthLookVideo] стрічку превʼю не записано: %s" % e)
+                print("[DepthLookVideo] preview strip not written: %s" % e)
         if preview:
             watermark(arr, "PREVIEW %d, every %d - set quality=final" % (PREVIEW_SIDE, step))
         play = float(fps) / step
-        print("[DepthLookVideo] %s: %d кадр(ів) %dx%d за %.1f с, грати з %.2f fps, сила луку %.2f" % (
+        stage(unique_id, "done", secs=round(time.time() - t0, 1))
+        print("[DepthLookVideo] %s: %d frame(s) %dx%d in %.1f s, play at %.2f fps, look strength %.2f" % (
             QUALITY_PREVIEW if preview else QUALITY_FINAL, arr.shape[0], arr.shape[2], arr.shape[1], time.time() - t0, play, mix))
         return {"ui": ui, "result": (to_result(arr, image), play)}

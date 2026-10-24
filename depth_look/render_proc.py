@@ -37,6 +37,8 @@ def _render_subproc(frames, dep, kw, progress, out_shape=None):
     job = os.path.join(_PARENT, "_cache", "jobs", uuid.uuid4().hex[:12])
     proc = None
     try:
+        if getattr(progress, "stage", None):
+            progress.stage("start")
         os.makedirs(job)
         np.save(os.path.join(job, "img.npy"), frames)
         np.save(os.path.join(job, "depth.npy"), dep)
@@ -48,7 +50,7 @@ def _render_subproc(frames, dep, kw, progress, out_shape=None):
             proc = subprocess.Popen([sys.executable, os.path.join(_HERE, "worker.py"), job],
                                     stdout=subprocess.PIPE, stderr=errf, text=True, bufsize=1)
         except Exception as e:
-            print("[DepthLook] воркер не стартував (%s) - рахую в процесі Comfy" % e)
+            print("[DepthLook] worker failed to start (%s) - computing in the Comfy process" % e)
             return None
         q = queue.Queue()
         def _pump():                                       # stdout воркера -> черга (None = кінець)
@@ -64,6 +66,9 @@ def _render_subproc(frames, dep, kw, progress, out_shape=None):
                 line = ""
             if line is None:
                 done = True
+            elif line.startswith("STAGE "):                # етап зсередини рушія (core.apply_numpy)
+                if getattr(progress, "stage", None):
+                    progress.stage(line.split()[1])
             elif line.startswith("PROGRESS "):
                 try:
                     k, n = line.split()[1:3]
@@ -82,7 +87,7 @@ def _render_subproc(frames, dep, kw, progress, out_shape=None):
         if rc != 0:
             errf.flush()
             tail = open(os.path.join(job, "err.txt"), errors="replace").read()[-1500:]
-            raise RuntimeError("DepthLook воркер завершився з кодом %s:\n%s" % (rc, tail))
+            raise RuntimeError("DepthLook worker exited with code %s:\n%s" % (rc, tail))
         mmr = np.load(os.path.join(job, "out.npy"), mmap_mode="r")
         arr = np.array(mmr)                                # справжня копія в памʼять процесу
         del mmr
@@ -109,14 +114,41 @@ def tensors_to_numpy(image, depth):
     return frames, dep
 
 
-def make_progress(n):
-    """Смужка прогресу по кадрах у Comfy; без Comfy -> None."""
+def stage(uid, name, **kw):
+    """Етап виконання -> рядок стану на картці ноди (подія svk.stage; js: svk_ui.stageLine). Без Comfy або id - нічого."""
+    if uid is None:
+        return
+    try:
+        from server import PromptServer
+        PromptServer.instance.send_sync("svk.stage", dict(node=str(uid), stage=name, **kw))
+    except Exception:
+        pass
+
+
+def make_progress(n, uid=None):
+    """Смужка прогресу по кадрах у Comfy + «кадр k / N · ~скільки лишилось» на картці; без Comfy -> лише рядок стану.
+    progress.stage(name) - етап зсередини рендеру (запуск рушія, аналіз руху камери)."""
     try:
         import comfy.utils
         pbar = comfy.utils.ProgressBar(n)
-        return lambda k, m: pbar.update_absolute(k, m)
     except Exception:
-        return None
+        pbar = None
+    t0 = [None]
+    last = [0.0]
+
+    def progress(k, m):
+        if pbar is not None:
+            pbar.update_absolute(k, m)
+        now = time.time()
+        if t0[0] is None:                       # відлік ETA - від першого готового кадру, без старту воркера
+            t0[0] = (now, k)
+        if now - last[0] >= 0.4 or k >= m:
+            last[0] = now
+            t, k0 = t0[0]
+            eta = (now - t) / (k - k0) * (m - k) if k > k0 else 0.0
+            stage(uid, "frame", k=int(k), n=int(m), eta=round(eta, 1))
+    progress.stage = lambda name, **kw: stage(uid, name, **kw)
+    return progress
 
 
 def render(frames, dep, kw, progress, out_shape):

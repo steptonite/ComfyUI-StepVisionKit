@@ -25,7 +25,7 @@ import look_api  # noqa: E402
 from .core import (DEFAULT_PRESET, _EXTRA_KEYS, parse_palette, build_preset, _params_from_json,  # noqa: E402,F401
                    _work_size, _Lazy, apply_numpy, check_inputs, watermark, SIZE_ORIGINAL, OUTPUT_SIZES,
                    GRADE_TYPE, parse_output_size, resolve_params, static_params, make_grade, out_shape)
-from .render_proc import (_interrupted, _render_subproc, tensors_to_numpy, make_progress,  # noqa: E402,F401
+from .render_proc import (_interrupted, _render_subproc, tensors_to_numpy, make_progress, stage,  # noqa: E402,F401
                           render as _render, to_result)
 
 
@@ -40,22 +40,22 @@ class DepthLook:
         presets = look_params.list_presets()
         return {
             "required": {
-                "image": ("IMAGE", {"tooltip": "Кадри (B,H,W,3)."}),
-                "depth": ("IMAGE", {"tooltip": "Карта глибини: 1 на весь батч або по одній на кадр. Світле = близько."}),
+                "image": ("IMAGE", {"tooltip": "Frames (B,H,W,3)."}),
+                "depth": ("IMAGE", {"tooltip": "Depth map: one for the whole batch or one per frame. Bright = near."}),
                 "preset": (presets, {"default": DEFAULT_PRESET if DEFAULT_PRESET in presets else presets[0],
-                                     "tooltip": "Пресет з look_proto/presets. Якщо підключено grade - береться він, а не пресет."}),
-                "clean_depth": ("BOOLEAN", {"default": True, "tooltip": "Сира глибина чиститься (кадр - напрямна). Вимкни, якщо глибина вже чиста 0..1."}),
-                "depth_light_is_near": ("BOOLEAN", {"default": True, "tooltip": "Світле = близько. Вимкни, якщо нода глибини віддає навпаки."}),
+                                     "tooltip": "Preset from look_proto/presets. If grade is connected, it is used instead of the preset."}),
+                "clean_depth": ("BOOLEAN", {"default": True, "tooltip": "Raw depth is cleaned up (the frame is the guide). Turn off if the depth is already clean 0..1."}),
+                "depth_light_is_near": ("BOOLEAN", {"default": True, "tooltip": "Bright = near. Turn off if your depth node outputs the opposite."}),
             },
             # порядок: дані -> грейд -> розмір/якість -> службове. fps/start_time прибрано зі статики -
             # widgets_values старих workflow (11 значень) мігрує js у onConfigure
             "optional": {
-                "grade": (GRADE_TYPE, {"tooltip": "Грейд з іншої ноди Depth Look. Він - база; правки тюнера/overrides лягають зверху, без правок - транзит."}),
-                "output_size": (OUTPUT_SIZES, {"default": SIZE_ORIGINAL, "tooltip": "Фінальний розмір кадру (довга сторона, px). «як оригінал» = розмір входу. Діє лише в режимі «повний рендер»; превʼю в тюнері від нього не залежить."}),
-                "max_side": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8, "tooltip": "Робоча роздільність: look рахується на кадрі з такою довгою стороною і росте до фінального розміру. 0 = одразу у фінальному. Для довгих кліпів на 8 ГБ."}),
-                "depth_levels": (["clip", "frame"], {"default": "clip", "tooltip": "clip - спільні рівні глибини з усього кліпу (без мерехтіння); frame - розтяг по кожному кадру. Лише при clean_depth."}),
+                "grade": (GRADE_TYPE, {"tooltip": "Grade from another Depth Look node. It is the base; tuner edits/overrides are applied on top, and with no edits it passes through."}),
+                "output_size": (OUTPUT_SIZES, {"default": SIZE_ORIGINAL, "tooltip": "Final frame size (long side, px). The first option keeps the input size. Only applies in the full-render mode; the tuner preview does not depend on it."}),
+                "max_side": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8, "tooltip": "Working resolution: the look is computed on a frame with this long side and then upscaled to the final size. 0 = compute directly at final size. For long clips on 8 GB machines."}),
+                "depth_levels": (["clip", "frame"], {"default": "clip", "tooltip": "clip - shared depth levels across the whole clip (no flicker); frame - per-frame stretch. Only with clean_depth."}),
                 # спершу крутиш тюнер на швидкому прогоні, потім перемикаєш на повний рендер і запускаєш
-                "mode": ([MODE_TUNE, MODE_FULL], {"default": MODE_TUNE, "tooltip": "Налаштування: швидко, ≤720, з написом PREVIEW. Повний рендер: розмір за output_size і max_side."}),
+                "mode": ([MODE_TUNE, MODE_FULL], {"default": MODE_TUNE, "tooltip": "Tuning mode: fast, ≤720, with a PREVIEW watermark. Full render: size from output_size and max_side."}),
                 # службові (ховає js): стара текстова форма і значення вбудованого тюнера
                 "overrides": ("STRING", {"multiline": True, "default": "{}"}),
                 "palette": ("STRING", {"multiline": True, "default": ""}),
@@ -87,14 +87,15 @@ class DepthLook:
         ui = {}
         if unique_id is not None:                          # кадри батча (≤8, float16) для превʼю вбудованого тюнера
             try:
+                stage(unique_id, "cache")
                 meta = look_api.save_node_cache(unique_id, frames, dep, clean_depth, depth_light_is_near,
                                                 depth_levels=depth_levels)
                 ui = {"depth_look": [{"frames": meta["indices"], "stamp": meta["stamp"]}]}
             except Exception as e:
-                print("[DepthLook] кеш превʼю не записано: %s" % e)
+                print("[DepthLook] preview cache not written: %s" % e)
         if grade is not None:                              # js ініціалізує тюнер параметрами грейду, поки params_json порожній
             ui["depth_look_grade"] = [{"params": p, "preset": g["preset"]}]
-        progress = make_progress(frames.shape[0])          # смужка прогресу по кадрах у Comfy
+        progress = make_progress(frames.shape[0], unique_id)   # смужка прогресу по кадрах у Comfy + рядок етапів на картці
         t0 = time.time()
         kw = dict(grade=g, clean_depth=bool(clean_depth), light_is_near=bool(depth_light_is_near),
                   max_side=int(max_side or 0), depth_levels=depth_levels, output_size=out_size, static=True)
@@ -102,12 +103,14 @@ class DepthLook:
         mix = float(min(max((grade or {}).get("look_mix", 1.0), 0.0), 1.0))     # «сила луку» з простої ноди
         if mix < 1.0:
             from .simple import mix_with_original
+            stage(unique_id, "mix")
             arr = mix_with_original(arr, frames, mix)
             g = dict(g, look_mix=mix)
         if not full:                                       # щоб превʼю не пішло у фінал непоміченим
             watermark(arr)
         ui["depth_look_warn"] = warns
-        print("[DepthLook] %s: %d кадр(ів) %dx%d -> %dx%d за %.1f с, сила луку %.2f" % (
+        stage(unique_id, "done", secs=round(time.time() - t0, 1))
+        print("[DepthLook] %s: %d frame(s) %dx%d -> %dx%d in %.1f s, look strength %.2f" % (
             mode, frames.shape[0], frames.shape[2], frames.shape[1], arr.shape[2], arr.shape[1], time.time() - t0, mix))
         return {"ui": ui, "result": (to_result(arr, image), g)}
 
@@ -116,8 +119,8 @@ from .simple import DepthLookSimple  # noqa: E402
 from .video_node import DepthLookVideo  # noqa: E402
 
 NODE_CLASS_MAPPINGS = {"DepthLook": DepthLook, "DepthLookSimple": DepthLookSimple, "DepthLookVideo": DepthLookVideo}
-NODE_DISPLAY_NAME_MAPPINGS = {"DepthLook": "Depth Look · повний", "DepthLookSimple": "Depth Look · простий",
-                              "DepthLookVideo": "Depth Look · відео"}
+NODE_DISPLAY_NAME_MAPPINGS = {"DepthLook": "Depth Look · Full", "DepthLookSimple": "Depth Look · Simple",
+                              "DepthLookVideo": "Depth Look · Video"}
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]   # js - у спільній web/ паку
 
 
@@ -169,7 +172,7 @@ def _simple_info(key):
             p = look_params.load_preset(n)
             presets.append({"name": n, "powers": {k: float(p.get(k, 0.0)) for _g, k in POWER_GROUPS}})
         except Exception as e:   # noqa: BLE001 - зіпсований пресет не валить картку
-            print("[DepthLook] пресет %s пропущено: %s" % (n, e))
+            print("[DepthLook] preset %s skipped: %s" % (n, e))
     groups = [{"key": k, "name": g, "label": CHIP_LABEL.get(g, g), "icon": look_params.GROUP_ICON.get(g, ""),
                "hint": look_params.GROUP_HINT.get(g, ""), "add": ADD_DEFAULT.get(k, 0.5),
                "max": [s for s in look_params.SPEC if s[0] == k][0][2]} for g, k in POWER_GROUPS]
@@ -220,7 +223,7 @@ def register_routes(routes):
         size = max(48, min(320, int(request.query.get("size", 160))))
         meta = look_api.read_node_meta(key)
         if meta is None:
-            return _jr(409, {"err": "потрібен один запуск", "need_run": True})
+            return _jr(409, {"err": "run it once first", "need_run": True})
         ck = (key, meta["stamp"], preset, size)
 
         def work():
@@ -280,4 +283,4 @@ try:   # у Comfy PromptServer.instance є; у простому import-тест�
         register_routes(_inst.routes)
 except Exception as _e:   # noqa: BLE001
     if "No module named 'server'" not in str(_e):
-        print("[DepthLook] маршрути не зареєстровано: %s" % _e)
+        print("[DepthLook] routes not registered: %s" % _e)

@@ -2,14 +2,15 @@
 // (той самий tune.html, що й автономний тюнер). Параметри iframe -> віджет params_json (зберігається у workflow).
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { ICON, control, morePanel, keepWheel } from "./svk_ui.js";
+import { ICON, control, morePanel, keepWheel, stageLine } from "./svk_ui.js";
+import { T } from "./svk_i18n.js";
 
 const NODE = "DepthLook";
 const START_W = 1000, START_H = 900;
 // на ноді лише тюнер: усі нативні віджети сховані (значення лишаються у workflow і йдуть у Run).
 // Пресет обирається в тюнері; режим - сегментом у рядку під тюнером; рідкісне - під «ще».
-const MORE = [["output_size", "Фінальний розмір"], ["max_side", "Робоча роздільність"], ["depth_levels", "Рівні глибини", { names: { clip: "спільні на кліп", frame: "по кадру" } }],
-              ["clean_depth", "Чистити глибину"], ["depth_light_is_near", "Світле — близько"]];
+const MORE = [["output_size", T("Output size")], ["max_side", T("Working resolution")], ["depth_levels", T("Depth levels"), { names: { clip: T("shared across clip"), frame: T("per frame") } }],
+              ["clean_depth", T("Clean depth")], ["depth_light_is_near", T("Light = near")]];
 function hideAll(node) { for (const w of node.widgets || []) if (w.name !== "look_ui") hideWidget(w); node.__dlBar?.sync(); }
 const PANELS = new Set();          // {node, frame}
 
@@ -100,9 +101,9 @@ function openFull(node) {
     const bar = document.createElement("div");
     bar.style.cssText = "display:flex;align-items:center;gap:12px;padding:6px 12px;background:#18181b;color:#ccc;font:13px system-ui";
     const title = document.createElement("span");
-    title.textContent = "Depth Look · нода #" + node.id;
+    title.textContent = T("Depth Look · node #") + node.id;
     const back = document.createElement("button");
-    back.textContent = "✕ назад у граф (Esc)";
+    back.textContent = T("✕ back to graph (Esc)");
     back.style.cssText = "margin-left:auto;padding:5px 14px;border:1px solid #444;border-radius:6px;background:#26262b;color:#eee;cursor:pointer";
     bar.append(title, back);
     const frame = document.createElement("iframe");
@@ -140,22 +141,19 @@ function createBar(node, specs) {
     const row = document.createElement("div");
     row.className = "svk-bar";
     const full = document.createElement("button");
-    full.className = "svk-ibtn"; full.type = "button"; full.innerHTML = ICON.full; full.title = "тюнер на весь екран (Esc — назад)";
+    full.className = "svk-ibtn"; full.type = "button"; full.innerHTML = ICON.full; full.title = T("tuner full screen (Esc — back)");
     full.onclick = () => openFull(node);
     row.append(full);
     const ctl = [];
     if (specs.mode) {
         const vals = specs.mode[0] || [];
-        const c = control(node, "mode", specs.mode, "", { seg: { [vals[0]]: "превʼю", [vals[1]]: "фінал" }, tip: specs.mode[1]?.tooltip });
+        const c = control(node, "mode", specs.mode, "", { seg: { [vals[0]]: T("preview"), [vals[1]]: T("final") }, tip: specs.mode[1]?.tooltip });
         row.append(c.row); ctl.push(c);
     }
+    // рядок стану (етап / кадр k з N) - у тому ж рядку, що й керування, займає вільне місце
+    const st = stageLine(node); st.style.flex = "1"; row.append(st);
     const grow = document.createElement("span"); grow.className = "grow"; row.append(grow);
-    const more = morePanel(node, specs, MORE);
-    more.style.cssText = "flex:none";
-    row.append(more.querySelector("summary").cloneNode(true));      // кнопка «ще» в рядку, панель - під ним
-    const sum = row.lastChild; sum.style.cursor = "pointer";
-    sum.onclick = () => { more.open = !more.open; sum.style.color = more.open ? "var(--svk-text)" : ""; };
-    more.querySelector("summary").style.display = "none";
+    const more = morePanel(node, specs, MORE);                       // «ще» - як на інших нодах: останній рядок на всю ширину
     bar.append(row, more);
     keepWheel(bar);
     bar.sync = () => { ctl.forEach(c => c.sync()); more.sync(); };

@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="uk">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Тюнер луку</title>
+<title>Look Tuner</title>
 <link rel="stylesheet" href="/depth_look/svk_ui.css">
 <style>
 :root {   /* спільні токени (js/svk_ui.css); другий аргумент - запасні значення для автономного тюнера без Comfy */
@@ -27,8 +27,11 @@ body.zoomed #img, body.spacepan #img, body.spacepan .imgwrap { cursor: grab; }
 body.zoomed.focuspick #img, body.zoomed.eyedrop #img, body.zoomed.shift #img, body.zoomed.alt #img { cursor: crosshair; }
 body.zoomed.loupe #img { cursor: none; }
 body.panning, body.panning * { cursor: grabbing !important; }
-#zoomBox { display: inline-flex; align-items: center; gap: 4px; }
-#zoomBox button { min-width: 30px; }
+#zoomBox { display: inline-flex; align-items: center; gap: 0; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+#zoomBox button { min-width: 30px; border: 0 !important; border-radius: 0 !important; }
+#zFit, #z100 { display: none !important; }   /* те саме робить клік по відсотку (вміст ↔ 100%) і клавіші 0 / 1 */
+#msg.warnchip { display: inline-flex !important; align-items: center; gap: 6px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+#msg.warnchip.open { white-space: normal; }
 #zPct { min-width: 52px; font-variant-numeric: tabular-nums; }
 #zHq { color: var(--dim); font-size: 11px; min-width: 0; }
 #focusMk { position: absolute; width: 22px; height: 22px; margin: -11px 0 0 -11px; border: 2px solid var(--accent); border-radius: 50%;
@@ -176,89 +179,89 @@ body.loupe .imgwrap { cursor: none; }
   <div class="imgwrap"><div id="zoomer"><img id="img" alt=""><canvas id="hq"></canvas></div><div id="focusMk"></div><div id="needRun"></div>
     <div id="loupe"><canvas id="loupeCv"></canvas><div id="loupeCap"></div></div></div>
   <div id="tools">
-    <button id="btnFocusPick" title="Фокус: клік по кадру — клік по кадру ставить площину фокуса в цю точку (те саме — Shift+клік)" aria-label="Фокус: клік по кадру"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M22 12h-4M6 12H2M12 6V2M12 22v-4"/><circle cx="12" cy="12" r="1.5"/></svg></button>
-    <button id="btnHero" title="Різкий герой — герой різкий, фон блюриться" aria-label="Різкий герой"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4.5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg></button>
-    <button id="btnBg" title="Різкий фон — фон різкий, герой блюриться" aria-label="Різкий фон"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 4 4 7 3-3 7 12H2z"/></svg></button>
+    <button id="btnFocusPick" title="Focus pick: click the frame — sets the focus plane at that point (same as Shift+click)" aria-label="Focus pick: click the frame"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M22 12h-4M6 12H2M12 6V2M12 22v-4"/><circle cx="12" cy="12" r="1.5"/></svg></button>
+    <button id="btnHero" title="Sharp hero — hero in focus, background blurred" aria-label="Sharp hero"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4.5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg></button>
+    <button id="btnBg" title="Sharp background — background in focus, hero blurred" aria-label="Sharp background"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 4 4 7 3-3 7 12H2z"/></svg></button>
     <span class="sep"></span>
-    <button id="btnDepth" title="Показати глибину — карта глибини, як її бачить рушій (світліше = ближче)" aria-label="Показати глибину"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg></button>
-    <button id="btnOrig" title="оригінал без ефекту; утримуй \ — те саме, поки тримаєш" aria-label="Оригінал"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/></svg></button>
+    <button id="btnDepth" title="Show depth — the depth map as the engine sees it (lighter = nearer)" aria-label="Show depth"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg></button>
+    <button id="btnOrig" title="original without the effect; hold \ for the same while held" aria-label="Original"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 3v18"/></svg></button>
     <span class="sep"></span>
-    <span id="zoomBox"><button id="zOut" title="відʼємне наближення (клавіша −)" aria-label="−"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button><button id="zPct" title="масштаб кадру; клік — вмістити ↔ 100%">—</button><button id="zIn" title="наблизити (клавіша +)" aria-label="+"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg></button><button id="zFit" title="вмістити кадр (0 або подвійний клік)" aria-label="Вмістити"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button><button id="z100" title="100% робочої роздільності (1 або подвійний клік)" aria-label="100%"><span style="font:600 11px var(--svk-mono,monospace)">1:1</span></button><span id="zHq"></span></span>
+    <span id="zoomBox"><button id="zOut" title="zoom out (key −)" aria-label="−"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button><button id="zPct" title="frame zoom; click — fit ↔ 100%">fit</button><button id="zIn" title="zoom in (key +)" aria-label="+"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg></button><button id="zFit" title="fit frame (0 or double-click)" aria-label="Fit"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button><button id="z100" title="100% of working resolution (1 or double-click)" aria-label="100%"><span style="font:600 11px var(--svk-mono,monospace)">1:1</span></button><span id="zHq"></span></span>
     <span class="sep"></span>
-    <button id="btnLoupe" title="лупа 100%: ділянка кадру 1:1 під курсором, щоб бачити зерно й краї (Z — увімкнути/вимкнути)" aria-label="Лупа 100%"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button>
-    <span id="frameBox"><span class="sep"></span><span>кадр</span><input type="range" id="frameSl"><output id="frameOut">0</output></span>
-    <span id="timeBox"><span class="sep"></span><button id="btnPlay" title="крок 1/12 с після кожного рендеру">▶</button>
-      <input type="range" id="timeSl"><span>час, с</span><output id="timeOut">0.00</output></span>
+    <button id="btnLoupe" title="100% loupe: a 1:1 patch of the frame under the cursor to inspect grain and edges (Z — toggle)" aria-label="100% loupe"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button>
+    <span id="frameBox"><span class="sep"></span><span>frame</span><input type="range" id="frameSl"><output id="frameOut">0</output></span>
+    <span id="timeBox"><span class="sep"></span><button id="btnPlay" title="step 1/12 s after each render">▶</button>
+      <input type="range" id="timeSl"><span>time, s</span><output id="timeOut">0.00</output></span>
   </div>
-  <div id="status">завантаження…</div>
+  <div id="status">loading…</div>
 </div>
 
 <div id="panel">
   <div class="row">
-    <select id="presetSel" title="пресет"></select>
-    <select id="photoSel" title="фото" style="display:none"></select>
+    <select id="presetSel" title="preset"></select>
+    <select id="photoSel" title="photo" style="display:none"></select>
   </div>
   <div class="row">
-    <button id="btnSave">Зберегти як…</button>
-    <button id="btnFull">Повний рендер</button>
-    <button id="btnReset" title="назад до збереженого стану пресету">Скинути</button>
-    <button id="btnZero" title="усі ефекти в нуль - чистий оригінал, крутиш з нуля">З нуля</button>
-    <button id="btnGrade" title="одразу в зафіксований грейд look v1">Мій грейд</button>
+    <button id="btnSave">Save as…</button>
+    <button id="btnFull">Full render</button>
+    <button id="btnReset" title="back to the saved preset state">Reset</button>
+    <button id="btnZero" title="all effects to zero — clean original, tweak from scratch">From zero</button>
+    <button id="btnGrade" title="jump to the locked look v1 grade">My grade</button>
   </div>
   <div id="msg" class="path" style="display:none"></div>
 
   <details id="ownBox">
-    <summary>Свій кадр</summary>
-    <div class="row"><input type="text" id="ownImg" placeholder="/шлях/до/кадру.png" spellcheck="false"></div>
-    <div class="row"><input type="text" id="ownDepth" placeholder="/шлях/до/глибини.png" spellcheck="false"></div>
-    <div class="row"><button id="btnOwn" class="primary">Відкрити</button><span id="ownMsg" class="path" style="margin:0"></span></div>
-    <div class="swlab">png / jpg / tif / webp, будь-яка орієнтація; глибина — сіра карта (світліше = ближче)</div>
+    <summary>Own frame</summary>
+    <div class="row"><input type="text" id="ownImg" placeholder="/path/to/frame.png" spellcheck="false"></div>
+    <div class="row"><input type="text" id="ownDepth" placeholder="/path/to/depth.png" spellcheck="false"></div>
+    <div class="row"><button id="btnOwn" class="primary">Open</button><span id="ownMsg" class="path" style="margin:0"></span></div>
+    <div class="swlab">png / jpg / tif / webp, any orientation; depth is a gray map (lighter = nearer)</div>
   </details>
 
   <details id="grpPreview" class="grp">
-    <summary><span class="gnum"></span><span class="gi" id="prevIcon"></span><span class="gt">Превʼю</span><span class="gcar"></span></summary>
+    <summary><span class="gnum"></span><span class="gi" id="prevIcon"></span><span class="gt">Preview</span><span class="gcar"></span></summary>
     <div class="ghint" id="prevHint"></div>
-    <div class="prow"><label for="sizeSel">Розмір превʼю</label>
+    <div class="prow"><label for="sizeSel">Preview size</label>
       <select id="sizeSel" style="flex:none">
         <option value="480">480</option><option value="720" selected>720</option><option value="1080">1080</option>
       </select></div>
-    <div class="pnote">лише швидкість превʼю, на фінал не впливає</div>
+    <div class="pnote">preview speed only, does not affect the final</div>
     <div class="pnote" id="finalHint"></div>
-    <div class="prow"><label for="loupeSz">Вікно лупи, px</label>
+    <div class="prow"><label for="loupeSz">Loupe window, px</label>
       <select id="loupeSz" style="flex:none"><option value="200">200</option><option value="240" selected>240</option><option value="320">320</option></select></div>
-    <div class="pnote">Лупа 100% (кнопка під кадром або Z): 1 піксель кадру = 1 піксель екрана. Після зміни параметрів кадр перераховується повністю (≈10 с), далі лупа рухається миттєво.</div>
+    <div class="pnote">100% loupe (button under the frame or Z): 1 frame pixel = 1 screen pixel. After parameters change the frame is recomputed in full (≈10 s), then the loupe moves instantly.</div>
   </details>
 
   <div id="gradBox">
-  <h3>Градієнт</h3>
+  <h3>Gradient</h3>
   <div id="gradLib"></div>
   <div id="gradHint"></div>
   <div class="row">
-    <button id="btnGradNew" title="зберегти поточний градієнт у бібліотеку під новим імʼям">Новий з поточного</button>
-    <button id="btnGradSave" title="перезаписати вибраний власний градієнт" disabled>Зберегти</button>
+    <button id="btnGradNew" title="save the current gradient to the library under a new name">New from current</button>
+    <button id="btnGradSave" title="overwrite the selected custom gradient" disabled>Save</button>
   </div>
   <div id="grad">
-    <canvas id="bar" title="подвійний клік — додати стоп; потягни стоп униз — видалити"></canvas>
+    <canvas id="bar" title="double-click — add a stop; drag a stop down — remove it"></canvas>
     <div id="handles"></div>
   </div>
   <div id="stopedit" class="off">
-    <span style="color:var(--dim)">Позиція</span>
+    <span style="color:var(--dim)">Position</span>
     <input type="number" id="stopT" min="0" max="100" step="0.1"><span style="color:var(--dim)">%</span>
-    <button id="btnDel" title="Delete / Backspace">Видалити стоп</button>
+    <button id="btnDel" title="Delete / Backspace">Delete stop</button>
   </div>
   <div class="row">
-    <button id="btnFlip">Перевернути</button>
-    <button id="btnEven">Розподілити рівно</button>
-    <button id="btnEye" title="клік по превʼю бере колір; Alt — те саме без кнопки">Піпетка</button>
+    <button id="btnFlip">Flip</button>
+    <button id="btnEven">Distribute evenly</button>
+    <button id="btnEye" title="click the preview to pick a color; Alt — same without the button">Eyedropper</button>
   </div>
 
   <details id="pickBox" open class="off">
-    <summary>Колір стопа</summary>
+    <summary>Stop color</summary>
     <div class="pk">
       <div class="pkrow">
         <div id="sbWrap"><canvas id="sbCv"></canvas><div id="sbMk"></div></div>
         <div id="hueWrap"><div id="hueMk"></div></div>
-        <div id="chip"><div id="chipNew" title="поточний"></div><div id="chipOld" title="початковий — клік поверне"></div></div>
+        <div id="chip"><div id="chipNew" title="current"></div><div id="chipOld" title="original — click to restore"></div></div>
       </div>
       <div class="flds">
         <label>H<input type="number" id="fH" min="0" max="360" step="1"></label>
@@ -270,11 +273,11 @@ body.loupe .imgwrap { cursor: none; }
       </div>
       <div class="hexrow">
         <span style="color:var(--dim)">#</span><input type="text" id="fHex" maxlength="7" spellcheck="false">
-        <input type="color" id="stopColor" title="системний вибір кольору">
+        <input type="color" id="stopColor" title="system color picker">
       </div>
-      <div class="swlab">Палітра Pinterest</div>
+      <div class="swlab">Pinterest palette</div>
       <div class="swrow" id="swFixed"></div>
-      <div class="swlab">Останні</div>
+      <div class="swlab">Recent</div>
       <div class="swrow" id="swRecent"></div>
     </div>
   </details>
@@ -632,7 +635,7 @@ function setEyedrop(on) {
   eyedrop = on;
   document.body.classList.toggle("eyedrop", on);
   $("btnEye").classList.toggle("on", on);
-  if (on) setStatus("піпетка: клікни по превʼю (Esc — скасувати)");
+  if (on) setStatus("eyedropper: click the preview (Esc — cancel)");
 }
 $("btnEye").addEventListener("click", () => setEyedrop(!eyedrop));
 
@@ -663,7 +666,7 @@ $("img").addEventListener("click", e => {
   try {
     const c = pickFromPreview(e);
     if (c) setStopColor(c, true);
-  } catch (err) { setStatus("піпетка: " + err, "err"); }
+  } catch (err) { setStatus("eyedropper: " + err, "err"); }
   if (eyedrop) setEyedrop(false);
 });
 
@@ -699,7 +702,7 @@ function setFocusPick(on) {
   focusPick = on;
   document.body.classList.toggle("focuspick", on);
   $("btnFocusPick").classList.toggle("on", on);
-  if (on) setStatus("фокус: клікни по кадру (Esc — скасувати)");
+  if (on) setStatus("focus: click the frame (Esc — cancel)");
 }
 $("btnFocusPick").addEventListener("click", () => setFocusPick(!focusPick));
 
@@ -722,8 +725,8 @@ async function pickFocus(e) {
     if (!r.ok) throw new Error(j.err || r.status);
     if (hasSl("blur_target")) setSliderClamped("blur_target", -1, false);   // -1 = фокус із повзунка
     setSliderClamped("focus", j.depth, true);
-    setStatus("фокус = " + j.depth.toFixed(3) + " (x " + pt.x.toFixed(2) + ", y " + pt.y.toFixed(2) + ")");
-  } catch (err) { setStatus("фокус: " + err, "err"); }
+    setStatus("focus = " + j.depth.toFixed(3) + " (x " + pt.x.toFixed(2) + ", y " + pt.y.toFixed(2) + ")");
+  } catch (err) { setStatus("focus: " + err, "err"); }
 }
 
 $("img").addEventListener("click", e => {
@@ -742,7 +745,7 @@ async function sharpTo(hero) {
     const j = await (await fetch(API + "/depth_stats?size=" + parseInt($("sizeSel").value, 10) + "&frame=" + curFrame)).json();
     if (j.err) throw new Error(j.err);
     setSliderClamped("focus", hero ? j.p95 : j.p5, true);
-  } catch (err) { setStatus("глибина: " + err, "err"); }
+  } catch (err) { setStatus("depth: " + err, "err"); }
 }
 $("btnHero").addEventListener("click", () => sharpTo(true));
 $("btnBg").addEventListener("click", () => sharpTo(false));
@@ -780,7 +783,7 @@ window.addEventListener("blur", () => { document.body.classList.remove("shift");
 // свій кадр
 async function openOwn() {
   const image = $("ownImg").value.trim(), depth = $("ownDepth").value.trim(), msg = $("ownMsg");
-  msg.classList.remove("err"); msg.textContent = "відкриваю…";
+  msg.classList.remove("err"); msg.textContent = "opening…";
   $("btnOwn").disabled = true;
   try {
     const r = await post(API + "/load", { image: image, depth: depth, size: parseInt($("sizeSel").value, 10) });
@@ -788,7 +791,7 @@ async function openOwn() {
     if (!r.ok) throw new Error(j.err || r.status);
     photo = ""; frameName = j.name;
     $("photoSel").value = "";
-    msg.textContent = j.w + "×" + j.h + " (" + (j.w > j.h ? "горизонтальний" : j.w < j.h ? "вертикальний" : "квадрат") + ")";
+    msg.textContent = j.w + "×" + j.h + " (" + (j.w > j.h ? "landscape" : j.w < j.h ? "portrait" : "square") + ")";
     showView("render");
     scheduleRender();
   } catch (err) {
@@ -848,7 +851,7 @@ function paintThumb(cv, pal) {
 }
 
 function hint(text) { $("gradHint").textContent = text; }
-function baseHint() { hint(curGrad ? "Градієнт: " + curGrad.name + (curGrad.builtin ? "" : " (мій)") : "Клік по градієнту — застосувати"); }
+function baseHint() { hint(curGrad ? "Gradient: " + curGrad.name + (curGrad.builtin ? "" : " (mine)") : "Click a gradient to apply it"); }
 
 function renderLib() {
   const box = $("gradLib");
@@ -856,13 +859,13 @@ function renderLib() {
   grads.forEach(g => {
     const w = document.createElement("div");
     w.className = "gsw" + (curGrad && curGrad.name === g.name ? " on" : "") + (g.builtin ? "" : " mine");
-    w.title = g.name + (g.builtin ? "" : " — мій (ПКМ: видалити)");
+    w.title = g.name + (g.builtin ? "" : " — mine (right-click: delete)");
     const cv = document.createElement("canvas");
     paintThumb(cv, g.palette);
     w.appendChild(cv);
     if (!g.builtin) {
       const x = document.createElement("button");
-      x.className = "gx"; x.textContent = "×"; x.title = "Видалити";
+      x.className = "gx"; x.textContent = "×"; x.title = "Delete";
       x.addEventListener("click", ev => { ev.stopPropagation(); delGrad(g); });
       w.appendChild(x);
     }
@@ -884,7 +887,7 @@ async function loadGrads(selectName) {
   const keep = selectName || (curGrad && curGrad.name);
   try {
     grads = await (await fetch(API + "/gradients")).json();
-  } catch (e) { showMsg("Бібліотека градієнтів: " + e, true); return; }
+  } catch (e) { showMsg("Gradient library: " + e, true); return; }
   curGrad = grads.find(g => g.name === keep) || null;
   renderLib(); updateGradButtons();
 }
@@ -893,30 +896,30 @@ async function saveGrad(name) {
   try {
     const r = await post(API + "/gradients/save", { name: name, palette: currentParams().palette });
     const j = await r.json();
-    if (!r.ok) { showMsg("Помилка: " + (j.err || r.status), true); return; }
+    if (!r.ok) { showMsg("Error: " + (j.err || r.status), true); return; }
     await loadGrads(j.name);
-    showMsg("Градієнт збережено: " + j.path);
-  } catch (e) { showMsg("Помилка: " + e, true); }
+    showMsg("Gradient saved: " + j.path);
+  } catch (e) { showMsg("Error: " + e, true); }
 }
 
 async function delGrad(g) {
-  if (g.builtin || !confirm("Видалити градієнт «" + g.name + "»?")) return;
+  if (g.builtin || !confirm("Delete gradient “" + g.name + "”?")) return;
   try {
     const r = await post(API + "/gradients/delete", { name: g.name });
     const j = await r.json();
-    if (!r.ok) { showMsg("Помилка: " + (j.err || r.status), true); return; }
+    if (!r.ok) { showMsg("Error: " + (j.err || r.status), true); return; }
     if (curGrad && curGrad.name === g.name) curGrad = null;
     await loadGrads();
-    showMsg("Градієнт видалено: " + g.name);
-  } catch (e) { showMsg("Помилка: " + e, true); }
+    showMsg("Gradient deleted: " + g.name);
+  } catch (e) { showMsg("Error: " + e, true); }
 }
 
 $("btnGradNew").addEventListener("click", () => {
   const mine = grads.filter(g => !g.builtin).length;
-  const name = (prompt("Імʼя градієнта:", "Мій градієнт " + (mine + 1)) || "").trim();
+  const name = (prompt("Gradient name:", "My gradient " + (mine + 1)) || "").trim();
   if (!name) return;
   const ex = grads.find(g => !g.builtin && g.name.toLowerCase() === name.toLowerCase());
-  if (ex && !confirm("Градієнт «" + ex.name + "» уже є. Перезаписати?")) return;
+  if (ex && !confirm("Gradient “" + ex.name + "” already exists. Overwrite?")) return;
   saveGrad(name);
 });
 $("btnGradSave").addEventListener("click", () => { if (curGrad && !curGrad.builtin) saveGrad(curGrad.name); });
@@ -937,6 +940,7 @@ function buildGroups() {
   const root = $("groups");
   root.innerHTML = "";
   const byGroup = {};
+  const colorGroup = (spec.find(s => s.name === "far_gradient") || {}).group;   // група кольору — за ключем слайдера, не за назвою
   spec.forEach(s => (byGroup[s.group] = byGroup[s.group] || []).push(s));
   const order = groupsMeta.map(g => g.name).filter(g => byGroup[g]);
   Object.keys(byGroup).forEach(g => { if (!order.includes(g)) order.push(g); });
@@ -947,13 +951,13 @@ function buildGroups() {
     det.className = "grp";
     det.open = OPEN.includes(g);
     const sm = document.createElement("summary");
-    sm.innerHTML = '<span class="gnum"></span><span class="gi"></span><span class="gt"></span><span class="gchip">вимкнено</span><span class="gcar"></span>';
+    sm.innerHTML = '<span class="gnum"></span><span class="gi"></span><span class="gt"></span><span class="gchip">off</span><span class="gcar"></span>';
     sm.querySelector(".gnum").textContent = i + 1;
     sm.querySelector(".gi").innerHTML = meta.icon || "";
     sm.querySelector(".gt").textContent = g;
     det.appendChild(sm);
     if (meta.hint) sm.title = meta.hint;                  // пояснення - підказкою на наведенні, без абзацу
-    if (g === "Колір і градієнт") det.appendChild($("gradBox"));          // редактор градієнта живе в групі кольору
+    if (g === colorGroup) det.appendChild($("gradBox"));          // редактор градієнта живе в групі кольору
     const power = meta.power || [];
     byGroup[g].forEach((s, k) => {
       const row = buildSlider(s);
@@ -964,7 +968,7 @@ function buildGroups() {
         groupEls[g] = { det, power, note: n };
       }
     });
-    det.addEventListener("toggle", () => { if (g === "Колір і градієнт" && det.open) { sbKey = ""; drawGradient(); } });
+    det.addEventListener("toggle", () => { if (g === colorGroup && det.open) { sbKey = ""; drawGradient(); } });
     root.appendChild(det);
   });
 }
@@ -978,7 +982,7 @@ function refreshGroup(g) {
   ge.det.classList.toggle("off", off);
   if (off) {
     const lab = zero === ge.power[0] ? "" : "«" + (sliders[zero] ? sliders[zero].spec.label : zero) + "» = 0 — ";
-    ge.note.textContent = lab + "вимкнено — не рахується";
+    ge.note.textContent = lab + "off — not computed";
     ge.det.querySelector(".gchip").title = ge.note.textContent;
   }
 }
@@ -992,7 +996,7 @@ function buildSlider(s) {
   row.className = "sl";
   row.innerHTML = '<label><span class="dot"></span><span class="t"></span></label>';
   row.querySelector(".t").textContent = s.label;
-  row.querySelector("label").title = s.label + "\nподвійний клік — скинути";
+  row.querySelector("label").title = s.label + "\ndouble-click — reset";
   const range = document.createElement("input");
   range.type = "range"; range.min = s.lo; range.max = s.hi; range.step = s.step; range.className = "svk-range";
   const num = document.createElement("input");
@@ -1058,7 +1062,7 @@ function adopt(preset) {
 }
 
 async function loadPreset(name) {
-  setStatus("завантаження пресета…", "busy");
+  setStatus("loading preset…", "busy");
   const r = await fetch(API + "/preset/" + encodeURIComponent(name));
   adopt(await r.json());
   const sel = $("presetSel");
@@ -1082,10 +1086,17 @@ $("btnGrade").addEventListener("click", () => loadPreset("look_v1"));
 
 // ---------- збереження / повний рендер ----------
 function showMsg(text, isErr) {
+  // довге попередження - не абзац на ноді, а один рядок «⚠ N»: повний текст у title, клік розгортає
   const m = $("msg");
   m.style.display = text ? "block" : "none";
-  m.textContent = text;
   m.classList.toggle("err", !!isErr);
+  const parts = text ? text.split("  ·  ") : [];
+  const long = text && text.length > 70;
+  m.classList.toggle("warnchip", !!long);
+  m.classList.remove("open");
+  m.title = long ? text : "";
+  m.textContent = long ? "⚠ " + parts.length + " · " + parts[0].replace(/^⚠\s*/, "") : text;
+  m.onclick = long ? () => { const o = m.classList.toggle("open"); m.textContent = o ? text : "⚠ " + parts.length + " · " + parts[0].replace(/^⚠\s*/, ""); } : null;
 }
 
 function currentParams() {
@@ -1100,13 +1111,13 @@ async function post(url, body) {
 }
 
 $("btnSave").addEventListener("click", async () => {
-  const name = prompt("Імʼя пресету:", $("presetSel").value || "look_tuned");
+  const name = prompt("Preset name:", $("presetSel").value || "look_tuned");
   if (!name) return;
   try {
     const r = await post(API + "/save", { name: name, params: currentParams() });
     const j = await r.json();
-    if (!r.ok) return showMsg("Помилка: " + (j.err || r.status), true);
-    showMsg("Збережено: " + j.path);
+    if (!r.ok) return showMsg("Error: " + (j.err || r.status), true);
+    showMsg("Saved: " + j.path);
     const base = j.path.split("/").pop().replace(/\.json$/, "");
     const sel2 = $("presetSel");
     if (![...sel2.options].some(o => o.value === base)) sel2.add(new Option(base, base));
@@ -1116,17 +1127,17 @@ $("btnSave").addEventListener("click", async () => {
     }
     loaded = currentParams();   // нова база для крапок «змінено»
     spec.forEach(s => markChanged(s.name));
-  } catch (e) { showMsg("Помилка: " + e, true); }
+  } catch (e) { showMsg("Error: " + e, true); }
 });
 
 $("btnFull").addEventListener("click", async () => {
   const b = $("btnFull");
-  b.disabled = true; showMsg("повний рендер… (може тривати)");
+  b.disabled = true; showMsg("full render… (may take a while)");
   try {
     const r = await post(API + "/full", { params: currentParams() });
     const j = await r.json();
-    showMsg(r.ok ? "Повний рендер: " + j.path : "Помилка: " + (j.err || r.status), !r.ok);
-  } catch (e) { showMsg("Помилка: " + e, true); }
+    showMsg(r.ok ? "Full render: " + j.path : "Error: " + (j.err || r.status), !r.ok);
+  } catch (e) { showMsg("Error: " + e, true); }
   b.disabled = false;
 });
 
@@ -1136,8 +1147,8 @@ let frameName = "", frameDims = null, lastMs = null, playErr = false;
 
 function statusText() {
   const d = frameDims;
-  return "рендер " + (lastMs || "?") + " мс" + (frameName ? " · " + frameName : "") +
-    (d && d.w ? " · " + d.w + "×" + d.h + (d.pw && d.pw !== d.w ? " (превʼю " + d.pw + "×" + d.ph + ")" : "") : "");
+  return "render " + (lastMs || "?") + " ms" + (frameName ? " · " + frameName : "") +
+    (d && d.w ? " · " + d.w + "×" + d.h + (d.pw && d.pw !== d.w ? " (preview " + d.pw + "×" + d.ph + ")" : "") : "");
 }
 
 function setStatus(text, cls) {
@@ -1156,7 +1167,7 @@ function scheduleRender() {
 
 async function doRender() {
   inflight = true; pending = false; playErr = false;
-  setStatus("рендер…", "busy");
+  setStatus("render…", "busy");
   try {
     const r = await post(API + "/render", { params: currentParams(), photo: photo, size: parseInt($("sizeSel").value, 10) });
     if (r.ok) {
@@ -1167,7 +1178,7 @@ async function doRender() {
       let msg = r.status, needRun = false;
       try { const j = await r.json(); msg = j.err || msg; needRun = !!j.need_run; } catch (_) {}
       if (needRun) showNeedRun(msg);
-      else setStatus("помилка рендеру: " + msg, "err");
+      else setStatus("render error: " + msg, "err");
       playErr = true;
     } else {
       if (EMBED) hideNeedRun();
@@ -1181,7 +1192,7 @@ async function doRender() {
       setStatus(statusText());
     }
   } catch (e) {
-    setStatus("помилка зʼєднання: " + e, "err");
+    setStatus("connection error: " + e, "err");
   }
   inflight = false;
   if (pending) doRender();
@@ -1218,7 +1229,7 @@ function setLoupe(on) {
     if (!hq.sig) post(API + "/render_crop", { free: true }).catch(() => {});       // віддати памʼять серверу (якщо різкий шар зуму його не тримає)
     return;
   }
-  setStatus("лупа 100%: наведи на кадр (Z або Esc — вимкнути)");
+  setStatus("100% loupe: hover the frame (Z or Esc — turn off)");
 }
 $("btnLoupe").addEventListener("click", () => setLoupe(!loupeOn));
 $("loupeSz").addEventListener("change", () => { if (loupeOn) { loupeHeld = null; drawLoupe(); scheduleLoupe(); } });
@@ -1247,7 +1258,7 @@ function drawLoupe() {
     ctx.drawImage(h.bmp, Math.round(h.x0 - px + S / 2), Math.round(h.y0 - py + S / 2));
     LP_CV.classList.remove("stale");
     const capped = h.ow > h.W * 1.02;
-    LP_CAP.innerHTML = "100% · кадр " + h.W + "×" + h.H + (capped ? "<small>оригінал " + h.ow + "×" + h.oh + " — лупа показує ×" + (h.W / h.ow).toFixed(2) + " від нього</small>" : "");
+    LP_CAP.innerHTML = "100% · frame " + h.W + "×" + h.H + (capped ? "<small>original " + h.ow + "×" + h.oh + " — loupe shows ×" + (h.W / h.ow).toFixed(2) + " of it</small>" : "");
   } else {
     const im = $("img");
     if (im.naturalWidth) {                           // тимчасово: превʼю, збільшене до розміру кадру
@@ -1256,7 +1267,7 @@ function drawLoupe() {
       ctx.drawImage(im, px * k - S * k / 2, py * k - S * k / 2, S * k, S * k, 0, 0, S, S);
     }
     LP_CV.classList.add("stale");
-    LP_CAP.textContent = loupeInflight || !fresh ? "рахую кадр у 100%…" + (loupeMs ? " (≈" + Math.max(1, Math.round(loupeMs / 1000)) + " с)" : "") : "підвантажую ділянку…";
+    LP_CAP.textContent = loupeInflight || !fresh ? "computing the frame at 100%…" + (loupeMs ? " (≈" + Math.max(1, Math.round(loupeMs / 1000)) + " s)" : "") : "loading the patch…";
   }
 }
 
@@ -1279,7 +1290,7 @@ async function sendLoupe() {
     const r = await post(API + "/render_crop", { params: currentParams(), cx: pt.x, cy: pt.y, size: Math.min(1024, S * 2) });
     if (!r.ok) {
       let msg = r.status; try { const j = await r.json(); msg = j.err || msg; } catch (_) {}
-      setStatus("лупа: " + msg, "err"); loupeInflight = false; return;
+      setStatus("loupe: " + msg, "err"); loupeInflight = false; return;
     }
     const g = k => parseInt(r.headers.get(k), 10) || 0;
     const bmp = await createImageBitmap(await r.blob());
@@ -1287,7 +1298,7 @@ async function sendLoupe() {
     loupeHeld = { bmp, sig, x0: g("X-Crop-X"), y0: g("X-Crop-Y"), w: g("X-Crop-W"), h: g("X-Crop-H"),
                   W: g("X-Full-W"), H: g("X-Full-H"), ow: g("X-Orig-W"), oh: g("X-Orig-H") };
     if (r.headers.get("X-Cached") === "0") loupeMs = performance.now() - t0;
-  } catch (e) { setStatus("лупа: " + e, "err"); }
+  } catch (e) { setStatus("loupe: " + e, "err"); }
   loupeInflight = false;
   drawLoupe(); scheduleLoupe();
 }
@@ -1487,7 +1498,7 @@ function hqParamsChanged() {
   if (!hq.sig) return;
   HQ.style.visibility = "hidden";                      // старий різкий шар не збігається з новим превʼю
   const g = zgeom();
-  if (g && hqNeeded(g)) { hqState("різкість: чекаю…"); hqSchedule(900); }
+  if (g && hqNeeded(g)) { hqState("sharpness: waiting…"); hqSchedule(900); }
 }
 
 async function hqRun() {
@@ -1507,16 +1518,16 @@ async function hqRun() {
       const cx = i * T + Math.min(T, W - i * T) / 2, cy = j * T + Math.min(T, H - j * T) / 2;
       need.push({ key, cx, cy, d: Math.hypot(cx - mcx, cy - mcy) });
     }
-  if (!need.length) { hqState("різкість: готово"); hqShow(); return; }
+  if (!need.length) { hqState("sharpness: ready"); hqShow(); return; }
   need.sort((a, b) => a.d - b.d);
   const t = need[0], t0 = performance.now();
   hq.inflight = true;
-  hqState(hq.tiles.size ? "різкість: дорахунок…" : "різкість: рахую кадр (≈10 с)…");
+  hqState(hq.tiles.size ? "sharpness: finishing…" : "sharpness: computing the frame (≈10 s)…");
   try {
     const r = await post(API + "/render_crop", { params: currentParams(), cx: t.cx / W, cy: t.cy / H, size: T });
     if (!r.ok) {
       let msg = r.status; try { const j = await r.json(); msg = j.err || msg; } catch (_) {}
-      hqState("різкість: " + msg); hq.inflight = false; return;
+      hqState("sharpness: " + msg); hq.inflight = false; return;
     }
     const gh = k => parseInt(r.headers.get(k), 10) || 0;
     const bmp = await createImageBitmap(await r.blob());
@@ -1525,7 +1536,7 @@ async function hqRun() {
       hq.tiles.add(t.key);
     }
     if (bmp.close) bmp.close();
-  } catch (e) { hqState("різкість: " + e); hq.inflight = false; return; }
+  } catch (e) { hqState("sharpness: " + e); hq.inflight = false; return; }
   hq.inflight = false;
   hqShow();
   hqSchedule(30);                                      // наступний тайл / перевірка, чи нічого не змінилось
@@ -1535,7 +1546,7 @@ async function hqRun() {
 let curFrame = 0, nodeInfo = null, armed = !EMBED, quietOnce = false, ntTimer = null, presetBase = null;
 
 function showNeedRun(msg) {
-  $("needRun").textContent = msg || "запусти граф раз, щоб превʼю взяло твій кадр";
+  $("needRun").textContent = msg || "run the graph once so the preview picks up your frame";
   document.documentElement.classList.add("needrun");
   setStatus(msg || "", "");
 }
@@ -1613,7 +1624,7 @@ if (EMBED) {
     const m = ev.data;
     if (!m || typeof m !== "object") return;
     if (m.type === "depth_look_init") applyInit(m);
-    else if (m.type === "depth_look_refresh") refreshNode().catch(e => setStatus("оновлення: " + e, "err"));
+    else if (m.type === "depth_look_refresh") refreshNode().catch(e => setStatus("refresh: " + e, "err"));
     else if (m.type === "depth_look_warn") showMsg((m.warns || []).length ? "⚠ " + m.warns.join("  ·  ⚠ ") : "", true);
   });
   setTimeout(() => { armed = true; }, 4000);   // батько не відповів (iframe відкрито окремо) — працюємо без нього
@@ -1632,10 +1643,10 @@ function notesToTitles() {
   const st = await (await fetch(API + "/state")).json();
   spec = st.spec;
   groupsMeta = st.groups || [];
-  const px = st.extra_groups && st.extra_groups["Превʼю"];
+  const px = st.extra_groups && Object.values(st.extra_groups)[0];
   if (px) { $("prevIcon").innerHTML = px.icon || ""; $("prevHint").textContent = px.hint || ""; $("grpPreview").querySelector("summary").title = px.hint || ""; }
-  $("finalHint").textContent = EMBED ? "фінальний розмір — у ноді (за замовч. як оригінал)"
-    : "фінальний розмір: кнопка «Повний рендер» рахує в робочій роздільності кадру";
+  $("finalHint").textContent = EMBED ? "final size — set on the node (default: same as original)"
+    : "final size: the “Full render” button computes at the frame's working resolution";
   notesToTitles();
   presetBase = clone(st.preset);
   if (EMBED && st.spec) {
@@ -1643,12 +1654,12 @@ function notesToTitles() {
     if (ts && st.node_frame && st.frames.length && st.fps !== undefined) ts.hi = Math.max(ts.hi, (+st.start_time || 0) + st.frames[st.frames.length - 1] / Math.max(+st.fps || 24, 1e-6));
   }
   const ps = $("presetSel");
-  const LABELS = { "look_v1": "Лук v1", "test_grade": "Тестовий", "00_оригінал": "Оригінал" };   // = presetLabel у web/svk_ui.js
+  const LABELS = { "look_v1": "Look v1", "test_grade": "Test", "00_оригінал": "Original" };   // = presetLabel у web/svk_ui.js
   st.presets.forEach(n => { const o = new Option((LABELS[n] || n) + (st.locked.includes(n) ? " 🔒" : ""), n); o.title = n; ps.add(o); });
   ps.value = st.preset_name;
   if (st.photos && st.photos.length) {
     const sel2 = $("photoSel");
-    sel2.add(new Option("(свій кадр)", ""));
+    sel2.add(new Option("(own frame)", ""));
     st.photos.forEach(n => sel2.add(new Option(n, n)));
     sel2.value = st.photo;
     sel2.style.display = "";
@@ -1672,7 +1683,7 @@ function notesToTitles() {
   }
   scheduleRender();
   loadGrads();
-})().catch(e => setStatus("помилка ініціалізації: " + (e.stack || e), "err"));
+})().catch(e => setStatus("initialization error: " + (e.stack || e), "err"));
 </script>
 </body>
 </html>
