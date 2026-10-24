@@ -4,7 +4,7 @@
   · обгортаємо comfy.utils.ProgressBar.update_absolute і
     comfy.model_management.throw_exception_if_processing_interrupted — перед кожним кроком
     семплера/прогрес-бару дивимось на SoC;
-  · якщо SoC ≥ pause_at — блокуємо потік (спимо) до resume_at. Пауза, не обрив: якщо Льоша
+  · якщо SoC ≥ pause_at — блокуємо потік (спимо) до resume_at. Пауза, не обрив: якщо користувач
     натиснув «скасувати», пауза завершується, і оригінал кидає InterruptProcessingException;
   · жорсткий поріг (hard_at) і ноди без прогрес-бару тримає thermal_watch: окремий процес,
     що ставить ComfyUI на SIGSTOP. install() запускає і його.

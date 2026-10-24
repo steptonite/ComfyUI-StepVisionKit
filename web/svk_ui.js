@@ -85,6 +85,12 @@ const LEGACY_VALUES = { "як оригінал": "original", "налаштува
                         "превʼю (швидко)": "preview (fast)", "фінал": "final", "00_оригінал": "00_original" };
 export function migrateLegacyValues(node) {
     for (const w of node.widgets || []) if (typeof w.value === "string" && Object.hasOwn(LEGACY_VALUES, w.value)) w.value = LEGACY_VALUES[w.value];
+    // старе імʼя пресета з суфіксом (<база>_...) -> базовий пресет, як look_params.preset_alias
+    const p = W(node, "preset"), opts = p?.options?.values;
+    if (p && Array.isArray(opts) && !opts.includes(p.value)) {
+        const base = opts.filter(o => String(p.value).startsWith(o + "_")).sort((a, b) => b.length - a.length)[0];
+        if (base) p.value = base;
+    }
 }
 
 // ---- контроли, привʼязані до нативного віджета (його значення йде у workflow і в Run)

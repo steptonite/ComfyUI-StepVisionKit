@@ -32,7 +32,7 @@ LEGACY = {"як оригінал": SIZE_ORIGINAL, "налаштування (ш�
 
 
 def legacy(v):
-    return LEGACY.get(v, v) if isinstance(v, str) else v
+    return look_params.preset_alias(LEGACY.get(v, v)) if isinstance(v, str) else v
 
 
 def validate_legacy(**fields):

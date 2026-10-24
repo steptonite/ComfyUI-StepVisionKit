@@ -245,8 +245,20 @@ def defaults():
 LEGACY_PRESETS = {"00_оригінал": "00_original"}
 
 
+def preset_alias(name):
+    """Старе імʼя пресета з суфіксом (<база>_...), файлу якого вже нема -> базовий пресет."""
+    known = list_presets()
+    if not isinstance(name, str) or name in known:
+        return name
+    for p in sorted(known, key=len, reverse=True):
+        if name.startswith(p + "_"):
+            return p
+    return name
+
+
 def load_preset(name_or_path):
-    name_or_path = LEGACY_PRESETS.get(name_or_path, name_or_path)
+    if not os.path.exists(name_or_path):
+        name_or_path = preset_alias(LEGACY_PRESETS.get(name_or_path, name_or_path))
     path = name_or_path if os.path.exists(name_or_path) else os.path.join(PRESETS_DIR, name_or_path.removesuffix(".json") + ".json")
     p = defaults()
     p.update(json.load(open(path)))

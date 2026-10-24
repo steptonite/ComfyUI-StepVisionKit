@@ -1,7 +1,7 @@
 """Термо-сторож StepVisionKit: читач температури SoC, конфіг і файл стану паузи.
 
-ЧОМУ: Льоша ганяє локально Depth Anything, YOLO, SAM, MatAnyone на MacBook Air M2
-(пасивне охолодження). Рятує лише підставка, Катя генерує без неї. Коли SoC гарячий,
+ЧОМУ: Depth Anything, YOLO, SAM, MatAnyone ганяються локально на MacBook Air M2
+(пасивне охолодження), рятує лише підставка. Коли SoC гарячий,
 генерація ПАУЗИТЬСЯ до охолодження і сама продовжується. Задачу НІКОЛИ не вбиваємо.
 
 ЧИТАЧ: чистий ctypes, без pyobjc (у venv ComfyUI його нема). Два джерела, поріг — по
@@ -37,7 +37,7 @@ PROFILES = {
     "bare": {"pause_at": 90.0, "resume_at": 80.0, "hard_at": 97.0},     # без підставки
 }
 PROFILE_TITLES = {"stand": "with cooling stand", "bare": "no stand", "custom": "custom"}
-TEMP_MIN, TEMP_MAX = 30.0, 100.0        # рішення Льоші 10.09.2026: вище 100 ніколи
+TEMP_MIN, TEMP_MAX = 30.0, 100.0        # рішення автора 10.09.2026: вище 100 ніколи
 DEFAULTS = {"enabled": True, "profile": "stand", "pause_at": 95.0, "resume_at": 85.0,
             "hard_at": 100.0, "poll_s": 2.0}
 
