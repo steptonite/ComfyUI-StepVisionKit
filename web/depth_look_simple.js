@@ -435,7 +435,8 @@ function colorControl(node, name, label, onChange) {
     return { row, sync };
 }
 const VIDEO_MORE = [["start_time", T("Start, s")], ["preview_every", T("Every Nth frame in preview")],
-                    ["output_size", T("Output size")], ["max_side", T("Working resolution")]];
+                    ["output_size", T("Output size")], ["max_side", T("Working resolution")],
+                    ["hdr", T("HDR input"), { names: { "SDR or HLG/PQ as encoded": T("SDR / HLG·PQ as is"), "linear (keeps highlights)": T("linear, keep highlights") } }]];
 // верхній рядок відео-ноди: fps + превʼю/фінал. Контроли пишуть прямо у нативні віджети ноди, тож їх можна показати де завгодно
 function buildTop(node, specs, onChange) {
     const bar = el("div", "svk-bar");

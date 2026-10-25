@@ -17,6 +17,20 @@ import look_params  # noqa: E402
 import look_api  # noqa: E402
 import depth_motion  # noqa: E402
 
+
+def _color():
+    """media/color.py без пакета media (його __init__ тягне rawpy і ноди Comfy, а воркер - голий скрипт)."""
+    global _C
+    if _C is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("svk_color", os.path.join(os.path.dirname(_PARENT), "media", "color.py"))
+        _C = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_C)
+    return _C
+
+
+_C = None
+
 DEFAULT_PRESET = "look_v1"
 _EXTRA_KEYS = {"vp_x", "vp_y", "shift_x", "shift_y", "palette"}
 
@@ -408,7 +422,8 @@ def _render_parallel(render_frame, out, B, n_workers, progress):
 def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=True,
                 light_is_near=True, overrides="{}", palette="", fps=24.0, start_time=0.0,
                 params_json="", max_side=0, depth_levels="clip", out=None, progress=None,
-                output_size=0, static=False, grade=None, anim=None, frame_step=1, workers=None, motion=None):
+                output_size=0, static=False, grade=None, anim=None, frame_step=1, workers=None, motion=None,
+                hdr_linear=False):
     """frames_np: (B,H,W,3) float 0..1; depths_np: (B|1,h,w) або (B|1,h,w,C) float (канал 0).
     Кадр i отримує time = start_time + i/fps (анімаційні повзунки: хвиля, пульс глоу, серпанок, шлейф) і
     seed зерна = seed + i (зерно живе; warp_seed стала). Кадри йдуть по одному, без великих проміжних стеків.
@@ -423,6 +438,9 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
     результат побітово той самий, що й послідовний - кожен кадр залежить лише від свого номера).
     motion {dm_*: значення}: «Рух по глибині» (depth_motion.py) - пост-прохід після look у кожному кадрі, на ТОМУ Ж часі
     кадру, що й анімація; None / усі сили 0 = вимкнено (результат побітово той самий, що без параметра).
+    hdr_linear=True: кадри scene-linear (1.0 = дифузний білий, світло > 1). Кожен кадр кодується в HLG-сигнал 0..1
+    (запас до ~3.8x білого) замість обрізання на 1, лук рахується на сигналі, і ВИХІД теж HLG-сигнал - назад у linear
+    його переводить викликач (video_node), після превʼю-стрічки.
     out: готовий (B,Ho,Wo,3) float32 масив для результату (напр. numpy-вʼю torch-тензора). -> out."""
     if not isinstance(frames_np, np.ndarray):
         frames_np = np.asarray(frames_np)
@@ -449,12 +467,18 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
     Ww, Hw = _work_size(Ho, Wo, int(max_side or 0))
 
     def get_rgb(i):
-        rgb = np.clip(np.asarray(frames_np[i][..., :3], np.float32), 0, 1)
+        rgb = np.asarray(frames_np[i][..., :3], np.float32)
+        if not hdr_linear:
+            rgb = np.clip(rgb, 0, 1)
         if (Ww, Hw) != (W, H):
             if Ww * Hw < W * H:
                 rgb = cv2.resize(rgb, (Ww, Hw), interpolation=cv2.INTER_AREA)
             else:                                                  # робоча роздільність більша за вхід: апскейл
-                rgb = np.clip(cv2.resize(rgb, (Ww, Hw), interpolation=cv2.INTER_CUBIC), 0, 1)
+                rgb = cv2.resize(rgb, (Ww, Hw), interpolation=cv2.INTER_CUBIC)
+                if not hdr_linear:
+                    rgb = np.clip(rgb, 0, 1)
+        if hdr_linear:                                             # світло над 1 - у верхню чверть сигналу, не в стелю
+            rgb = _color().hlg_encode(rgb)
         return rgb
 
     def get_depth(i):

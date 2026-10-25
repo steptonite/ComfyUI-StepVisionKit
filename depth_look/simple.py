@@ -141,13 +141,16 @@ def node_key(unique_id):
     return "s" + str(unique_id)
 
 
-def mix_with_original(arr, frames, mix):
-    """arr (B,H,W,3) результат луку; frames (B,h,w,3) оригінал. -> новий масив: оригінал*(1-mix) + лук*mix."""
+def mix_with_original(arr, frames, mix, prep=None):
+    """arr (B,H,W,3) результат луку; frames (B,h,w,3) оригінал. -> новий масив: оригінал*(1-mix) + лук*mix.
+    prep(кадр): як привести оригінал до простору луку (HDR: linear -> HLG-сигнал)."""
     out = np.empty_like(arr)
     H, W = arr.shape[1:3]
     for i in range(arr.shape[0]):
         o = np.asarray(frames[i][..., :3], np.float32)
         if o.shape[:2] != (H, W):
             o = cv2.resize(o, (W, H), interpolation=cv2.INTER_AREA if o.shape[1] > W else cv2.INTER_CUBIC)
+        if prep is not None:
+            o = prep(o)
         out[i] = o * (1.0 - mix) + arr[i] * mix
     return out

@@ -240,6 +240,7 @@ VIDEO_FORMATS = {
     "EXR sequence": (None, None, None, ".exr", True),
 }
 TRANSFERS = ["SDR Rec.709", "HDR PQ (HDR10)", "HDR HLG"]
+INPUT_CURVES = ["sRGB", "linear", "HLG (as encoded)", "PQ (as encoded)"]
 _TAGS = {"SDR Rec.709": ("bt709", "bt709", "bt709"),
          "HDR PQ (HDR10)": ("bt2020", "smpte2084", "bt2020nc"),
          "HDR HLG": ("bt2020", "arib-std-b67", "bt2020nc")}
@@ -259,8 +260,10 @@ class SVKSaveVideoHDR:
             "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.001}),
             "transfer": (TRANSFERS, {"default": "SDR Rec.709",
                          "tooltip": "SDR = regular Rec.709; PQ = HDR10 (Rec.2020, absolute nits); HLG = broadcast HDR. Ignored for EXR (always linear)"}),
-            "input_curve": (["sRGB", "linear"], {"default": "sRGB",
-                            "tooltip": "what the incoming frames are: sRGB = regular ComfyUI images; linear = Load RAW / Load Video linear / EXR"}),
+            "input_curve": (INPUT_CURVES, {"default": "sRGB",
+                            "tooltip": "what the incoming frames are: sRGB = regular ComfyUI images; linear = Load RAW / Load Video linear / EXR; "
+                                       "HLG / PQ (as encoded) = Load Video (Pro) 'as encoded' from an HDR file, also after Depth Look - "
+                                       "written back untouched when transfer matches, so highlights survive"}),
         }, "optional": {
             "alpha": ("MASK", {"tooltip": "alpha for ProRes 4444 / XQ and EXR, 1 = opaque"}),
             "folder": ("STRING", {"default": "", "tooltip": "where to save; empty = ComfyUI output"}),
@@ -284,6 +287,11 @@ class SVKSaveVideoHDR:
             return C.hlg_encode(C.apply_matrix(rgb_lin, C.M709_TO_2020))
         return C.bt1886_inv(rgb_lin)
 
+    @staticmethod
+    def _passthrough(input_curve, transfer):
+        """Код-значення вже в потрібній кривій (і в Rec.2020): пишемо як є, без декоду й матриці."""
+        return (input_curve, transfer) in (("HLG (as encoded)", "HDR HLG"), ("PQ (as encoded)", "HDR PQ (HDR10)"))
+
     def save(self, images, filename_prefix, format, fps, transfer, input_curve, alpha=None, folder="",
              hevc_crf=16, max_nits=1000, exr_compression="zip"):
         codec, profile, pix, ext, can_alpha = VIDEO_FORMATS[format]
@@ -296,8 +304,15 @@ class SVKSaveVideoHDR:
             al = al[None] if al.ndim == 2 else al
 
         def frame(i):
+            """-> scene-linear Rec.709 (1.0 = дифузний білий)."""
             a = images[i].cpu().numpy().astype(np.float32)[..., :3]
-            return C.srgb_eotf(a) if input_curve == "sRGB" else a
+            if input_curve == "sRGB":
+                return C.srgb_eotf(a)
+            if input_curve == "HLG (as encoded)":
+                return C.apply_matrix(C.hlg_decode(a), C.M2020_TO_709)
+            if input_curve == "PQ (as encoded)":
+                return C.apply_matrix(C.pq_decode(a), C.M2020_TO_709)
+            return a
 
         if codec is None:
             d = os.path.join(full, f"{fname}_{counter:05}")
@@ -334,7 +349,10 @@ class SVKSaveVideoHDR:
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             for i in range(n):
-                sig = self._encode(frame(i), transfer, max_nits)
+                if self._passthrough(input_curve, transfer):
+                    sig = np.clip(images[i].cpu().numpy().astype(np.float32)[..., :3], 0.0, 1.0)
+                else:
+                    sig = self._encode(frame(i), transfer, max_nits)
                 if al is not None:
                     sig = np.concatenate([sig, al[min(i, len(al) - 1)][..., None]], -1)
                 proc.stdin.write(np.clip(sig * 65535.0 + 0.5, 0, 65535).astype("<u2").tobytes())

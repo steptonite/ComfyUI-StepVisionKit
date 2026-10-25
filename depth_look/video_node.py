@@ -15,9 +15,12 @@ import depth_motion
 from .core import (SIZE_ORIGINAL, OUTPUT_SIZES, GRADE_TYPE, PREVIEW_SIDE, parse_output_size, check_inputs,
                    legacy, validate_legacy, params_from_grade, out_shape, watermark)
 from .render_proc import tensors_to_numpy, make_progress, render, to_result, stage
+from ..media import color as C
 
 QUALITY_PREVIEW = "preview (fast)"
 QUALITY_FINAL = "final"
+HDR_OFF = "SDR or HLG/PQ as encoded"
+HDR_LINEAR = "linear (keeps highlights)"
 _DEF = None
 
 
@@ -84,7 +87,11 @@ class DepthLookVideo:
             "preview_every": ("INT", {"default": 3, "min": 1, "max": 60, "step": 1, "tooltip": "Preview only: take every Nth frame. To watch at real speed, set the playback rate to fps/N (second output)."}),
         })
         opt = {"fps_in": ("FLOAT", {"forceInput": True, "min": 1.0, "max": 240.0, "step": 0.01,
-                                    "tooltip": "Frame rate from another node (e.g. fps from Video Info / Load Video). When connected, it replaces the fps field."})}
+                                    "tooltip": "Frame rate from another node (e.g. fps from Video Info / Load Video). When connected, it replaces the fps field."}),
+               "hdr": ([HDR_OFF, HDR_LINEAR], {"default": HDR_OFF,
+                       "tooltip": "HDR clip: Load Video (Pro) 'as encoded' needs nothing here - save with input_curve HLG/PQ (as encoded). "
+                                  "Load Video (Pro) 'linear' -> pick linear: highlights above 1 go through the look instead of clipping; "
+                                  "output stays linear, save with input_curve linear."})}
         for key, kind, d, lo, hi, step, label in depth_motion.SPEC:     # «Рух по глибині» (depth_motion.py): сили за замовч. 0
             tip = "Depth motion · " + label
             if isinstance(kind, list):
@@ -108,7 +115,7 @@ class DepthLookVideo:
         return validate_legacy(quality=(quality, [QUALITY_PREVIEW, QUALITY_FINAL]), output_size=(output_size, OUTPUT_SIZES))
 
     def run(self, image, depth, grade, fps, start_time, output_size, max_side, quality, preview_every,
-            unique_id=None, fps_in=None, **anim):
+            unique_id=None, fps_in=None, hdr=HDR_OFF, **anim):
         if fps_in is not None:                                 # сокет fps (напр. від Video Info) має перевагу над полем
             fps = float(fps_in)
         preview = str(legacy(quality)).startswith("preview")
@@ -132,6 +139,9 @@ class DepthLookVideo:
         motion = {k: anim[k] for k in depth_motion.KEYS if k in anim}
         if depth_motion.active(motion):                        # старі графи без dm_*: ключа motion у завданні немає взагалі
             kw["motion"] = motion
+        hdr_lin = hdr == HDR_LINEAR
+        if hdr_lin:                                            # лук рахується на HLG-сигналі, назад у linear - наприкінці
+            kw["hdr_linear"] = True
         t0 = time.time()
         arr = render(frames, dep, kw, make_progress(frames.shape[0], unique_id),
                      out_shape(frames.shape[0], frames.shape[1], frames.shape[2], out_size))
@@ -139,7 +149,7 @@ class DepthLookVideo:
         if mix < 1.0:
             from .simple import mix_with_original
             stage(unique_id, "mix")
-            arr = mix_with_original(arr, frames, mix)
+            arr = mix_with_original(arr, frames, mix, C.hlg_encode if hdr_lin else None)
         ui = {}
         if preview and unique_id is not None:                  # стрічка кадрів у ноді (той самий стиль, що й плитки Simple)
             try:
@@ -153,6 +163,9 @@ class DepthLookVideo:
                 print("[DepthLookVideo] preview strip not written: %s" % e)
         if preview:
             watermark(arr, "PREVIEW %d, every %d - set quality=final" % (PREVIEW_SIDE, step))
+        if hdr_lin:                                            # стрічка вище - з сигналу (HLG дивиться і як SDR)
+            for i in range(arr.shape[0]):
+                arr[i] = C.hlg_decode(arr[i])
         play = float(fps) / step
         stage(unique_id, "done", secs=round(time.time() - t0, 1))
         print("[DepthLookVideo] %s: %d frame(s) %dx%d in %.1f s, play at %.2f fps, look strength %.2f" % (
