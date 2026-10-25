@@ -1,10 +1,11 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-// Raw Depth Save / Load, Save Depth 16/EXR: кнопка відкриває системний вибір теки (macOS, osascript на сервері)
+// Raw Depth Load: кнопка відкриває системний вибір теки (macOS, osascript на сервері)
 // і вписує шлях у поле folder. Поле лишається звичайним текстом — шлях можна й вставити.
+// Ноди збереження кнопки не мають: шлях пишеться в імені (a/b/name), на сервері без екрана вибір не працює.
 
-const RAW_NODES = ["SVKRawDepthSave", "SVKRawDepthLoad", "SVKSaveDepth16"];
+const RAW_NODES = ["SVKRawDepthLoad"];
 
 function toast(severity, summary) {
     const tm = app.extensionManager?.toast;

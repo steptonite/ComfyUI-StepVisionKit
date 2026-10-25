@@ -71,7 +71,7 @@ class SVKRawDepthSave:
     def INPUT_TYPES(cls):
         return {"required": {
             "da3_geometry": ("DA3_GEOMETRY", {"tooltip": "output of DA3Inference"}),
-            "name": ("STRING", {"default": "depth", "tooltip": "prefix of the new subfolder: name_00001, name_00002…"}),
+            "name": ("STRING", {"default": "depth", "tooltip": "prefix of the new subfolder: name_00001, name_00002…; a/b/name makes subfolders a/b"}),
             "folder": ("STRING", {"default": "", "tooltip": "where to save; empty = output/svk_raw"}),
         }}
 
@@ -82,8 +82,11 @@ class SVKRawDepthSave:
 
     def save(self, da3_geometry, name, folder):
         g = da3_geometry
-        base = "".join(ch for ch in name.strip() if ch.isalnum() or ch in "-_") or "depth"
-        root = _folder(folder)
+        # a/b/name → підтеки a/b, у них name_00001 (як filename_prefix у Save Image)
+        parts = ["".join(ch for ch in p.strip() if ch.isalnum() or ch in "-_.") for p in name.replace("\\", "/").split("/")]
+        parts = [p for p in parts if p.strip(".")]
+        base = parts.pop() if parts else "depth"
+        root = os.path.join(_folder(folder), *parts)
         os.makedirs(root, exist_ok=True)
         i = 1
         while os.path.exists(os.path.join(root, f"{base}_{i:05d}")):
