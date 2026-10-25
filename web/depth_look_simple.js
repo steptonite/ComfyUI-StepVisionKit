@@ -584,6 +584,16 @@ function sanitizeWidgets(node, input) {
         else if (t === "STRING") ok = typeof w.value === "string" && (!/^dm_.*color/.test(w.name) || /^#[0-9a-fA-F]{6}$/.test(w.value));
         if (!ok) { w.value = "default" in o ? o.default : opts?.[0]; console.warn("[DepthLook] reset shifted value:", w.name); }
     }
+    // зсув на одну позицію лишає валідні числа: у силі ефектів лягають дефолти швидкостей → вмикаються 5 ефектів, яких не обирали
+    const val = k => node.widgets?.find(x => x.name === k)?.value;
+    const sig = [["dm_scan", 0.25], ["dm_par", 0.3], ["dm_focus", 0.15], ["dm_reveal", 0.2], ["dm_light", 0.15]];
+    if (sig.every(([k, v]) => Math.abs(val(k) - v) < 1e-6)) {
+        for (const w of node.widgets || []) {
+            const o = spec[w.name]?.[1];
+            if (w.name.startsWith("dm_") && o && "default" in o) w.value = o.default;
+        }
+        console.warn("[DepthLook] depth-motion values were shifted by an old graph — reset to defaults (all effects off)");
+    }
 }
 // вихід final підключено → прев'ю-запуск рахує ще й фінал (бекенд не бачить, куди йдуть виходи)
 function syncFinalOut(node) {
