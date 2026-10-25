@@ -16,6 +16,10 @@ from .core import (SIZE_ORIGINAL, OUTPUT_SIZES, GRADE_TYPE, PREVIEW_SIDE, parse_
                    legacy, validate_legacy, params_from_grade, out_shape, watermark)
 from .render_proc import tensors_to_numpy, make_progress, render, to_result, stage
 from ..media import color as C
+try:
+    from comfy_execution.graph_utils import ExecutionBlocker
+except Exception:            # старий Comfy без блокера: лишаємо None (ланцюг упаде з явною помилкою, а не мовчки зарендерить)
+    ExecutionBlocker = None
 
 QUALITY_PREVIEW = "preview (fast)"
 QUALITY_FINAL = "final"
@@ -104,7 +108,13 @@ class DepthLookVideo:
                                                 "Load Video (Pro) 'linear' -> pick linear: highlights above 1 go through the look instead of clipping; "
                                                 "output stays linear, save with input_curve linear."})
         opt["final_out"] = ("BOOLEAN", {"default": False, "tooltip": "Set by the UI: the final output is connected, so a preview run also renders the final."})
+        # render-gate (25.10.2026): теж лише в кінці, з тієї ж причини
+        opt["auto_render"] = ("BOOLEAN", {"default": False, "tooltip": "Off: every run only renders the preview and the outputs stay blocked (Video Combine / Save do not run) - press 'Render final' on the node. "
+                                                                       "On: every run also renders the final and passes it on, with the settings the node already has."})
+        opt["render_token"] = ("STRING", {"default": "", "multiline": False, "tooltip": "Set by the 'Render final' button (one-shot). Do not edit."})
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID"}}
+
+    _consumed = {}           # unique_id -> останній використаний render_token (one-shot: той самий токен фінал вдруге не запускає)
 
     RETURN_TYPES = ("IMAGE", "FLOAT", "IMAGE")
     RETURN_NAMES = ("image", "play_fps", "final")
@@ -116,18 +126,50 @@ class DepthLookVideo:
     def VALIDATE_INPUTS(cls, quality=None, output_size=None):
         return validate_legacy(quality=(quality, [QUALITY_PREVIEW, QUALITY_FINAL]), output_size=(output_size, OUTPUT_SIZES))
 
+    @classmethod
+    def _gate_open(cls, unique_id, auto_render, render_token):
+        """Фінал дозволено: ввімкнено auto_render або токен кнопки свіжий (≠ спожитому для цієї ноди). Токен споживається."""
+        if auto_render:
+            return True
+        tok = str(render_token or "")
+        key = str(unique_id)
+        if tok and cls._consumed.get(key) != tok:
+            cls._consumed[key] = tok
+            return True
+        return False
+
     def run(self, image, depth, grade, fps, start_time, output_size, max_side, quality, preview_every,
-            unique_id=None, fps_in=None, hdr=HDR_OFF, final_out=False, **anim):
+            unique_id=None, fps_in=None, hdr=HDR_OFF, final_out=False, auto_render=False, render_token="", **anim):
         if fps_in is not None:                                 # сокет fps (напр. від Video Info) має перевагу над полем
             fps = float(fps_in)
-        preview = str(legacy(quality)).startswith("preview")
+        want_final = str(legacy(quality)).startswith("final") or bool(final_out)
         job = (image, depth, grade, fps, start_time, output_size, max_side, preview_every, unique_id, hdr, anim)
-        arr, play, ui = self._render(*job, preview=preview)
-        out = fin = to_result(arr, image)
-        if preview and final_out:                              # вихід final підключено: фінал у тому ж запуску, перемикач не чіпати
-            del arr
-            fin = to_result(self._render(*job, preview=False)[0], image)
-        return {"ui": ui, "result": (out, play, fin)}
+        # (1) превʼю - завжди першим; стрічка йде в ноду одразу, ще до фіналу
+        prev_arr, play, ui = self._render(*job, preview=True)
+        self._push_strip(unique_id, ui)
+        # (2) фінал - лише за кнопкою (свіжий токен) або з auto_render; інакше всі виходи блокуються
+        if not self._gate_open(unique_id, auto_render, render_token):
+            print("[DepthLookVideo] preview done; final not requested (press 'Render final' on the node or enable auto_render) - outputs blocked")
+            blk = ExecutionBlocker(None) if ExecutionBlocker else None
+            return {"ui": ui, "result": (blk, blk, blk)}
+        out_prev = to_result(prev_arr, image)
+        del prev_arr
+        if not want_final:                                     # дозволено, але ні image=final, ні сокет final не потрібні: віддати превʼю
+            return {"ui": ui, "result": (out_prev, play, out_prev)}
+        fin = to_result(self._render(*job, preview=False)[0], image)
+        if str(legacy(quality)).startswith("preview"):         # image = превʼю, final = фінал (як і раніше)
+            return {"ui": ui, "result": (out_prev, play, fin)}
+        return {"ui": ui, "result": (fin, float(fps), fin)}
+
+    @staticmethod
+    def _push_strip(unique_id, ui):
+        if unique_id is None or not ui.get("depth_look_strip"):
+            return
+        try:
+            from server import PromptServer
+            PromptServer.instance.send_sync("svk.strip", {"node": str(unique_id), "strip": ui["depth_look_strip"][0]})
+        except Exception:
+            pass
 
     def _render(self, image, depth, grade, fps, start_time, output_size, max_side, preview_every, unique_id, hdr, anim, preview):
         g = grade

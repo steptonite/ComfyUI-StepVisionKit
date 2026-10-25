@@ -437,6 +437,18 @@ function colorControl(node, name, label, onChange) {
 const VIDEO_MORE = [["start_time", T("Start, s")], ["preview_every", T("Every Nth frame in preview")],
                     ["output_size", T("Output size")], ["max_side", T("Working resolution")],
                     ["hdr", T("HDR input"), { names: { "SDR or HLG/PQ as encoded": T("SDR / HLG·PQ as is"), "linear (keeps highlights)": T("linear, keep highlights") } }]];
+// «Render final»: свіжий одноразовий токен + запуск; бекенд зрахує превʼю, потім фінал і пропустить виходи далі
+async function renderFinal(node) {
+    setW(node, "render_token", String(Date.now()));
+    const hasFinal = !!node.outputs?.find(o => o.name === "final")?.links?.length;
+    const q = W(node, "quality");
+    if (!hasFinal && q && Array.isArray(node.__svkv?.specs?.quality?.[0])) setW(node, "quality", node.__svkv.specs.quality[0][1]);   // у image підключено - він і має нести фінал
+    markChanged();
+    node.__svkv?.sync?.();
+    try { await app.queuePrompt(0, 1); } catch (e) { console.warn("[DepthLook]", e); }
+    setW(node, "render_token", "");          // токен уже в завданні; у графі не лишаємо - збережений граф сам фінал не запустить
+    markChanged();
+}
 // верхній рядок відео-ноди: fps + превʼю/фінал. Контроли пишуть прямо у нативні віджети ноди, тож їх можна показати де завгодно
 function buildTop(node, specs, onChange) {
     const bar = el("div", "svk-bar");
@@ -448,6 +460,18 @@ function buildTop(node, specs, onChange) {
         const c = control(node, "quality", specs.quality, "", { seg: { [vals[0]]: T("preview"), [vals[1]]: T("final") }, tip: specs.quality[1]?.tooltip, onChange });
         bar.append(c.row); ctl.push(c);
     }
+    // гейт рендеру: превʼю йде завжди, фінал - за кнопкою (одноразовий токен) або з галочкою auto
+    const gate = el("div", "svk-bar"); gate.style.cssText = "flex-basis:100%;align-items:center";
+    const rb = el("button", "svk-btn primary", ICON.play + " " + T("Render final")); rb.type = "button";
+    rb.style.cssText = "display:inline-flex;align-items:center;gap:6px;flex:1";
+    rb.title = T("Renders the final once with the current settings and passes it to the connected nodes (Video Combine / Save). A normal run only renders the preview.");
+    rb.onclick = () => renderFinal(node);
+    gate.append(rb);
+    if (specs.auto_render && W(node, "auto_render")) {
+        const c = control(node, "auto_render", specs.auto_render, T("Auto"), { onChange });
+        c.row.style.flex = "none"; gate.append(c.row); ctl.push(c);
+    }
+    bar.style.flexWrap = "wrap"; bar.append(gate);
     const paintFps = () => {
         const linked = fpsLinked(node);
         if (fpsRow) { fpsRow.style.opacity = linked ? ".4" : ""; fpsRow.style.pointerEvents = linked ? "none" : ""; fpsRow.title = linked ? T("fps comes from the connected input") : fpsTip; }
@@ -753,6 +777,12 @@ app.registerExtension({
             if (out.depth_look_simple && node.__svk) loadInfo(node.__svk);
             if (out.depth_look_strip && node.__svkv) applyStrip(node, out.depth_look_strip[0]);
         });
+        // превʼю готове раніше за фінал: бекенд шле стрічку одразу, не чекаючи завершення ноди
+        api.addEventListener("svk.strip", ev => {
+            const id = ev.detail?.node;
+            const node = app.graph?.getNodeById?.(Number(id)) ?? app.graph?._nodes_by_id?.[id];
+            if (node?.__svkv && ev.detail?.strip) applyStrip(node, ev.detail.strip);
+        });
     },
     async beforeRegisterNodeDef(nodeType, nodeData) {
         const name = nodeData?.name;
@@ -762,7 +792,7 @@ app.registerExtension({
             const r = onCreated?.apply(this, arguments);
             this.color = NODE_COLOR; this.bgcolor = NODE_BG;            // один вигляд для трьох нод
             if (name === SIMPLE) setupSimple(this);
-            if (name === VIDEO) setupVideo(this, nodeData.input?.required || {});
+            if (name === VIDEO) setupVideo(this, { ...(nodeData.input?.optional || {}), ...(nodeData.input?.required || {}) });
             return r;
         };
         const onAdded = nodeType.prototype.onAdded;
@@ -783,7 +813,10 @@ app.registerExtension({
                 if (this.__svk.info) schedulePreview(this.__svk);
                 startSimple(this);
             }
-            if (name === VIDEO) sanitizeWidgets(this, nodeData.input);
+            if (name === VIDEO) {
+                sanitizeWidgets(this, nodeData.input);
+                setW(this, "render_token", "");                // токен кнопки не переживає збереження графа
+            }
             if (name === VIDEO && this.__svkv) {
                 for (const w of this.widgets || []) if (w.name !== "svk_strip") hideWidget(w);
                 this.__svkv.sync();
