@@ -570,6 +570,21 @@ function setupVideo(node, specs) {
     fitToNode(node, root);
     V.refresh();
 }
+// значення з'їхали (поле hdr переїжджало між версіями): невалідне поле → дефолт, щоб граф запускався
+function sanitizeWidgets(node, input) {
+    const spec = { ...(input?.required || {}), ...(input?.optional || {}) };
+    for (const w of node.widgets || []) {
+        const s = spec[w.name]; if (!s) continue;
+        const [t, o = {}] = s;
+        const opts = Array.isArray(t) ? t : t === "COMBO" ? (o.options || []) : null;
+        let ok = true;
+        if (opts) ok = opts.includes(w.value);
+        else if (t === "INT" || t === "FLOAT") ok = typeof w.value === "number" && isFinite(w.value) && !(o.min != null && w.value < o.min) && !(o.max != null && w.value > o.max);
+        else if (t === "BOOLEAN") ok = typeof w.value === "boolean";
+        else if (t === "STRING") ok = typeof w.value === "string" && (!/^dm_.*color/.test(w.name) || /^#[0-9a-fA-F]{6}$/.test(w.value));
+        if (!ok) { w.value = "default" in o ? o.default : opts?.[0]; console.warn("[DepthLook] reset shifted value:", w.name); }
+    }
+}
 // вихід final підключено → прев'ю-запуск рахує ще й фінал (бекенд не бачить, куди йдуть виходи)
 function syncFinalOut(node) {
     const w = node.widgets?.find(x => x.name === "final_out");
@@ -758,6 +773,7 @@ app.registerExtension({
                 if (this.__svk.info) schedulePreview(this.__svk);
                 startSimple(this);
             }
+            if (name === VIDEO) sanitizeWidgets(this, nodeData.input);
             if (name === VIDEO && this.__svkv) {
                 for (const w of this.widgets || []) if (w.name !== "svk_strip") hideWidget(w);
                 this.__svkv.sync();
