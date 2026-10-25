@@ -570,6 +570,11 @@ function setupVideo(node, specs) {
     fitToNode(node, root);
     V.refresh();
 }
+// вихід final підключено → прев'ю-запуск рахує ще й фінал (бекенд не бачить, куди йдуть виходи)
+function syncFinalOut(node) {
+    const w = node.widgets?.find(x => x.name === "final_out");
+    if (w) w.value = !!node.outputs?.find(o => o.name === "final")?.links?.length;
+}
 const fpsLinked = node => node.inputs?.some(i => i.name === "fps_in" && i.link != null);
 function stripURL(node, i, stamp) { return api.apiURL("/depth_look/strip/" + encodeURIComponent(node.id) + "/" + i + "?v=" + (stamp || 0)); }
 function showShot(V, i) {
@@ -756,6 +761,7 @@ app.registerExtension({
             if (name === VIDEO && this.__svkv) {
                 for (const w of this.widgets || []) if (w.name !== "svk_strip") hideWidget(w);
                 this.__svkv.sync();
+                syncFinalOut(this);
                 if (!this.__svkv.started) { this.__svkv.started = true; loadStripMeta(this); }
             }
             return r;
@@ -763,7 +769,7 @@ app.registerExtension({
         const onConn = nodeType.prototype.onConnectionsChange;
         nodeType.prototype.onConnectionsChange = function () {
             const r = onConn?.apply(this, arguments);
-            if (name === VIDEO) this.__svkv?.refresh?.();
+            if (name === VIDEO) { syncFinalOut(this); this.__svkv?.refresh?.(); }
             return r;
         };
         const onRemoved = nodeType.prototype.onRemoved;

@@ -42,6 +42,11 @@ from .media import NODES as IO_NODES, DISPLAY as IO_DISPLAY
 
 WEB_DIRECTORY = "./web"
 
+# HLG-формати для VHS Video Combine: VHS бере json і з теки VHS_video_formats (свої формати він мітить bt709)
+import os as _os, folder_paths as _fp
+_vf = _fp.folder_names_and_paths.get("VHS_video_formats", ((), set()))
+_fp.folder_names_and_paths["VHS_video_formats"] = ([*_vf[0], _os.path.join(_os.path.dirname(__file__), "video_formats")], set(_vf[1]) | {".json"})
+
 NODE_CLASS_MAPPINGS = {
     "LexYOLODetect": LexYOLODetect,
     "LexBoxesToBBOX": LexBoxesToBBOX,

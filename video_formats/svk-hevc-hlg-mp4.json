@@ -1,0 +1,18 @@
+{
+    "main_pass":
+    [
+        "-n", "-c:v", "libx265",
+        "-vtag", "hvc1",
+        "-pix_fmt", "yuv420p10le",
+        "-crf", ["crf", "INT", {"default": 16, "min": 0, "max": 51, "step": 1}],
+        "-preset", "medium",
+        "-x265-params", "log-level=quiet:colorprim=bt2020:transfer=arib-std-b67:colormatrix=bt2020nc",
+        "-vf", "scale=out_color_matrix=bt2020:out_range=tv",
+        "-color_range", "tv", "-colorspace", "bt2020nc", "-color_primaries", "bt2020", "-color_trc", "arib-std-b67"
+    ],
+    "fake_trc": "arib-std-b67",
+    "input_color_depth": "16bit",
+    "audio_pass": ["-c:a", "aac", "-movflags", "use_metadata_tags"],
+    "save_metadata": ["save_metadata", "BOOLEAN", {"default": true}],
+    "extension": "mp4"
+}

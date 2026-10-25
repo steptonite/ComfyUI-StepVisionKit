@@ -87,11 +87,7 @@ class DepthLookVideo:
             "preview_every": ("INT", {"default": 3, "min": 1, "max": 60, "step": 1, "tooltip": "Preview only: take every Nth frame. To watch at real speed, set the playback rate to fps/N (second output)."}),
         })
         opt = {"fps_in": ("FLOAT", {"forceInput": True, "min": 1.0, "max": 240.0, "step": 0.01,
-                                    "tooltip": "Frame rate from another node (e.g. fps from Video Info / Load Video). When connected, it replaces the fps field."}),
-               "hdr": ([HDR_OFF, HDR_LINEAR], {"default": HDR_OFF,
-                       "tooltip": "HDR clip: Load Video (Pro) 'as encoded' needs nothing here - save with input_curve HLG/PQ (as encoded). "
-                                  "Load Video (Pro) 'linear' -> pick linear: highlights above 1 go through the look instead of clipping; "
-                                  "output stays linear, save with input_curve linear."})}
+                                    "tooltip": "Frame rate from another node (e.g. fps from Video Info / Load Video). When connected, it replaces the fps field."})}
         for key, kind, d, lo, hi, step, label in depth_motion.SPEC:     # «Рух по глибині» (depth_motion.py): сили за замовч. 0
             tip = "Depth motion · " + label
             if isinstance(kind, list):
@@ -102,10 +98,16 @@ class DepthLookVideo:
                 opt[key] = ("INT", {"default": int(d), "min": int(lo), "max": int(hi), "step": int(step), "tooltip": tip})
             else:
                 opt[key] = ("FLOAT", {"default": float(d), "min": float(lo), "max": float(hi), "step": float(step), "tooltip": tip})
+        # у кінці: значення віджетів у збереженому графі позиційні, нове поле в середині зсуває старі графи
+        opt["hdr"] = ([HDR_OFF, HDR_LINEAR], {"default": HDR_OFF,
+                              "tooltip": "HDR clip: Load Video (Pro) 'as encoded' needs nothing here - save with input_curve HLG/PQ (as encoded). "
+                                                "Load Video (Pro) 'linear' -> pick linear: highlights above 1 go through the look instead of clipping; "
+                                                "output stays linear, save with input_curve linear."})
+        opt["final_out"] = ("BOOLEAN", {"default": False, "tooltip": "Set by the UI: the final output is connected, so a preview run also renders the final."})
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID"}}
 
-    RETURN_TYPES = ("IMAGE", "FLOAT")
-    RETURN_NAMES = ("image", "play_fps")
+    RETURN_TYPES = ("IMAGE", "FLOAT", "IMAGE")
+    RETURN_NAMES = ("image", "play_fps", "final")
     OUTPUT_NODE = True       # стрічка превʼю в ноді має рахуватись і без підключеного виходу
     FUNCTION = "run"
     CATEGORY = "StepVisionKit/Depth"
@@ -115,10 +117,19 @@ class DepthLookVideo:
         return validate_legacy(quality=(quality, [QUALITY_PREVIEW, QUALITY_FINAL]), output_size=(output_size, OUTPUT_SIZES))
 
     def run(self, image, depth, grade, fps, start_time, output_size, max_side, quality, preview_every,
-            unique_id=None, fps_in=None, hdr=HDR_OFF, **anim):
+            unique_id=None, fps_in=None, hdr=HDR_OFF, final_out=False, **anim):
         if fps_in is not None:                                 # сокет fps (напр. від Video Info) має перевагу над полем
             fps = float(fps_in)
         preview = str(legacy(quality)).startswith("preview")
+        job = (image, depth, grade, fps, start_time, output_size, max_side, preview_every, unique_id, hdr, anim)
+        arr, play, ui = self._render(*job, preview=preview)
+        out = fin = to_result(arr, image)
+        if preview and final_out:                              # вихід final підключено: фінал у тому ж запуску, перемикач не чіпати
+            del arr
+            fin = to_result(self._render(*job, preview=False)[0], image)
+        return {"ui": ui, "result": (out, play, fin)}
+
+    def _render(self, image, depth, grade, fps, start_time, output_size, max_side, preview_every, unique_id, hdr, anim, preview):
         g = grade
         params_from_grade(g)                                   # ранній зрозумілий виняток, якщо підключили не те
         stage(unique_id, "read", n=int(image.shape[0]))
@@ -170,4 +181,4 @@ class DepthLookVideo:
         stage(unique_id, "done", secs=round(time.time() - t0, 1))
         print("[DepthLookVideo] %s: %d frame(s) %dx%d in %.1f s, play at %.2f fps, look strength %.2f" % (
             QUALITY_PREVIEW if preview else QUALITY_FINAL, arr.shape[0], arr.shape[2], arr.shape[1], time.time() - t0, play, mix))
-        return {"ui": ui, "result": (to_result(arr, image), play)}
+        return arr, play, ui

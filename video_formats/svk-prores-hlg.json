@@ -1,0 +1,14 @@
+{
+    "main_pass":
+    [
+        "-n", "-c:v", "prores_ks",
+        "-profile:v", "4444",
+        "-pix_fmt", "yuv444p10le",
+        "-vf", "scale=out_color_matrix=bt2020:out_range=tv",
+        "-color_range", "tv", "-colorspace", "bt2020nc", "-color_primaries", "bt2020", "-color_trc", "arib-std-b67"
+    ],
+    "fake_trc": "arib-std-b67",
+    "input_color_depth": "16bit",
+    "audio_pass": ["-c:a", "pcm_s16le"],
+    "extension": "mov"
+}
