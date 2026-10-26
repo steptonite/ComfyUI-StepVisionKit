@@ -75,7 +75,11 @@ _CACHE = {}                    # (str(unique_id), "preview"|"final") -> (клю�
 def _tensor_sig(t):
     """Відбиток тензора без копії кліпу: форма, тип, пристрій, адреса й версія + сітка ~32x32 пікселів у ≤5 кадрах."""
     h = hashlib.blake2b(digest_size=16)
-    h.update(repr((tuple(t.shape), str(t.dtype), str(t.device), int(t.data_ptr()), int(getattr(t, "_version", 0)))).encode())
+    try:
+        ver = int(t._version)
+    except Exception:                                      # inference-тензори (DA3 у Comfy) лічильника версій не мають
+        ver = 0
+    h.update(repr((tuple(t.shape), str(t.dtype), str(t.device), int(t.data_ptr()), ver)).encode())
     B = int(t.shape[0])
     for i in sorted({0, B // 4, B // 2, (3 * B) // 4, B - 1}):
         f = t[i]
