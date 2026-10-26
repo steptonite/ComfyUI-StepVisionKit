@@ -53,8 +53,15 @@ def _clip_dir(path):
 
 def _float_ext():
     # OpenCV 5 з pip зібраний без OpenEXR (Vast 26.10: Raw Save падав після 7 хв DA3) -> float32 TIFF, теж без втрат
+    # haveImageWriter каже True і тоді, коли кодек вимкнений змінною -> пробний запис
     if cv2.haveImageWriter(".exr"):
-        return ".exr"
+        try:
+            import tempfile
+            with tempfile.TemporaryDirectory() as t:
+                if cv2.imwrite(os.path.join(t, "p.exr"), np.zeros((2, 2), np.float32)):
+                    return ".exr"
+        except cv2.error:
+            pass
     print("[SVK] OpenCV has no OpenEXR writer - saving float32 TIFF instead (pip install \"opencv-python<5\" brings EXR back)")
     return ".tif"
 
