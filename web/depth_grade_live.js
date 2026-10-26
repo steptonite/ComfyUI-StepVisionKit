@@ -73,11 +73,11 @@ class ViewPanel {
 
         // ── рядок 1: піпетки ліворуч, «До/після», «Криві», «Скинути» — іконками праворуч
         const r1 = h("div");
-        r1.className = "svk-row";
+        r1.className = "dg-row";
         const pick = h("div");
-        pick.className = "svk-seg";
+        pick.className = "dg-seg";
         const lbl = h("span", "", T("Eyedropper"));
-        lbl.className = "svk-lbl";
+        lbl.className = "dg-lbl";
         this.toolBtns = {};
         for (const t of TOOLS) {
             const b = btn(t.label, t.hint, () => this.setTool(this.tool === t.id ? null : t.id));
@@ -85,7 +85,7 @@ class ViewPanel {
             pick.append(b);
         }
         const end = h("div");
-        end.className = "svk-end";
+        end.className = "dg-end";
         this.cmp = icon("split", T("Before / after: hold the button to show the input without the grade"));
         const on = () => { this.compare = true; this.schedule(); };
         const off = () => { this.compare = false; this.schedule(); };
@@ -116,7 +116,7 @@ class ViewPanel {
             background:${C.bg};box-shadow:0 0 0 1px ${C.line}`);
         this.view = h("canvas", "position:absolute;left:0;top:0;display:block;image-rendering:auto");
         this.readout = h("div", `position:absolute;left:6px;bottom:6px;padding:3px 6px;border-radius:5px;
-            background:rgba(24,24,27,.82);font:11px ${MONO};color:${C.text};pointer-events:none;display:none`);
+            background:rgba(21,21,24,.82);font:11px ${MONO};color:${C.text};pointer-events:none;display:none`);
         this.stage.append(this.view, this.readout);
         this.view.addEventListener("pointermove", (e) => this.onHover(e));
         this.view.addEventListener("pointerleave", () => { this.hover = null; this.readout.style.display = "none"; this.schedule(); });
@@ -179,13 +179,13 @@ class ViewPanel {
 
     setTool(id) {
         this.tool = id;
-        for (const [k, b] of Object.entries(this.toolBtns)) b.classList.toggle("svk-on", k === id);
+        for (const [k, b] of Object.entries(this.toolBtns)) b.classList.toggle("dg-on", k === id);
         this.view.style.cursor = id ? "crosshair" : "default";
     }
 
     toggleCurve() {
         this.showCurve = !this.showCurve;
-        this.curveBtn.classList.toggle("svk-on", this.showCurve);
+        this.curveBtn.classList.toggle("dg-on", this.showCurve);
         this.layout();
         this.schedule();
     }

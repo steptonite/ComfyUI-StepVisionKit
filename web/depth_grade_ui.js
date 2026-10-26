@@ -19,35 +19,36 @@ export const PARAM_KEYS = ["depth_is", "look", "foreground_pop", "blacks", "whit
     "smooth_banding", "banding_edge", "trim_far", "trim_near", "flip", "levels_scope",
     "deflicker", "motion_guard"];
 
+// = токени --svk-* у svk_ui.css (канвас кривої бере кольори звідси, тому числа, а не var())
 export const C = {
-    bg: "#18181b", panel: "#1f1f23", panelHi: "#28282e", line: "#2e2e33", text: "#d4d4d8", dim: "#8a8a93",
-    hist: "rgba(161,161,170,0.22)", accent: "#6fbf9f", accentDim: "rgba(111,191,159,0.35)", err: "#e0857c",
+    bg: "#151518", panel: "#1d1d21", panelHi: "#26262b", line: "#2a2a2f", text: "#e8e6e3", dim: "#8d8b88",
+    hist: "rgba(141,139,136,0.22)", accent: "#e0a458", accentDim: "rgba(224,164,88,0.35)", err: "#d27b6b",
 };
 export const MONO = "ui-monospace, SFMono-Regular, Menlo, monospace";
 export const GAP = 6;       // проміжок між блоками, px
 export const CTRL_H = 22;   // висота всіх контролів, px
 
-// ── стилі: один раз на сторінку, щоб обидві View виглядали однаково
+// ── стилі: один раз на сторінку, щоб обидві View виглядали однаково. Класи dg-*, не svk-*: svk_ui.css має свої .svk-btn/.svk-seg/.svk-chips
 const CSS = `
-.svk-row{display:flex;align-items:center;gap:8px;height:${CTRL_H}px;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
-.svk-row::-webkit-scrollbar,.svk-chips::-webkit-scrollbar{display:none}
-.svk-seg{display:inline-flex;gap:2px;flex:none}
-.svk-end{display:inline-flex;gap:4px;margin-left:auto;flex:none}
-.svk-lbl{font:500 11px/1 system-ui,sans-serif;color:${C.dim};flex:none}
-.svk-btn{box-sizing:border-box;height:${CTRL_H}px;padding:0 8px;display:inline-flex;align-items:center;justify-content:center;gap:4px;flex:none;border-radius:6px;border:1px solid ${C.line};background:${C.panel};color:${C.text};font:500 11px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;user-select:none;transition:transform .12s cubic-bezier(.16,1,.3,1),background-color .15s,border-color .15s,color .15s}
-.svk-btn:hover{background:${C.panelHi}}
-.svk-btn:active{transform:translateY(1px)}
-.svk-btn:disabled{opacity:.45;cursor:default;transform:none;background:${C.panel}}
-.svk-btn.svk-on{border-color:${C.accent};color:${C.accent}}
-.svk-ico{width:${CTRL_H}px;padding:0}
-.svk-ico svg{width:13px;height:13px;display:block}
-.svk-sel{box-sizing:border-box;height:${CTRL_H}px;padding:0 4px 0 6px;border-radius:6px;border:1px solid ${C.line};background:${C.panel};color:${C.text};font:500 11px/1 system-ui,sans-serif;flex:none;cursor:pointer}
-.svk-chips{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;white-space:nowrap}
-.svk-num{font:11px ${MONO};color:${C.dim};white-space:nowrap}
-.svk-busy{height:2px;border-radius:1px;background:${C.line};overflow:hidden}
-.svk-busy i{display:block;width:30%;height:100%;background:${C.accent};animation:svk-slide 1.1s cubic-bezier(.4,0,.2,1) infinite}
-@keyframes svk-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
-@media (prefers-reduced-motion:reduce){.svk-busy i{animation-duration:3s}}
+.dg-row{display:flex;align-items:center;gap:8px;height:${CTRL_H}px;white-space:nowrap;overflow-x:auto;scrollbar-width:none}
+.dg-row::-webkit-scrollbar,.dg-chips::-webkit-scrollbar{display:none}
+.dg-seg{display:inline-flex;gap:2px;flex:none}
+.dg-end{display:inline-flex;gap:4px;margin-left:auto;flex:none}
+.dg-lbl{font:500 11px/1 system-ui,sans-serif;color:${C.dim};flex:none}
+.dg-btn{box-sizing:border-box;height:${CTRL_H}px;padding:0 8px;display:inline-flex;align-items:center;justify-content:center;gap:4px;flex:none;border-radius:6px;border:1px solid ${C.line};background:${C.panel};color:${C.text};font:500 11px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;user-select:none;transition:transform .12s cubic-bezier(.16,1,.3,1),background-color .15s,border-color .15s,color .15s}
+.dg-btn:hover{background:${C.panelHi}}
+.dg-btn:active{transform:translateY(1px)}
+.dg-btn:disabled{opacity:.45;cursor:default;transform:none;background:${C.panel}}
+.dg-btn.dg-on{border-color:${C.accent};color:${C.accent}}
+.dg-ico{width:${CTRL_H}px;padding:0}
+.dg-ico svg{width:13px;height:13px;display:block}
+.dg-sel{box-sizing:border-box;height:${CTRL_H}px;padding:0 4px 0 6px;border-radius:6px;border:1px solid ${C.line};background:${C.panel};color:${C.text};font:500 11px/1 system-ui,sans-serif;flex:none;cursor:pointer}
+.dg-chips{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;white-space:nowrap}
+.dg-num{font:11px ${MONO};color:${C.dim};white-space:nowrap}
+.dg-busy{height:2px;border-radius:1px;background:${C.line};overflow:hidden}
+.dg-busy i{display:block;width:30%;height:100%;background:${C.accent};animation:dg-slide 1.1s cubic-bezier(.4,0,.2,1) infinite}
+@keyframes dg-slide{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
+@media (prefers-reduced-motion:reduce){.dg-busy i{animation-duration:3s}}
 `;
 
 export function ensureStyles() {
@@ -94,7 +95,7 @@ function svgOf(name) {
 export function icon(name, title, onclick = null) {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "svk-btn svk-ico";
+    b.className = "dg-btn dg-ico";
     b.title = title;
     b.setAttribute("aria-label", title);
     b.innerHTML = svgOf(name);
@@ -110,7 +111,7 @@ export function setIcon(b, name) {
 export function btn(text, title = "", onclick = null) {
     const b = h("button", "", text);
     b.type = "button";
-    b.className = "svk-btn";
+    b.className = "dg-btn";
     if (title) b.title = title;
     if (onclick) b.onclick = onclick;
     return b;
@@ -151,7 +152,7 @@ export function presetActive(node, preset) {
 // рядок чіпів; getNode() → нода Depth Grade (джерело) або null
 export function presetRow(getNode) {
     const el = h("div");
-    el.className = "svk-chips";
+    el.className = "dg-chips";
     const chips = PRESETS.map((p) => {
         const b = btn(p.label, p.hint, () => {
             const A = getNode();
@@ -165,7 +166,7 @@ export function presetRow(getNode) {
         const A = getNode();
         for (const { p, b } of chips) {
             b.disabled = !A;
-            b.classList.toggle("svk-on", !!A && presetActive(A, p));
+            b.classList.toggle("dg-on", !!A && presetActive(A, p));
         }
     }
     return { el, refresh };

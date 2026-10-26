@@ -34,11 +34,12 @@ const MAIN = {
     SVKLoadImageSequence: ["folder", "pattern", "start_frame", "frame_count"],
     SVKSaveVideoHDR: ["filename_prefix", "format", "fps", "transfer"],
     SVKVideoDepthStream: ["file", "frame_count", "resolution", "batch"],
+    SVKDepthGrade: ["depth_is", "look", "foreground_pop", "midtones", "deflicker"],
     SVKRawDepthSave: null,           // null - усі віджети на видноті (їх ≤3)
     SVKDepthReceiver: null,
 };
-// лише колір ноди: власний UI або превʼю картинок під віджетами, картку поверх них не ставимо
-const COLOR_ONLY = ["SVKSaveImageHDR", "SVKSaveDepth16", "SVKRawDepthLoad"];
+// лише колір ноди: власний UI або превʼю картинок під віджетами, картку поверх них не ставимо; Live - стара, лишається як була
+const COLOR_ONLY = ["SVKSaveImageHDR", "SVKSaveDepth16", "SVKRawDepthLoad", "SVKDepthGradeLive", "SVKDepthGradeView", "SVKDepthGradeVideoView"];
 const COLOR_FIELDS = new Set(["color", "tint", "key_color"]);
 // англійські підписи, де імʼя віджета не читається; решта - імʼя без «_»
 const EN = { conf: "Confidence", imgsz: "Image size", model_name: "Model", class_filter: "Classes", format_in: "Box format",
@@ -51,11 +52,13 @@ function label(key, name) {
     if (LANG === "uk") { const l = DICT.nodes?.[key]?.inputs?.[name]?.label; if (l) return l; }
     return EN[name] || (name.charAt(0).toUpperCase() + name.slice(1)).replace(/_/g, " ");
 }
-function opts(name, spec) {
+// onChange: власний callback віджета, як при зміні нативного (Depth Grade на ньому перемальовує View)
+function opts(node, name, spec) {
     const vals = Array.isArray(spec?.[0]) ? spec[0] : null;
-    if (COLOR_FIELDS.has(name)) return { color: true };
-    if (vals && vals.length <= 3 && vals.every(v => String(v).length <= 12)) return { seg: Object.fromEntries(vals.map(v => [v, T(String(v))])) };
-    return {};
+    const o = { onChange: v => W(node, name)?.callback?.(v, app.canvas, node) };
+    if (COLOR_FIELDS.has(name)) o.color = true;
+    else if (vals && vals.length <= 3 && vals.every(v => String(v).length <= 12)) o.seg = Object.fromEntries(vals.map(v => [v, T(String(v))]));
+    return o;
 }
 
 function build(node, key, specs) {
@@ -65,7 +68,7 @@ function build(node, key, specs) {
     keepWheel(root);
     const ctl = [];
     for (const n of main) {
-        const lb = label(key, n), o = opts(n, specs[n]);
+        const lb = label(key, n), o = opts(node, n, specs[n]);
         const c = control(node, n, specs[n], lb, o);
         if (o.seg) {                       // сегмент без підпису не читається - підпис ліворуч, як у полів
             const r = el("div", "svk-field"); r.title = c.row.title;
@@ -74,7 +77,7 @@ function build(node, key, specs) {
         ctl.push(c);
     }
     const rest = names.filter(n => !main.includes(n));
-    const more = rest.length ? morePanel(node, specs, rest.map(n => [n, label(key, n), COLOR_FIELDS.has(n) ? { color: true } : {}])) : null;
+    const more = rest.length ? morePanel(node, specs, rest.map(n => { const { seg, ...o } = opts(node, n, specs[n]); return [n, label(key, n), o]; })) : null;
     if (more) root.append(more);
     scrollHint(root);
     root.sync = () => { ctl.forEach(c => c.sync()); more?.sync(); };
@@ -101,6 +104,8 @@ app.registerExtension({
             this.__svkCard = root;
             this.addDOMWidget("svk_card", "svk_card", root, { serialize: false, hideOnZoom: false, getMinHeight: () => minH });
             hideRepresented(this, specs);
+            const changed = this.onWidgetChanged;     // віджет змінили не з картки (скидання, пресет у Depth Grade View) -> оновити картку
+            this.onWidgetChanged = function () { const r = changed?.apply(this, arguments); root.sync(); return r; };
             const sz = this.computeSize();
             this.setSize([Math.max(START_W, sz[0]), sz[1]]);
             fitToNode(this, root);

@@ -54,7 +54,7 @@ function loadAll(list) {
 
 function makeSelect(opts, title, onChange) {
     const s = document.createElement("select");
-    s.className = "svk-sel";
+    s.className = "dg-sel";
     s.title = title;
     for (const [v, t] of opts) {
         const o = document.createElement("option");
@@ -136,19 +136,19 @@ class VideoPanel {
 
         // ── рядок 1: перемикач режимів, Пуск/Пауза і лічильник; До/після, розмір, фрагмент праворуч
         const r1 = h("div");
-        r1.className = "svk-row";
+        r1.className = "dg-row";
         this.modeStill = btn(T("Still"), T("One frame: the tone is computed instantly in the browser, no request per slider"),
             () => this.setMode("still"));
         this.modePlay = btn(T("Playback"), T("The server computes a clip fragment: Play/Pause, speed = node fps"),
             () => this.setMode("play"));
         const modeSeg = h("div");
-        modeSeg.className = "svk-seg";
+        modeSeg.className = "dg-seg";
         modeSeg.append(this.modeStill, this.modePlay);
         this.playBtn = icon("play", PLAY_TITLE, () => this.togglePlay());
         this.counter = h("span");
-        this.counter.className = "svk-num";
+        this.counter.className = "dg-num";
         const end = h("div");
-        end.className = "svk-end";
+        end.className = "dg-end";
         this.cmp = icon("split", T("Before / after: the left part is the input without the grade; the line can be dragged"), () => this.toggleCompare());
         this.sizeSel = makeSelect(SIZES.map((s) => [String(s), `${s} px`]), T("Preview size (long side)"),
             (v) => { this.setProp("svkPreviewSize", +v); this.queue(); });
@@ -217,7 +217,7 @@ class VideoPanel {
         // ── статус: смужка обчислення, рядок стану, підказка
         this.status = h("div", `flex:none;min-height:${STATUS_H}px;display:flex;flex-direction:column;gap:3px;box-sizing:border-box`);
         this.busyEl = h("div");
-        this.busyEl.className = "svk-busy";
+        this.busyEl.className = "dg-busy";
         this.busyEl.append(h("i"));
         this.statusLine = h("div", `font:10px ${MONO};color:${C.dim};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-height:12px`);
         this.hintLine = h("div", `font:10px system-ui,sans-serif;color:${C.dim};line-height:1.35;display:none`, HINT);
@@ -844,8 +844,8 @@ class VideoPanel {
         this.trackWrap.style.display = has && this.meta.total ? "block" : "none";
 
         // режим, кнопки і селектори
-        this.modeStill.classList.toggle("svk-on", still);
-        this.modePlay.classList.toggle("svk-on", !still);
+        this.modeStill.classList.toggle("dg-on", still);
+        this.modePlay.classList.toggle("dg-on", !still);
         this.playBtn.style.display = still ? "none" : "";
         this.fragSel.style.display = still ? "none" : "";
         const playState = this.playing ? "pause" : "play";
@@ -857,8 +857,8 @@ class VideoPanel {
         this.playBtn.disabled = n < 2;
         this.cmp.disabled = !has;
         this.curveBtn.style.display = still ? "" : "none";
-        this.curveBtn.classList.toggle("svk-on", still && this.showCurve);
-        this.cmp.classList.toggle("svk-on", this.compare && has);
+        this.curveBtn.classList.toggle("dg-on", still && this.showCurve);
+        this.cmp.classList.toggle("dg-on", this.compare && has);
         if (this.sizeSel.value !== String(this.size())) this.sizeSel.value = String(this.size());
         if (this.fragSel.value !== String(this.count())) this.fragSel.value = String(this.count());
         if (!has) setText(this.counter, "");
