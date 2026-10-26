@@ -31,7 +31,7 @@ class SVKCameraRealism:
                 # svk_profiles - значення профілів для картки: вибір плитки заповнює повзунки
                 "profile": (P.PROFILE_NAMES, {"default": P.DEFAULT_PROFILE, "tooltip": _TIP["profile"],
                                               "svk_profiles": {n: P.profile_values(n) for n in P.PROFILES}}),
-                "strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": _TIP["strength"]}),
+                "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": _TIP["strength"]}),
                 "seed": ("INT", {"default": 1, "min": 0, "max": 0xFFFFFFFF, "control_after_generate": False,
                                  "tooltip": _TIP["seed"]}),
             },

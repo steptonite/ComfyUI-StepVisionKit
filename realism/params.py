@@ -147,7 +147,7 @@ NEUTRAL.update({"iso": 800, "noise_size": 0.25, "isp_sharpen_radius": 1.2, "shak
                 "og_size": 1.2, "og_clump": 0.35, "og_softness": 0.3, "og_colour": 0.25, "og_blue": 1.4,
                 "og_shadows": 1.0, "og_mids": 1.0, "og_highlights": 0.4, "og_animate": 1.0, "og_replace": 0})
 
-# значення профілів при майстер-силі 1. «Сила» 0.5 (типова) дає рівно половину кожної сили.
+# значення профілів при майстер-силі 1. «Сила» 1 (типова) - рівно профіль, 0.5 - половина кожної сили.
 PROFILES = {
     # ARRI Alexa 35: дрібний luma-шум, мʼяке плече світлих, теплувата шкіра, без шарпу; затвор 180°
     "ARRI Alexa 35": dict(iso=800, noise_luma=0.35, noise_chroma=0.03, noise_size=0.15, fixed_pattern=0.02,
