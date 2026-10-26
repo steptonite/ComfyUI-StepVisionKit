@@ -1,4 +1,4 @@
-"""Camera Realism v1: програмний «реалізм камери» на numpy (+ cv2 для блюру/ремапу). Без torch, без GPU.
+"""Camera Realism v2: програмний «реалізм камери» на numpy (+ cv2 для блюру/ремапу). Без torch, без GPU.
 
 apply_realism(frames, depth, params, seed, frame_offset):
   frames float32 (B,H,W,3) 0..1 (кодовані значення, як у Comfy IMAGE); depth (B|1,H,W) 0..1, світле = близько, або None;
@@ -9,12 +9,16 @@ apply_realism(frames, depth, params, seed, frame_offset):
 Порядок у кадрі (фізичний, від сцени до файлу камери):
   глибина (серпанок, мікродеталь) -> оптика (вуаль, мʼякі кути, віньєтка, геометрія: дисторсія/хроматика/тремтіння/rolling shutter)
   -> мерехтіння експозиції -> сенсор (шум, фікс. патерн) -> байєр -> ISP (шумодав, шарп, блоки).
+v2 (signatures.py): глибина -> портретне боке -> моушн-блюр -> оптика -> привид-флер -> геометрія (+ gate weave) -> мерехтіння
+  -> halation, зерно плівки -> сенсор, плями кольору -> байєр -> пропуск рядків -> ISP -> акварель, Smart HDR, Deep Fusion
+  -> крива світла і колір -> смуги 8 біт -> блоки -> пил.
 """
 import math
 
 import cv2
 import numpy as np
 
+from . import signatures as S
 from .params import NEUTRAL
 
 LUMA = np.array([0.299, 0.587, 0.114], np.float32)
@@ -23,10 +27,12 @@ _TAU = 2.0 * math.pi
 
 # групи -> ключі-сили, що її вмикають
 _SENSOR = ("noise_luma", "noise_chroma", "fixed_pattern")
-_ISP = ("isp_denoise", "isp_sharpen", "isp_blocks")
+_ISP = ("isp_denoise", "isp_sharpen")
 _OPTICS = ("vignette", "distortion", "chroma_ab", "corner_softness", "veil")
 _DEPTH = ("depth_haze", "depth_detail")
-_VIDEO = ("shake", "flicker")      # rolling_shutter сам по собі нічого не робить: швидкість береться з тремтіння
+_VIDEO = ("shake", "flicker", "gate_weave", "motion_blur")
+_TONE = ("highlight_rolloff", "highlight_clip", "blacks", "warmth", "saturation", "skin_hue")
+_PHONE = ("smart_hdr", "deep_fusion", "shadow_smear")      # rolling_shutter сам по собі нічого не робить: швидкість береться з тремтіння
 
 
 def _on(p, *keys):
@@ -297,8 +303,6 @@ def _isp(f, p):
         y = _luma(f)
         dy = y - cv2.GaussianBlur(y, (0, 0), max(0.4, p["isp_sharpen_radius"]))
         f = f + (2.0 * p["isp_sharpen"] * dy)[..., None]
-    if p["isp_blocks"] > 1e-6:
-        f = _blocks(f, p["isp_blocks"])
     return f
 
 
@@ -313,26 +317,35 @@ def apply_realism(frames, depth, params, seed=0, frame_offset=0):
     multi = B > 1 or int(frame_offset) > 0
 
     do_depth = have_depth and _on(p, *_DEPTH)
+    do_bokeh = have_depth and p["portrait_bokeh"] > 1e-6
     do_optics = _on(p, *_OPTICS)
-    do_video = multi and _on(p, *_VIDEO)
     do_shake = multi and p["shake"] > 1e-6
+    do_weave = multi and p["gate_weave"] > 1e-6
     do_flicker = multi and p["flicker"] > 1e-6
+    do_mblur = B > 1 and p["motion_blur"] > 1e-6               # потрібні сусідні кадри цього ж батча
+    do_video = do_shake or do_weave or do_flicker or do_mblur
     do_sensor = _on(p, *_SENSOR)
     do_bayer = p["bayer_amount"] > 1e-6
     do_isp = _on(p, *_ISP)
-    do_geo = _on(p, "distortion", "chroma_ab") or do_shake
-    if not (do_depth or do_optics or do_video or do_sensor or do_bayer or do_isp):
+    do_phone = _on(p, *_PHONE)
+    do_tone = _on(p, *_TONE)
+    do_sig = _on(p, "halation", "film_grain", "dust", "ghost_flare", "line_skip", "chroma_blotch", "banding", "isp_blocks")
+    do_geo = _on(p, "distortion", "chroma_ab") or do_shake or do_weave
+    if not (do_depth or do_bokeh or do_optics or do_video or do_sensor or do_bayer or do_isp or do_phone or do_tone or do_sig):
         return frames
 
+    amp = rot_amp = 0.0
+    zoom, speed = 1.0, p["shake_speed"]
     if do_shake:
         amp = p["shake"] * 0.003 * max(H, W)                     # std зсуву, px
         rot_amp = math.radians(0.25 * p["shake"])                # std повороту
-        margin = 2.2 * amp + 2.2 * rot_amp * 0.5 * max(H, W)
+    wv = p["gate_weave"] * 0.0011 * max(H, W) if do_weave else 0.0
+    if do_shake or do_weave:
+        margin = 2.2 * (amp + 1.4 * wv) + 2.2 * rot_amp * 0.5 * max(H, W)
         zoom = 1.0 + 2.0 * margin / min(H, W)                    # постійний кроп: краї не показують відзеркалення
-        speed = p["shake_speed"]
 
     dep = None
-    if do_depth:
+    if do_depth or do_bokeh:
         dep = np.asarray(depth, dtype=np.float32)
         if dep.ndim == 2:
             dep = dep[None]
@@ -341,37 +354,75 @@ def apply_realism(frames, depth, params, seed=0, frame_offset=0):
     for i in range(B):
         fi = int(frame_offset) + i
         f = frames[i].copy()
-        if do_depth:
+        if dep is not None:
             d = dep[min(i, dep.shape[0] - 1)]
             if d.shape != (H, W):
                 d = cv2.resize(d, (W, H), interpolation=cv2.INTER_LINEAR)
-            f = _depth_group(f, np.clip(d, 0.0, 1.0), p)
+            d = np.clip(d, 0.0, 1.0)
+            if do_depth:
+                f = _depth_group(f, d, p)
+            if do_bokeh:
+                f = S.portrait_bokeh(f, d, p["portrait_bokeh"])
+        if do_mblur:
+            vel = S.flow_velocity(frames, i)
+            if vel is not None:
+                f = S.motion_blur(f, vel, min(p["motion_blur"], 1.0))
         if do_optics:
             f = _optics_pre(f, p)
+        if p["ghost_flare"] > 1e-6:
+            f = S.ghost_flare(f, p["ghost_flare"])
         if do_geo:
             tx = ty = rot = rs_row = None
             z = 1.0
-            if do_shake:
-                tx = amp * _wobble(seed, 0, fi, speed)
-                ty = 0.7 * amp * _wobble(seed, 1, fi, speed)
-                rot = rot_amp * _wobble(seed, 2, fi, speed)
+            if do_shake or do_weave:
+                tx = ty = rot = 0.0
                 z = zoom
-                if p["rolling_shutter"] > 1e-6:                   # швидкість тремтіння -> зсув рядків від верху до низу кадру
-                    vx = tx - amp * _wobble(seed, 0, fi - 1, speed)
-                    rows = (np.arange(H, dtype=np.float32) / max(H - 1, 1) - 0.5)
-                    rs_row = (1.5 * p["rolling_shutter"] * vx) * rows
+                if do_shake:
+                    tx = amp * _wobble(seed, 0, fi, speed)
+                    ty = 0.7 * amp * _wobble(seed, 1, fi, speed)
+                    rot = rot_amp * _wobble(seed, 2, fi, speed)
+                    if p["rolling_shutter"] > 1e-6:               # швидкість тремтіння -> зсув рядків від верху до низу кадру
+                        vx = tx - amp * _wobble(seed, 0, fi - 1, speed)
+                        rows = (np.arange(H, dtype=np.float32) / max(H - 1, 1) - 0.5)
+                        rs_row = (1.5 * p["rolling_shutter"] * vx) * rows
+                if do_weave:                                      # плівка в каналі: стрибок щокадру, переважно по вертикалі
+                    rw = np.random.default_rng([seed & 0xFFFFFFFF, 7300, fi])
+                    tx += wv * (0.5 * _wobble(seed, 4, fi, 3.0) + 0.5 * float(rw.standard_normal()))
+                    ty += 1.4 * wv * (0.4 * _wobble(seed, 5, fi, 3.0) + 0.6 * float(rw.standard_normal()))
             f = _geometry(f, p, tx, ty, rot, rs_row, z)
         if do_flicker:
             rg = np.random.default_rng([seed & 0xFFFFFFFF, 7100, fi])
             g = 0.5 * _wobble(seed, 3, fi, 2.0) + 0.5 * float(rg.standard_normal())
             f = f * (1.0 + 0.06 * p["flicker"] * g)
+        if p["halation"] > 1e-6:
+            f = S.halation(f, p["halation"])
+        if p["film_grain"] > 1e-6:
+            f = S.film_grain(f, p["film_grain"], np.random.default_rng([seed & 0xFFFFFFFF, 6001, fi]))
         if do_sensor:
             rng = np.random.default_rng([seed & 0xFFFFFFFF, 5001, fi])
             f = _sensor(f, p, rng, seed)
+        if p["chroma_blotch"] > 1e-6:
+            f = S.chroma_blotch(f, p["chroma_blotch"], np.random.default_rng([seed & 0xFFFFFFFF, 6101, fi]))
         if do_bayer:
             f = _bayer(f, p["bayer_amount"])
+        if p["line_skip"] > 1e-6:
+            f = S.line_skip(f, p["line_skip"])
         if do_isp:
             f = _isp(f, p)
+        if p["shadow_smear"] > 1e-6:
+            f = S.shadow_smear(f, p["shadow_smear"])
+        if p["smart_hdr"] > 1e-6:
+            f = S.smart_hdr(f, p["smart_hdr"])
+        if p["deep_fusion"] > 1e-6:
+            f = S.deep_fusion(f, p["deep_fusion"])
+        if do_tone:
+            f = S.tone_colour(f, p)
+        if p["banding"] > 1e-6:
+            f = S.banding(np.clip(f, 0.0, 1.0), p["banding"])
+        if p["isp_blocks"] > 1e-6:
+            f = _blocks(np.clip(f, 0.0, 1.0), p["isp_blocks"])
+        if p["dust"] > 1e-6:
+            f = S.dust(np.clip(f, 0.0, 1.0), p["dust"], seed, fi)
         np.clip(f, 0.0, 1.0, out=f)
         out[i] = f
     return out

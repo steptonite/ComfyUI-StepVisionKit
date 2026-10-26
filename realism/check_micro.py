@@ -95,6 +95,25 @@ check("(г) глибина іншого розміру ресайзиться", 
 one = apply_realism(frames[:1], None, run(shake=1.0, flicker=1.0), seed=1)
 check("одиночний кадр: тремтіння/мерехтіння пропущені", np.array_equal(one, frames[:1]))
 
+# v2: підписи пристроїв і ядро - кожен окремо
+for k, v in [("highlight_rolloff", 1.0), ("highlight_clip", 1.0), ("blacks", 1.0), ("blacks", -1.0), ("warmth", 1.0),
+             ("saturation", -1.0), ("skin_hue", 1.0), ("film_grain", 1.0), ("halation", 1.0), ("gate_weave", 1.0),
+             ("dust", 1.0), ("smart_hdr", 1.0), ("deep_fusion", 1.0), ("shadow_smear", 1.0), ("portrait_bokeh", 1.0),
+             ("ghost_flare", 1.0), ("line_skip", 1.0), ("chroma_blotch", 1.0), ("banding", 1.0), ("motion_blur", 1.0)]:
+    fr = frames
+    if k == "motion_blur":                         # потрібен рух між кадрами
+        fr = np.stack([np.roll(frames[0], 4 * j, axis=1) for j in range(B)])
+    if k == "ghost_flare":                         # потрібні яскраві точки
+        fr = fr.copy(); fr[:, 20:26, 30:36] = 1.0
+    o = apply_realism(fr, depth, run(**{k: v}), seed=3)
+    check("(v2) %s=%+.0f: без NaN, в 0..1, змінює" % (k, v),
+          bool(np.isfinite(o).all()) and o.min() >= 0 and o.max() <= 1 and float(np.abs(o - fr).mean()) > 1e-4,
+          "mean|Δ|=%.4f" % float(np.abs(o - fr).mean()))
+o = apply_realism(frames[:1], depth[:1], run(motion_blur=1.0, gate_weave=1.0), seed=3)
+check("(v2) один кадр: моушн-блюр і gate weave пропущені", np.array_equal(o, frames[:1]))
+o = apply_realism(frames, None, run(portrait_bokeh=1.0), seed=3)
+check("(v2) портретне боке без глибини пропускається", np.array_equal(o, frames))
+
 # профілі
 for name in P.PROFILES:
     t = time.time()
@@ -105,7 +124,7 @@ for name in P.PROFILES:
 c = P.resolve("Custom", 1.0, {"noise_luma": 0.4, "iso": 3200})
 check("Custom бере значення повзунків", c["noise_luma"] == 0.4 and c["iso"] == 3200 and c["vignette"] == P.WIDGET_DEFAULTS["vignette"])
 h = P.resolve("iPhone", 0.5)
-check("майстер-сила множить сили, не iso/радіус", abs(h["isp_sharpen"] - 0.3) < 1e-9 and h["iso"] == 640 and h["isp_sharpen_radius"] == 1.6)
+check("майстер-сила множить сили, не iso/радіус", abs(h["isp_sharpen"] - 0.2) < 1e-9 and h["iso"] == 640 and h["isp_sharpen_radius"] == 1.4 and abs(h["blacks"] + 0.125) < 1e-9)
 
 print("\nРЕЗУЛЬТАТ:", "усе ок" if not fails else "ПРОВАЛИ: " + "; ".join(fails))
 sys.exit(1 if fails else 0)

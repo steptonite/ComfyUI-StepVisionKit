@@ -29,8 +29,14 @@ const MORE = [
     [T("Optics"), [["vignette", T("Vignette")], ["distortion", T("Distortion")], ["chroma_ab", T("Colour fringes")],
                    ["corner_softness", T("Soft corners")], ["veil", T("Veiling glare")]]],
     [T("Depth"), [["depth_haze", T("Aerial haze")], ["depth_detail", T("Near detail")]]],
+    [T("Tone & colour"), [["highlight_rolloff", T("Highlight rolloff")], ["highlight_clip", T("Highlight clip")], ["blacks", T("Blacks")],
+                          ["warmth", T("Warmth")], ["saturation", T("Saturation")], ["skin_hue", T("Skin hue")]]],
+    [T("Film"), [["film_grain", T("Film grain")], ["halation", T("Halation")], ["gate_weave", T("Gate weave")], ["dust", T("Dust & scratches")]]],
+    [T("Phone"), [["smart_hdr", "Smart HDR"], ["deep_fusion", "Deep Fusion"], ["shadow_smear", T("Shadow smear")],
+                  ["portrait_bokeh", T("Portrait bokeh")], ["ghost_flare", T("Ghost flare")]]],
+    [T("Old video"), [["line_skip", T("Line skipping")], ["chroma_blotch", T("Colour blotches")], ["banding", T("Banding")]]],
     [T("Video"), [["shake", T("Hand shake")], ["shake_speed", T("Shake tempo")], ["flicker", T("Exposure flicker")],
-                  ["rolling_shutter", T("Rolling shutter")], ["frame_offset", T("First frame number")]]],
+                  ["rolling_shutter", T("Rolling shutter")], ["motion_blur", T("Motion blur")], ["frame_offset", T("First frame number")]]],
 ];
 const PROFILE_LABEL = { "ARRI Alexa 35": "ARRI Alexa 35", "Cinema digital": T("Cinema digital"), "Mirrorless": T("Mirrorless"),
                         "iPhone": "iPhone", "DSLR 2012": "DSLR 2012", "16mm film": T("16mm film"), "Custom": T("Custom") };
