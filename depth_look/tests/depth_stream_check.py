@@ -108,8 +108,9 @@ def child(a):
         else:
             S = imp.import_module("svk.depth_look.depth_stream")
             sm = "bilinear" if a.child == "broken" else "area"
-            dep, n, info = S.SVKVideoDepthStream().run(model, "", 0, a.frames, 0.5, 518, True, True, a.ram_gb, path=a.video,
-                                                       scale_method=sm, cache_folder=a.cache)
+            b = int(a.child[5:]) if a.child.startswith("batch") else 1
+            dep, n, info = S.SVKVideoDepthStream().run(model, "", 0, a.frames, 0.5, 518, True, True, batch=b, ram_budget_gb=a.ram_gb,
+                                                       path=a.video, scale_method=sm, cache_folder=a.cache)
             print(info)
         secs = time.time() - t1
         out = np.lib.format.open_memmap(a.out, mode="w+", dtype=np.float32, shape=tuple(dep.shape[:3]))
@@ -144,7 +145,7 @@ def _maxdiff(p, q):
 
 def run(variant, a):
     out = os.path.join(a.work, f"{variant}.npy")
-    cache = os.path.join(a.work, "cache_broken" if variant == "broken" else "cache")
+    cache = os.path.join(a.work, "cache" if variant in ("new", "cache") else "cache_" + variant)
     cmd = [sys.executable, os.path.abspath(__file__), "--child", variant, "--video", a.video, "--frames", str(a.frames),
            "--out", out, "--cache", cache, "--work", a.work, "--dtype", a.dtype, "--ram-gb", str(a.ram_gb)]
     t = time.time()
@@ -152,6 +153,8 @@ def run(variant, a):
     sys.stdout.write(p.stdout[-3000:])
     if p.returncode:
         sys.stdout.write(p.stderr[-3000:])
+        if variant.startswith("batch"):                       # пачка може не влізти у VRAM - це результат заміру, не збій тесту
+            return {"variant": variant, "failed": "rc=%d %s" % (p.returncode, p.stderr.strip().splitlines()[-1][:200] if p.stderr.strip() else "")}
         raise SystemExit(f"{variant}: child failed rc={p.returncode}")
     r = json.loads([l for l in p.stdout.splitlines() if l.startswith("RESULT ")][-1][7:])
     r["wall_s"] = round(time.time() - t, 1)
@@ -171,6 +174,8 @@ def main():
     ap.add_argument("--slow", type=float, default=0.10)
     ap.add_argument("--dtype", default="fp16", help="weight_dtype для Load DA3 (fp16 / bf16 / fp32)")
     ap.add_argument("--ram-gb", type=float, default=0.0, help="ram_budget_gb ноди: 0 = вихід на диск (замір RAM), >0 = у RAM, якщо влазить")
+    ap.add_argument("--batches", default="", help="пачки DA3 для заміру, напр. 4,8 (кожна - окремий процес)")
+    ap.add_argument("--batch-tol", type=float, default=1e-3, help="допуск для пачки >1: різниця лише від округлення GPU")
     ap.add_argument("--child")
     ap.add_argument("--out")
     ap.add_argument("--cache")
@@ -179,12 +184,12 @@ def main():
     if a.child:
         return child(a)
     os.makedirs(a.work, exist_ok=True)
-    for d in ("cache", "cache_broken"):
+    want = a.only.split(",") + ["batch%d" % int(b) for b in a.batches.split(",") if b.strip()]
+    for d in ["cache"] + ["cache_" + v for v in want]:
         shutil.rmtree(os.path.join(a.work, d), ignore_errors=True)
-    want = a.only.split(",")
     res, checks = {}, []
-    for v in ("ref", "new", "cache", "broken"):
-        if v in want:
+    for v in [v for v in ("ref", "new", "cache", "broken") if v in want] + [v for v in want if v.startswith("batch")]:
+        if True:
             res[v] = run(v, a)
             print(f"[{v}] " + json.dumps(res[v]))
     if "new" in res:
@@ -199,6 +204,16 @@ def main():
     if "ref" in res and "broken" in res:
         d = _maxdiff(res["ref"]["out"], res["broken"]["out"])
         checks.append(("broken copy is caught (diff > tol)", d > a.tol, d))
+    for v in [v for v in res if v.startswith("batch")]:          # пачка: швидкість і відхилення від ref (лише округлення GPU)
+        if "failed" in res[v]:
+            checks.append(("%s: did not run (info)" % v, True, res[v]["failed"]))
+            continue
+        base = res.get("new") or res.get("ref")
+        d = _maxdiff(res["ref"]["out"], res[v]["out"]) if "ref" in res else float("nan")
+        checks.append(("%s: max|ref-new| <= %g" % (v, a.batch_tol), d <= a.batch_tol, d))
+        if base:
+            checks.append(("%s: speed vs %s (info)" % (v, "new" if "new" in res else "ref"), True,
+                           "%.2f s vs %.2f s = x%.2f" % (res[v]["secs"], base["secs"], base["secs"] / max(res[v]["secs"], 1e-9))))
     if "cache" in res and "new" in res:
         checks.append(("cache rerun < %.0f s" % a.cache_s, res["cache"]["secs"] < a.cache_s, res["cache"]["secs"]))
         same = _sha(res["cache"]["out"]) == _sha(res["new"]["out"])
