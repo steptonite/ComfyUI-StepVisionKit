@@ -754,9 +754,18 @@ function videoDirty(V) {
     if (canAuto(V)) V.autoT = setTimeout(() => { V.autoT = null; tryAuto(V); }, AUTO_DELAY);
     paintStale(V);
 }
-function tryAuto(V) {
-    if (!isStale(V) || !canAuto(V) || V.autoT || V.waiting) return;
+async function tryAuto(V) {
+    if (!isStale(V) || !canAuto(V) || V.autoT || V.waiting || V.autoAsk) return;
     if (QUEUE_LEFT > 0) { paintStale(V); return; }          // повернемось на події status, коли черга спорожніє
+    // лічильник з подій status може запізнюватись (фінал щойно поставили кнопкою чи з іншої вкладки) - питаємо чергу в сервера
+    V.autoAsk = true;
+    try {
+        const left = (await (await fetch(api.apiURL("/prompt"))).json())?.exec_info?.queue_remaining;
+        if (typeof left === "number") QUEUE_LEFT = left;
+    } catch (_) {}
+    V.autoAsk = false;
+    if (QUEUE_LEFT > 0) { paintStale(V); return; }
+    if (!isStale(V) || !canAuto(V) || V.autoT || V.waiting) return;
     runVideo(V.node);
 }
 function paintStale(V) {
