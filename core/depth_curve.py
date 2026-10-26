@@ -95,7 +95,7 @@ class LexDepthCurve:
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("depth", "depth_mask", "info")
     FUNCTION = "curve"
-    CATEGORY = "Lex/bridge"
+    CATEGORY = "StepVisionKit"
 
     def curve(self, depth, source, mode, near_bias, black_point, white_point, gamma,
               clarity, detail, clip_low, clip_high, invert, deband=0.0, deband_edge=0.06,

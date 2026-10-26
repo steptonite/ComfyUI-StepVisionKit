@@ -1,4 +1,4 @@
-"""Lex Bridge — дрібні перехідники між детекторами й SAM2/HUD на ComfyUI (Mac/MPS).
+"""StepVisionKit core — дрібні перехідники між детекторами й SAM2/HUD на ComfyUI (Mac/MPS).
 
 Нащо: у ComfyUI три різні "типи боксів", які між собою не стикуються —
   BOUNDING_BOX  (ядро ComfyUI, RTDETR/MediaPipe): список-на-кадр зі словників {x,y,width,height,label,score}
@@ -40,7 +40,7 @@ class LexBoxesToBBOX:
     RETURN_TYPES = ("BBOX", "STRING")
     RETURN_NAMES = ("bboxes", "info")
     FUNCTION = "convert"
-    CATEGORY = "Lex/bridge"
+    CATEGORY = "StepVisionKit"
 
     def convert(self, boxes, mode, index, pad, format_in, on_miss="previous", image=None):
         h = int(image.shape[1]) if image is not None else 0
@@ -88,7 +88,7 @@ class LexHUDBoxes:
 
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "draw"
-    CATEGORY = "Lex/bridge"
+    CATEGORY = "StepVisionKit"
 
     def draw(self, images, boxes, style, thickness, corner_len, color, show_label, format_in):
         import cv2
@@ -175,7 +175,7 @@ class LexYOLODetect:
     RETURN_TYPES = ("BOUNDING_BOX", "BBOX", "IMAGE", "STRING")
     RETURN_NAMES = ("bounding_box", "bbox_for_sam2", "preview", "info")
     FUNCTION = "detect"
-    CATEGORY = "Lex/bridge"
+    CATEGORY = "StepVisionKit"
 
     def detect(self, images, model_name, device, conf, imgsz, class_filter, max_boxes,
                on_miss="previous", make_preview=False, track=True, smooth=0.0,

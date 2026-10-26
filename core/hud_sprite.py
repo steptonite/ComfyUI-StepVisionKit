@@ -185,7 +185,7 @@ class LexHUDSprite:
     RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "MASK", "MASK", "STRING")
     RETURN_NAMES = ("composite", "composite_alpha", "hud_rgb", "hud_alpha", "box_mask", "info")
     FUNCTION = "run"
-    CATEGORY = "Lex/bridge"
+    CATEGORY = "StepVisionKit"
 
     def run(self, boxes, mode, index, margin_pct, margin_px, aspect, min_width, min_height,
             offset_x, offset_y, smooth, nine_slice, hole, hole_feather, alpha_mode,

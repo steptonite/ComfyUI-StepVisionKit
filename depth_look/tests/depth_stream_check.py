@@ -97,7 +97,7 @@ def child(a):
         if a.child == "ref":
             import nodes
             V = imp.import_module("svk.media.video")
-            R = imp.import_module("svk.lex.depth_raw")
+            R = imp.import_module("svk.core.depth_raw")
             img = V.SVKLoadVideoPro().load("", 0, a.frames, "as encoded", path=a.video)[0]
             half = nodes.ImageScaleBy().upscale(img, "area", 0.5)[0]
             del img

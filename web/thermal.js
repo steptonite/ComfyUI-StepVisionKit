@@ -1,5 +1,5 @@
 // Термо-сторож: плашка температури SoC у куті ComfyUI, налаштування (Settings → StepVisionKit →
-// Термо-сторож) і тост після заморозки. Сервер — lex/thermal_guard.py: маршрути /svk/thermal/*
+// Термо-сторож) і тост після заморозки. Сервер — core/thermal_guard.py: маршрути /svk/thermal/*
 // і подія svk.thermal (cooling / ok / was_frozen). Джерело істини — thermal_config.json на сервері;
 // UI лише показує його й пересилає зміни.
 import { app } from "../../scripts/app.js";
