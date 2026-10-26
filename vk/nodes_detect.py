@@ -2,7 +2,8 @@
 
 import numpy as np
 
-from .boxes import (ON_MISSING, SORT_BY, fill_missing, sort_frame, to_bbox, to_core)
+from .boxes import (ON_MISSING, SORT_BY, fill_missing, preview_frames, preview_payload, sort_frame,
+                    to_bbox, to_core)
 
 
 class VKDetect:
@@ -29,6 +30,7 @@ class VKDetect:
                 "sort_by": (SORT_BY, {"default": "area", "tooltip": "What decides the #index order. On video, area re-shuffles the order whenever objects change size — use a track id to follow one object instead."}),
                 "on_missing": (ON_MISSING, {"default": "previous", "tooltip": "Frames with no detection. SAM2 crashes on an empty frame, so keep 'previous' when feeding it."}),
             },
+            "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
     RETURN_TYPES = ("BOUNDING_BOX", "BBOX", "INT", "STRING")
@@ -38,7 +40,7 @@ class VKDetect:
     DESCRIPTION = "Find objects in every frame. Feed the boxes to Draw Boxes, Overlay On Boxes, Select Box or SAM2."
 
     def detect(self, images, model_name, device, confidence, image_size, classes,
-               max_objects, track, sort_by, on_missing):
+               max_objects, track, sort_by, on_missing, unique_id=None):
         import os
 
         import folder_paths
@@ -65,6 +67,7 @@ class VKDetect:
         wanted = [s.strip().lower() for s in classes.split(",") if s.strip()]
         H, W = int(images.shape[1]), int(images.shape[2])
         frames, seen, ids = [], 0, set()
+        shots, shot_at = [], preview_frames(images.shape[0])
 
         for i in range(images.shape[0]):
             frame = (images[i].cpu().numpy() * 255).astype(np.uint8)[:, :, ::-1]
@@ -81,10 +84,12 @@ class VKDetect:
             tids = (r.boxes.id.cpu().numpy().astype(int).tolist()
                     if getattr(r.boxes, "id", None) is not None else [-1] * len(names))
 
-            f = [{"x1": float(bx[0]), "y1": float(bx[1]), "x2": float(bx[2]), "y2": float(bx[3]),
-                  "label": nm, "score": float(sc), "id": int(tid)}
-                 for bx, nm, sc, tid in zip(xyxy, names, scores, tids)
-                 if not wanted or nm.lower() in wanted]
+            raw = [{"x1": float(bx[0]), "y1": float(bx[1]), "x2": float(bx[2]), "y2": float(bx[3]),
+                    "label": nm, "score": float(sc), "id": int(tid)}
+                   for bx, nm, sc, tid in zip(xyxy, names, scores, tids)]
+            if i in shot_at:
+                shots.append((i, np.ascontiguousarray(frame[:, :, ::-1]), raw))
+            f = [b for b in raw if not wanted or b["label"].lower() in wanted]
 
             f = sort_frame(f, sort_by)[:max_objects]
             ids.update(b["id"] for b in f if b["id"] >= 0)
@@ -99,7 +104,8 @@ class VKDetect:
                 f"{per} box(es)/frame for SAM2 · "
                 f"track ids: {sorted(ids) if ids else 'off'} · classes: {', '.join(labels) or '-'}")
         print(f"[VKDetect] {info}")
-        return (to_core(frames), bbox, len(ids) or per, info)
+        return {"ui": {"svk_yolo": [preview_payload(shots, W, H, confidence, unique_id)]},
+                "result": (to_core(frames), bbox, len(ids) or per, info)}
 
 
 NODES = {"VKDetect": VKDetect}

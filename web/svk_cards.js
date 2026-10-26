@@ -3,7 +3,9 @@
 // самі йдуть під «ще», тож новий вхід у Python не губиться. Імена й значення віджетів не міняються: старі workflow відкриваються як були.
 import { app } from "../../scripts/app.js";
 import { el, W, control, morePanel, keepWheel, fitToNode, scrollHint, hideWidget } from "./svk_ui.js";
+import { api } from "../../scripts/api.js";
 import { T, LANG, DICT } from "./svk_i18n.js";
+import { yoloPreview, PREVIEW_H } from "./yolo_preview.js";
 
 const CSS_URL = new URL("./svk_ui.css", import.meta.url).href;
 const NODE_COLOR = "#2a2a2f", NODE_BG = "#151518";      // = --svk-line / --svk-card
@@ -38,6 +40,8 @@ const MAIN = {
     SVKRawDepthSave: null,           // null - усі віджети на видноті (їх ≤3)
     SVKDepthReceiver: null,
 };
+// превʼю над керуваннями: кадр із боксами останнього Run
+const PREVIEW = { LexYOLODetect: yoloPreview, VKDetect: yoloPreview };
 // лише колір ноди: власний UI або превʼю картинок під віджетами, картку поверх них не ставимо; Live - стара, лишається як була
 const COLOR_ONLY = ["SVKSaveImageHDR", "SVKSaveDepth16", "SVKRawDepthLoad", "SVKDepthGradeLive", "SVKDepthGradeView", "SVKDepthGradeVideoView"];
 const COLOR_FIELDS = new Set(["color", "tint", "key_color"]);
@@ -55,7 +59,7 @@ function label(key, name) {
 // onChange: власний callback віджета, як при зміні нативного (Depth Grade на ньому перемальовує View)
 function opts(node, name, spec) {
     const vals = Array.isArray(spec?.[0]) ? spec[0] : null;
-    const o = { onChange: v => W(node, name)?.callback?.(v, app.canvas, node) };
+    const o = { onChange: v => { W(node, name)?.callback?.(v, app.canvas, node); node.__svkPreview?.draw(); } };
     if (COLOR_FIELDS.has(name)) o.color = true;
     else if (vals && vals.length <= 3 && vals.every(v => String(v).length <= 12)) o.seg = Object.fromEntries(vals.map(v => [v, T(String(v))]));
     return o;
@@ -66,6 +70,8 @@ function build(node, key, specs) {
     const main = (MAIN[key] || names).filter(n => names.includes(n));
     const root = el("div", "svk-card svk-scroll");
     keepWheel(root);
+    const prev = PREVIEW[key]?.(node, key);
+    if (prev) { node.__svkPreview = prev; root.append(prev.root); }
     const ctl = [];
     for (const n of main) {
         const lb = label(key, n), o = opts(node, n, specs[n]);
@@ -80,8 +86,8 @@ function build(node, key, specs) {
     const more = rest.length ? morePanel(node, specs, rest.map(n => { const { seg, ...o } = opts(node, n, specs[n]); return [n, label(key, n), o]; })) : null;
     if (more) root.append(more);
     scrollHint(root);
-    root.sync = () => { ctl.forEach(c => c.sync()); more?.sync(); };
-    return { root, minH: main.length * ROW_H + (more ? ROW_H : 0) + CARD_PAD };
+    root.sync = () => { ctl.forEach(c => c.sync()); more?.sync(); prev?.draw(); };
+    return { root, minH: (prev ? PREVIEW_H + ROW_H : 0) + main.length * ROW_H + (more ? ROW_H : 0) + CARD_PAD };
 }
 
 function hideRepresented(node, specs) {
@@ -90,6 +96,15 @@ function hideRepresented(node, specs) {
 
 app.registerExtension({
     name: "StepVisionKit.Cards",
+    setup() {
+        // Nodes 2.0 не викликає onExecuted, тож превʼю бере вивід із події виконання
+        api.addEventListener("executed", (ev) => {
+            const p = ev.detail?.output?.svk_yolo?.[0];
+            if (!p) return;
+            const id = String(ev.detail.node ?? "").split(":").pop();
+            app.graph?.getNodeById?.(/^\d+$/.test(id) ? +id : id)?.__svkPreview?.set(p);
+        });
+    },
     async beforeRegisterNodeDef(nodeType, nodeData) {
         const key = nodeData?.name;
         const card = Object.hasOwn(MAIN, key);

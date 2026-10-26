@@ -160,6 +160,37 @@ def select_frame(f, mode, index=0, track_id=1, point=(0, 0), class_filter=""):
     return f
 
 
+PREVIEW_SHOTS = 8
+
+
+def preview_frames(n):
+    """номери кадрів для превʼю в картці YOLO: до PREVIEW_SHOTS рівномірно по кліпу"""
+    k = min(PREVIEW_SHOTS, n)
+    return {round(j * (n - 1) / max(k - 1, 1)) for j in range(k)}
+
+
+def preview_payload(shots, w, h, conf, uid):
+    """shots [(кадр, rgb uint8, усі бокси детектора)] -> JPEG у temp і сирі бокси.
+    Картка сама фільтрує, сортує й обирає їх за поточними віджетами, тож новий прогін YOLO для цього не потрібен."""
+    import os
+
+    import folder_paths
+    from PIL import Image
+
+    tmp = folder_paths.get_temp_directory()
+    os.makedirs(tmp, exist_ok=True)
+    out = []
+    for i, rgb, boxes in shots:
+        im = Image.fromarray(rgb)
+        im.thumbnail((640, 640))
+        name = "svk_yolo_%s_%d.jpg" % (str(uid).replace(":", "_"), i)
+        im.save(os.path.join(tmp, name), quality=85)
+        out.append({"frame": i, "filename": name, "subfolder": "", "type": "temp",
+                    "boxes": [dict(b, x1=round(b["x1"], 1), y1=round(b["y1"], 1), x2=round(b["x2"], 1), y2=round(b["y2"], 1),
+                                   score=round(b["score"], 3)) for b in boxes]})
+    return {"w": w, "h": h, "conf": conf, "shots": out}
+
+
 def pad_and_clip(f, pad=0, w=0, h=0):
     out = []
     for b in f:

@@ -263,3 +263,9 @@
 .svk-rl-save { display: flex; gap: 6px; flex: 0 0 auto; }
 .svk-rl-save input { flex: 1; min-width: 0; font: var(--svk-fs-ctl) var(--svk-font); color: var(--svk-text); background: var(--svk-raise); border: 1px solid var(--svk-line); border-radius: var(--svk-r-ctl); padding: 6px 8px; }
 .svk-rl-save input.is-bad { border-color: var(--svk-danger); }
+/* превʼю YOLO в картці (yolo_preview.js) */
+.svk-yolo { display: grid; gap: 6px; }
+.svk-yolo canvas { display: block; width: 100%; height: 210px; border-radius: var(--svk-r-ctl); background: var(--svk-bg); }
+.svk-yolo-bar { display: flex; align-items: center; gap: 8px; min-height: 18px; font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-dim); }
+.svk-yolo-bar input[type=range] { flex: 0 0 96px; accent-color: var(--svk-accent); }
+.svk-yolo-bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

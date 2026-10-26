@@ -172,6 +172,7 @@ class LexYOLODetect:
                 "make_preview": ("BOOLEAN", {"default": False,
                                  "tooltip": "Warning: the preview is a FULL second copy of all frames in RAM (200 FullHD frames ≈ 5 GB). Enable it on 1-2 frames to read #N and id:N, then disable it for the real run"}),
             },
+            "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
     DESCRIPTION = "Runs a YOLO model from models/yolov8 on every frame, with tracking and smoothing, and picks which boxes to pass on."
@@ -182,13 +183,13 @@ class LexYOLODetect:
 
     def detect(self, images, model_name, device, conf, imgsz, class_filter, max_boxes,
                on_miss="previous", make_preview=False, track=True, smooth=0.0,
-               sort_by="area", select="all", pick=0, point_x=0, point_y=0, pad=0):
+               sort_by="area", select="all", pick=0, point_x=0, point_y=0, pad=0, unique_id=None):
         import os
         import folder_paths
         import torch
         from ultralytics import YOLO
-        from ..vk.boxes import (fill_missing, pad_and_clip, select_frame, sort_frame,
-                                to_bbox, to_core)
+        from ..vk.boxes import (fill_missing, pad_and_clip, preview_frames, preview_payload, select_frame,
+                                sort_frame, to_bbox, to_core)
 
         if device == "auto":
             device = ("cuda" if torch.cuda.is_available()
@@ -215,6 +216,7 @@ class LexYOLODetect:
 
         frames, ranked, ids, seen = [], [], set(), 0
         carry = {}
+        shots, shot_at = [], preview_frames(images.shape[0])
 
         for i in range(images.shape[0]):
             frame = (images[i].cpu().numpy() * 255).astype(np.uint8)[:, :, ::-1]
@@ -230,10 +232,12 @@ class LexYOLODetect:
             tids = (r.boxes.id.cpu().numpy().astype(int).tolist()
                     if getattr(r.boxes, "id", None) is not None else [-1] * len(names))
 
-            f = [{"x1": float(b[0]), "y1": float(b[1]), "x2": float(b[2]), "y2": float(b[3]),
-                  "label": nm, "score": float(sc), "id": int(tid)}
-                 for b, nm, sc, tid in zip(xyxy, names, scores, tids)
-                 if not wanted or nm.lower() in wanted]
+            raw = [{"x1": float(b[0]), "y1": float(b[1]), "x2": float(b[2]), "y2": float(b[3]),
+                    "label": nm, "score": float(sc), "id": int(tid)}
+                   for b, nm, sc, tid in zip(xyxy, names, scores, tids)]
+            if i in shot_at:
+                shots.append((i, np.ascontiguousarray(frame[:, :, ::-1]), raw))
+            f = [b for b in raw if not wanted or b["label"].lower() in wanted]
 
             f = sort_frame(f, sort_by)
             seen += 1 if f else 0
@@ -277,7 +281,8 @@ class LexYOLODetect:
                                              "corners", 2, 28, "#00FF9C", True, "auto")
         else:
             prev_img = torch.zeros(1, 1, 1, 3)
-        return (core, bbox, prev_img, info)
+        return {"ui": {"svk_yolo": [preview_payload(shots, W, H, conf, unique_id)]},
+                "result": (core, bbox, prev_img, info)}
 
 
 from .hud_sprite import LexHUDSprite

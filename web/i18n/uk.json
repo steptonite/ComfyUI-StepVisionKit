@@ -2161,6 +2161,12 @@
     "Close-up: move over the frame, click to pin the spot": "Крупняк: веди по кадру, клік — закріпити місце",
     "original": "оригінал",
     "camera": "камера",
-    "your own grain on top of any profile: size, clumping, softness, colour, response by tones, per-frame change": "своє зерно поверх будь-якого профілю: розмір, рихлість, мʼякість, колір, відгук по тонах, зміна щокадру"
+    "your own grain on top of any profile: size, clumping, softness, colour, response by tones, per-frame change": "своє зерно поверх будь-якого профілю: розмір, рихлість, мʼякість, колір, відгук по тонах, зміна щокадру",
+    "Click a box to pass on exactly this object": "Клік по боксу — передати далі саме цей обʼєкт",
+    "Boxes from the last Run; the highlighted ones go to the outputs": "Бокси з останнього Run; виділені йдуть на виходи",
+    "Run the node to see the boxes": "Запусти ноду, щоб побачити бокси",
+    "found": "знайдено",
+    "passed on": "далі",
+    "threshold below the Run: run again to see more": "поріг нижчий, ніж у Run: запусти ще раз, щоб побачити більше"
   }
 }
