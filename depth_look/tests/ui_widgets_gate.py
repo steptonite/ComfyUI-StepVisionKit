@@ -42,8 +42,18 @@ bad = []
 for cls, (py, js) in CHECKS.items():
     lost = inputs_of(py, cls) - shown_in(js) - wired_in_tuner(cls, js) - set(HIDDEN_BY_DESIGN.get(cls, {}))
     bad += ["%s.%s" % (cls, n) for n in sorted(lost)]
+# Camera Realism: входи - SPEC у realism/params.py + кілька службових; показані мають бути control(...) або MORE у web/camera_realism.js
+REALISM_HIDDEN = {"image": "вхід-зʼєднання", "depth": "вхід-зʼєднання", "profile": "плитки профілю на картці пишуть цей віджет"}
+rp = ROOT / "realism/params.py"
+rj = ROOT / "web/camera_realism.js"
+if rp.exists() and rj.exists():
+    spec_src = rp.read_text()
+    spec_src = spec_src[spec_src.index("SPEC = ["):spec_src.index("NAMES =")]
+    r_inputs = set(re.findall(r'^\s*\("(\w+)",', spec_src, re.M)) | {"profile", "strength", "seed"}
+    r_lost = r_inputs - shown_in(rj) - set(REALISM_HIDDEN)
+    bad += ["SVKCameraRealism.%s" % n for n in sorted(r_lost)]
 if bad:
     print("🔴 віджети без місця в UI (сховані hideAll):", ", ".join(bad))
     print("   постав у control(...)/MORE у web/*.js або додай у HIDDEN_BY_DESIGN з причиною")
     sys.exit(1)
-print("✅ усі входи DepthLook видимі або сховані свідомо")
+print("✅ усі входи DepthLook і SVKCameraRealism видимі або сховані свідомо")

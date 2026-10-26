@@ -16,11 +16,11 @@
 Змінилась тільки менюшна категорія — тепер усе під `StepVisionKit`.
 """
 
-from .lex.nodes_core import LexBoxesToBBOX, LexHUDBoxes, LexYOLODetect
-from .lex.depth_curve import LexDepthCurve
-from .lex.depth_grade import SVKDepthGrade, SVKDepthGradeLive, SVKDepthGradeView, SVKDepthGradeVideoView
-from .lex.depth_raw import SVKDepthReceiver, SVKRawDepthLoad, SVKRawDepthSave, SVKSaveDepth16
-from .lex.hud_sprite import LexHUDSprite
+from .core.nodes_core import LexBoxesToBBOX, LexHUDBoxes, LexYOLODetect
+from .core.depth_curve import LexDepthCurve
+from .core.depth_grade import SVKDepthGrade, SVKDepthGradeLive, SVKDepthGradeView, SVKDepthGradeVideoView
+from .core.depth_raw import SVKDepthReceiver, SVKRawDepthLoad, SVKRawDepthSave, SVKSaveDepth16
+from .core.hud_sprite import LexHUDSprite
 # Depth Look (look v1): лінзовий блюр за глибиною + палітра. Ключі DepthLook* лишились з окремого паку -
 # збережені воркфлоу відкриваються як були, змінилась лише категорія меню.
 from .depth_look import NODE_CLASS_MAPPINGS as DL_NODES, NODE_DISPLAY_NAME_MAPPINGS as DL_DISPLAY
@@ -28,7 +28,7 @@ from .depth_look import NODE_CLASS_MAPPINGS as DL_NODES, NODE_DISPLAY_NAME_MAPPI
 # Термо-сторож: пауза при перегріві SoC (м'яка — всередині процесу, жорстка — окремий наглядач).
 # Помилка сторожа не має ламати пакет: install() сам ловить усе, це страховка на імпорт.
 try:
-    from .lex import thermal_guard as _svk_thermal_guard
+    from .core import thermal_guard as _svk_thermal_guard
     _svk_thermal_guard.install()
 except Exception as _e:
     print(f"[Thermal guard] not started: {_e}")
@@ -39,6 +39,8 @@ from .vk.nodes_draw import NODES as VK_DRAW, DISPLAY as VKD_DRAW
 from .vk.nodes_mask import NODES as VK_MASK, DISPLAY as VKD_MASK
 from .vk.nodes_overlay import NODES as VK_OVL, DISPLAY as VKD_OVL
 from .media import NODES as IO_NODES, DISPLAY as IO_DISPLAY
+# Camera Realism: програмний реалізм камери (шум сенсора, байєр, ISP, оптика, тремтіння); план - docs/realism_plan.md
+from .realism import NODES as RL_NODES, DISPLAY as RL_DISPLAY
 
 WEB_DIRECTORY = "./web"
 
@@ -95,6 +97,9 @@ _SUB = {"LexHUDSprite": "HUD", "LexHUDBoxes": "HUD", "VKDrawBoxes": "HUD",
 NODE_CLASS_MAPPINGS.update(IO_NODES)
 NODE_DISPLAY_NAME_MAPPINGS.update(IO_DISPLAY)
 _SUB.update({k: "IO" for k in IO_NODES})
+NODE_CLASS_MAPPINGS.update(RL_NODES)
+NODE_DISPLAY_NAME_MAPPINGS.update(RL_DISPLAY)
+_SUB.update({k: "Realism" for k in RL_NODES})
 for _key, _cls in NODE_CLASS_MAPPINGS.items():
     _cls.CATEGORY = f"StepVisionKit/{_SUB.get(_key, 'misc')}"
 
