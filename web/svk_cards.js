@@ -1,0 +1,117 @@
+// Однакова картка для нод без власного UI (Detect, HUD, IO, Depth Curve, потік глибини): вигляд і логіка як у Depth Look, правила - CONVENTIONS_UI.md.
+// Нативні віджети сховані, картка читає й пише їх через control(). Головні (MAIN) - на видноті, усі інші входи-віджети
+// самі йдуть під «ще», тож новий вхід у Python не губиться. Імена й значення віджетів не міняються: старі workflow відкриваються як були.
+import { app } from "../../scripts/app.js";
+import { el, W, control, morePanel, keepWheel, fitToNode, scrollHint, hideWidget } from "./svk_ui.js";
+import { T, LANG, DICT } from "./svk_i18n.js";
+
+const CSS_URL = new URL("./svk_ui.css", import.meta.url).href;
+const NODE_COLOR = "#2a2a2f", NODE_BG = "#151518";      // = --svk-line / --svk-card
+const START_W = 340, ROW_H = 40, CARD_PAD = 24;
+
+(function injectCss() {
+    if (document.getElementById("svk-ui-css")) return;
+    const l = document.createElement("link");
+    l.id = "svk-ui-css"; l.rel = "stylesheet"; l.href = CSS_URL;
+    document.head.appendChild(l);
+})();
+
+// ключ ноди -> головні віджети в порядку картки: вибір -> 3–4 повзунки; решта - під «ще»
+const MAIN = {
+    LexYOLODetect: ["model_name", "conf", "class_filter", "select", "max_boxes"],
+    LexBoxesToBBOX: ["mode", "index", "pad"],
+    LexHUDBoxes: ["style", "color", "thickness", "show_label"],
+    LexHUDSprite: ["mode", "margin_pct", "label", "tint", "tint_strength"],
+    LexDepthCurve: ["source", "mode", "near_bias", "gamma", "clarity"],
+    VKDetect: ["model_name", "confidence", "classes", "max_objects", "track"],
+    VKSelectBox: ["mode", "index", "class_filter", "pad"],
+    VKBoxesToBBOX: ["format_in", "on_missing"],
+    VKDrawBoxes: ["style", "color", "thickness", "fill_opacity", "show_class"],
+    VKCutByMask: ["background", "color", "feather", "grow"],
+    VKOverlayOnBoxes: ["fit", "anchor", "scale", "opacity"],
+    SVKLoadRAW: ["file", "white_balance", "exposure", "highlights", "output_curve"],
+    SVKLoadVideoPro: ["file", "start_frame", "frame_count", "output_curve"],
+    SVKLoadImageSequence: ["folder", "pattern", "start_frame", "frame_count"],
+    SVKSaveVideoHDR: ["filename_prefix", "format", "fps", "transfer"],
+    SVKVideoDepthStream: ["file", "frame_count", "resolution", "batch"],
+    SVKRawDepthSave: null,           // null - усі віджети на видноті (їх ≤3)
+    SVKDepthReceiver: null,
+};
+// лише колір ноди: власний UI або превʼю картинок під віджетами, картку поверх них не ставимо
+const COLOR_ONLY = ["SVKSaveImageHDR", "SVKSaveDepth16", "SVKRawDepthLoad"];
+const COLOR_FIELDS = new Set(["color", "tint", "key_color"]);
+// англійські підписи, де імʼя віджета не читається; решта - імʼя без «_»
+const EN = { conf: "Confidence", imgsz: "Image size", model_name: "Model", class_filter: "Classes", format_in: "Box format",
+             on_miss: "If no box", on_missing: "If no box", pad: "Padding", every_nth: "Every Nth frame", hevc_crf: "HEVC quality",
+             max_nits: "Max nits", exr_compression: "EXR compression", wb_red: "WB red", wb_blue: "WB blue", ram_budget_gb: "RAM budget, GB",
+             sky_to_far: "Sky = far", pre_scale: "Pre-scale", margin_pct: "Margin, %", margin_px: "Margin, px", label_conf: "Label confidence",
+             emit_box_mask: "Box mask output", nine_slice: "Nine-slice corners", tint_strength: "Tint strength", make_preview: "Preview output" };
+
+function label(key, name) {
+    if (LANG === "uk") { const l = DICT.nodes?.[key]?.inputs?.[name]?.label; if (l) return l; }
+    return EN[name] || (name.charAt(0).toUpperCase() + name.slice(1)).replace(/_/g, " ");
+}
+function opts(name, spec) {
+    const vals = Array.isArray(spec?.[0]) ? spec[0] : null;
+    if (COLOR_FIELDS.has(name)) return { color: true };
+    if (vals && vals.length <= 3 && vals.every(v => String(v).length <= 12)) return { seg: Object.fromEntries(vals.map(v => [v, T(String(v))])) };
+    return {};
+}
+
+function build(node, key, specs) {
+    const names = (node.widgets || []).map(w => w.name).filter(n => specs[n]);
+    const main = (MAIN[key] || names).filter(n => names.includes(n));
+    const root = el("div", "svk-card svk-scroll");
+    keepWheel(root);
+    const ctl = [];
+    for (const n of main) {
+        const lb = label(key, n), o = opts(n, specs[n]);
+        const c = control(node, n, specs[n], lb, o);
+        if (o.seg) {                       // сегмент без підпису не читається - підпис ліворуч, як у полів
+            const r = el("div", "svk-field"); r.title = c.row.title;
+            r.append(el("span", "t", lb), c.row); root.append(r);
+        } else root.append(c.row);
+        ctl.push(c);
+    }
+    const rest = names.filter(n => !main.includes(n));
+    const more = rest.length ? morePanel(node, specs, rest.map(n => [n, label(key, n), COLOR_FIELDS.has(n) ? { color: true } : {}])) : null;
+    if (more) root.append(more);
+    scrollHint(root);
+    root.sync = () => { ctl.forEach(c => c.sync()); more?.sync(); };
+    return { root, minH: main.length * ROW_H + (more ? ROW_H : 0) + CARD_PAD };
+}
+
+function hideRepresented(node, specs) {
+    for (const w of node.widgets || []) if (w.name !== "svk_card" && specs[w.name]) hideWidget(w);
+}
+
+app.registerExtension({
+    name: "StepVisionKit.Cards",
+    async beforeRegisterNodeDef(nodeType, nodeData) {
+        const key = nodeData?.name;
+        const card = Object.hasOwn(MAIN, key);
+        if (!card && !COLOR_ONLY.includes(key)) return;
+        const specs = { ...(nodeData.input?.optional || {}), ...(nodeData.input?.required || {}) };
+        const onCreated = nodeType.prototype.onNodeCreated;
+        nodeType.prototype.onNodeCreated = function () {
+            const r = onCreated?.apply(this, arguments);
+            this.color = NODE_COLOR; this.bgcolor = NODE_BG;
+            if (!card) return r;
+            const { root, minH } = build(this, key, specs);
+            this.__svkCard = root;
+            this.addDOMWidget("svk_card", "svk_card", root, { serialize: false, hideOnZoom: false, getMinHeight: () => minH });
+            hideRepresented(this, specs);
+            const sz = this.computeSize();
+            this.setSize([Math.max(START_W, sz[0]), sz[1]]);
+            fitToNode(this, root);
+            return r;
+        };
+        const onConfigure = nodeType.prototype.onConfigure;
+        nodeType.prototype.onConfigure = function () {
+            const r = onConfigure?.apply(this, arguments);
+            this.color = NODE_COLOR; this.bgcolor = NODE_BG;
+            if (this.__svkCard) { hideRepresented(this, specs); this.__svkCard.sync(); }      // значення з workflow -> картка
+            return r;
+        };
+    },
+});

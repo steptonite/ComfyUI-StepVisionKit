@@ -97,7 +97,7 @@ export function migrateLegacyValues(node) {
 // spec - рядок INPUT_TYPES з object_info: [тип | список, {min,max,step,tooltip,default}]
 export function control(node, name, spec, label, opts = {}) {
     const [type, o = {}] = spec || [];
-    const tip = (opts.tip || o.tooltip || "") + (o.default !== undefined && !Array.isArray(type) ? "\n" + T("double-click the label for the default value") : "");
+    const tip = (opts.tip || o.tooltip || "") + (o.default !== undefined && !Array.isArray(type) && type !== "STRING" ?"\n" + T("double-click the label for the default value") : "");
     const get = () => W(node, name)?.value;
     const set = v => { const w = W(node, name); if (w && w.value !== v) { w.value = v; markChanged(); opts.onChange?.(v); } };
     let row, sync;
@@ -116,6 +116,19 @@ export function control(node, name, spec, label, opts = {}) {
         sel.onchange = () => set(sel.value);
         row.append(el("span", "t", label), sel);
         sync = () => { sel.value = get(); };
+    } else if (type === "STRING") {                                // текст; для hex-кольору (opts.color) - ще й пікер поруч
+        row = el("label", "svk-field svk-text"); row.title = tip;
+        const txt = el("input"); txt.type = "text"; txt.spellcheck = false;
+        txt.onchange = () => set(txt.value);
+        txt.onkeydown = ev => ev.stopPropagation();               // гарячі клавіші Comfy не перехоплюють набір
+        row.append(el("span", "t", label), txt);
+        let pick = null;
+        if (opts.color) {
+            pick = el("input"); pick.type = "color";
+            pick.oninput = () => { txt.value = pick.value; set(pick.value); };
+            row.append(pick);
+        }
+        sync = () => { const v = get() ?? ""; txt.value = v; if (pick && /^#[0-9a-f]{6}$/i.test(v)) pick.value = v; };
     } else if (type === "BOOLEAN" || (type === "INT" && o.min === 0 && o.max === 1)) {
         const asInt = type === "INT";
         row = el("label", "svk-field"); row.title = tip;

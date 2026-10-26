@@ -52,8 +52,17 @@ if rp.exists() and rj.exists():
     r_inputs = set(re.findall(r'^\s*\("(\w+)",', spec_src, re.M)) | {"profile", "strength", "seed"}
     r_lost = r_inputs - shown_in(rj) - set(REALISM_HIDDEN)
     bad += ["SVKCameraRealism.%s" % n for n in sorted(r_lost)]
+# Спільна картка (web/svk_cards.js): невказані віджети самі йдуть під «ще», тож загубити вхід вона не може.
+# Ловимо інше: ключ ноди чи імʼя в MAIN з одруківкою - тоді головне керування мовчки опиняється під «ще».
+cj = Path(__import__("os").environ.get("SVK_GATE_CARDS", ROOT / "web/svk_cards.js"))
+py_src = {p: p.read_text() for p in ROOT.glob("*/*.py") if "tests" not in p.parts}
+for key, body in re.findall(r"^\s*(\w+): (\[.*?\]|null),", re.search(r"const MAIN = \{(.*?)\n\};", cj.read_text(), re.S).group(1), re.M):
+    py = next((p for p, s in py_src.items() if re.search(r"^class %s\b" % key, s, re.M)), None)
+    if py is None:
+        bad.append("svk_cards.js: нода %s не знайдена" % key); continue
+    bad += ["svk_cards.js: %s.%s не вхід ноди" % (key, n) for n in re.findall(r'"(\w+)"', body) if n not in inputs_of(py, key)]
 if bad:
     print("🔴 віджети без місця в UI (сховані hideAll):", ", ".join(bad))
     print("   постав у control(...)/MORE у web/*.js або додай у HIDDEN_BY_DESIGN з причиною")
     sys.exit(1)
-print("✅ усі входи DepthLook і SVKCameraRealism видимі або сховані свідомо")
+print("✅ усі входи DepthLook і SVKCameraRealism видимі або сховані свідомо; MAIN спільної картки збігається з входами")

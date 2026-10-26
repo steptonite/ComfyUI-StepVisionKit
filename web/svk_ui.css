@@ -191,6 +191,10 @@
 .svk-field select, .svk-field input[type=number] { width: 112px; background: var(--svk-raise); color: var(--svk-text); border: 1px solid var(--svk-line);
   border-radius: var(--svk-r-sm); font: inherit; padding: 4px 6px; }
 .svk-field input[type=checkbox] { accent-color: var(--svk-accent); width: 15px; height: 15px; }
+.svk-field.svk-text input[type=text] { flex: 1; min-width: 0; max-width: 200px; background: var(--svk-raise); color: var(--svk-text); border: 1px solid var(--svk-line);
+  border-radius: var(--svk-r-sm); font: inherit; padding: 4px 6px; }
+.svk-field.svk-text input[type=color] { width: 26px; height: 24px; padding: 0; border: 1px solid var(--svk-line); border-radius: var(--svk-r-sm); background: none; cursor: pointer; }
+.svk-field > .svk-seg { flex: 0 1 auto; }
 /* stretch обовʼязковий: без нього .body успадковував align-items:center від сітки вище - рядки ставали вузькими й їхали в центр */
 .svk-more .body.body-col { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
 
