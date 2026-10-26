@@ -88,7 +88,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 _SUB = {"LexHUDSprite": "HUD", "LexHUDBoxes": "HUD", "VKDrawBoxes": "HUD",
         "VKOverlayOnBoxes": "HUD", "VKCutByMask": "HUD",
         "LexDepthCurve": "Depth", "SVKDepthGrade": "Depth", "SVKDepthGradeLive": "Depth", "SVKDepthGradeView": "Depth", "SVKDepthGradeVideoView": "Depth",
-        "DepthLook": "Depth", "DepthLookSimple": "Depth", "DepthLookVideo": "Depth",
+        "DepthLook": "Depth", "DepthLookSimple": "Depth", "DepthLookVideo": "Depth", "SVKVideoDepthStream": "Depth",
         "SVKDepthReceiver": "Depth", "SVKRawDepthSave": "Depth", "SVKRawDepthLoad": "Depth", "SVKSaveDepth16": "Depth",
         "LexYOLODetect": "Detect", "VKDetect": "Detect",
         "LexBoxesToBBOX": "Detect", "VKBoxesToBBOX": "Detect", "VKSelectBox": "Detect"}

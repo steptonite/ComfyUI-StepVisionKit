@@ -74,6 +74,25 @@ def to_linear(a, transfer):
     return C.bt1886(a) if transfer in ("bt709", "smpte170m", "bt2020-10", "bt2020-12") else C.srgb_eotf(a)
 
 
+def frames_cmd(p, s, start_frame=0, frame_count=0, every_nth=1, max_width=0):
+    """ffmpeg -> rgb48le / rgba64le кадри в трубу. Спільна для Load Video Pro і потокової глибини (depth_look/depth_stream.py),
+    щоб обидві декодували кадр байт-у-байт однаково. -> (cmd, w, h, ch)"""
+    w, h = int(s["width"]), int(s["height"])
+    if max_width and max_width < w:
+        w, h = max_width, int(round(h * max_width / w / 2)) * 2
+    alpha = "a" in s.get("pix_fmt", "").replace("gray", "") and s.get("pix_fmt", "").startswith(("yuva", "rgba", "bgra", "gbrap", "argb", "ya"))
+    mat = _MATRIX.get(s.get("color_space", ""), "auto")
+    rng = {"tv": "tv", "pc": "pc"}.get(s.get("color_range", ""), "auto")
+    vf = [f"select='gte(n\\,{start_frame})*not(mod(n-{start_frame}\\,{every_nth}))'"]
+    vf.append(f"scale={w}:{h}:flags=lanczos:in_color_matrix={mat}:in_range={rng}")
+    pix = "rgba64le" if alpha else "rgb48le"
+    cmd = [_ffmpeg(), "-v", "error", "-i", p, "-vf", ",".join(vf), "-fps_mode", "passthrough"]
+    if frame_count:
+        cmd += ["-frames:v", str(frame_count)]
+    cmd += ["-f", "rawvideo", "-pix_fmt", pix, "-"]
+    return cmd, w, h, 4 if alpha else 3
+
+
 class SVKLoadVideoPro:
     DESCRIPTION = ("Loads ProRes, DNxHR/DNxHD, 10/12-bit HEVC, H.264 and other ffmpeg formats as 16-bit frames, "
                    "keeping HDR (PQ / HLG) and alpha (ProRes 4444). Can convert to scene-linear Rec.709 for compositing.")
@@ -114,20 +133,8 @@ class SVKLoadVideoPro:
     def load(self, file, start_frame, frame_count, output_curve, path="", every_nth=1, max_width=0, gamut="keep source"):
         p = _path(file, path)
         s = probe(p)
-        w, h = int(s["width"]), int(s["height"])
-        if max_width and max_width < w:
-            w, h = max_width, int(round(h * max_width / w / 2)) * 2
-        alpha = "a" in s.get("pix_fmt", "").replace("gray", "") and s.get("pix_fmt", "").startswith(("yuva", "rgba", "bgra", "gbrap", "argb", "ya"))
-        mat = _MATRIX.get(s.get("color_space", ""), "auto")
-        rng = {"tv": "tv", "pc": "pc"}.get(s.get("color_range", ""), "auto")
-        vf = [f"select='gte(n\\,{start_frame})*not(mod(n-{start_frame}\\,{every_nth}))'"]
-        vf.append(f"scale={w}:{h}:flags=lanczos:in_color_matrix={mat}:in_range={rng}")
-        pix = "rgba64le" if alpha else "rgb48le"
-        ch = 4 if alpha else 3
-        cmd = [_ffmpeg(), "-v", "error", "-i", p, "-vf", ",".join(vf), "-fps_mode", "passthrough"]
-        if frame_count:
-            cmd += ["-frames:v", str(frame_count)]
-        cmd += ["-f", "rawvideo", "-pix_fmt", pix, "-"]
+        cmd, w, h, ch = frames_cmd(p, s, start_frame, frame_count, every_nth, max_width)
+        alpha = ch == 4
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         size = w * h * ch * 2
         bufs = []

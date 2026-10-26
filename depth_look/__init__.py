@@ -147,8 +147,11 @@ from .simple import DepthLookSimple  # noqa: E402
 from .video_node import DepthLookVideo  # noqa: E402
 
 NODE_CLASS_MAPPINGS = {"DepthLook": DepthLook, "DepthLookSimple": DepthLookSimple, "DepthLookVideo": DepthLookVideo}
+from .depth_stream import NODE_CLASS_MAPPINGS as _DS, NODE_DISPLAY_NAME_MAPPINGS as _DSD
+NODE_CLASS_MAPPINGS.update(_DS)
 NODE_DISPLAY_NAME_MAPPINGS = {"DepthLook": "Depth Look · Full", "DepthLookSimple": "Depth Look · Simple",
                               "DepthLookVideo": "Depth Look · Video"}
+NODE_DISPLAY_NAME_MAPPINGS.update(_DSD)
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]   # js - у спільній web/ паку
 
 
