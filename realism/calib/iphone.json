@@ -1,0 +1,162 @@
+{
+ "camera": "iphone",
+ "measured_on": 24,
+ "iso": 50,
+ "values": {
+  "noise_luma": 0.519,
+  "noise_chroma": 0.107,
+  "noise_size": 0.125,
+  "isp_denoise": 0.15,
+  "isp_sharpen": 0.2,
+  "isp_blocks": 0.1
+ },
+ "iqr": {
+  "noise_luma": [
+   0.383,
+   0.875
+  ],
+  "noise_chroma": [
+   0.064,
+   0.133
+  ],
+  "noise_size": [
+   0.0,
+   0.5
+  ],
+  "isp_denoise": [
+   0.0,
+   0.6
+  ],
+  "isp_sharpen": [
+   0.2,
+   0.2
+  ],
+  "isp_blocks": [
+   0.1,
+   0.1
+  ]
+ },
+ "noise_luma_per_iso_stop": -0.09101212057027756,
+ "sources": [
+  {
+   "title": "File:202303111500 IMG 2951.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 25
+  },
+  {
+   "title": "File:2024 World Rugby Pacific Nations Cup 秩父宮ラグビー場 2024年9月14日の東京 202409141543 IMG 8695.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 32
+  },
+  {
+   "title": "File:202408281602 IMG 3439.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 32
+  },
+  {
+   "title": "File:7回目のひな誕祭～Welcome to HINATAZAKA ROCKESTRA～ 横浜スタジアム 2026年4月5日の横浜 202604051432 IMG 3074.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 32
+  },
+  {
+   "title": "File:BALLPARK BURGER &9 × イコラブハンバーガー部 クアトロフォルマッジバーガー BALLPARK BURGER &9 2025年6月19日の横浜 202506191355 IMG 8542.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 32
+  },
+  {
+   "title": "File:CENTRAL MUSIC & ENTERTAINMENT FESTIVAL 2026 CENTRAL MUSIC STAGE Kアリーナ横浜 2026年4月4日の横浜 202604041350 IMG 2433.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 32
+  },
+  {
+   "title": "File:Eiden 711 20231126 01.jpg",
+   "license": "CC0",
+   "iso": 32
+  },
+  {
+   "title": "File:Dongguan People's Park (54261770548).jpg",
+   "license": "CC BY-SA 2.0",
+   "iso": 32
+  },
+  {
+   "title": "File:Flinders Street Station Melbourne CBD May 9, 2025 202505091119 IMG 6643.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 40
+  },
+  {
+   "title": "File:Honor 300 Ultra (54250082618).jpg",
+   "license": "CC BY-SA 2.0",
+   "iso": 40
+  },
+  {
+   "title": "File:Collins Street Melbourne CBD April 22, 2025 202504221135 IMG 3056.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 50
+  },
+  {
+   "title": "File:Dongguan (54250276955).jpg",
+   "license": "CC BY-SA 2.0",
+   "iso": 50
+  },
+  {
+   "title": "File:Dongguan People's Park (54261777029).jpg",
+   "license": "CC BY-SA 2.0",
+   "iso": 50
+  },
+  {
+   "title": "File:Huawei Mate 70 RS Ultimate Design (54235734941).jpg",
+   "license": "CC BY-SA 2.0",
+   "iso": 50
+  },
+  {
+   "title": "File:Walmart, Dongguan (54275134864).jpg",
+   "license": "CC BY-SA 2.0",
+   "iso": 50
+  },
+  {
+   "title": "File:Flinders Street Station Melbourne CBD May 14, 2025 202505141158 IMG 7584.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 64
+  },
+  {
+   "title": "File:Cairns Airport Domestic Terminal April 20, 2025 202504200556 IMG 2622.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 80
+  },
+  {
+   "title": "File:Asia League Ice Hockey 2026-2027 Game2 横浜GRITS vs スターズ神戸 KOSÉ新横浜スケートセンター 2026年9月12日の横浜市 202609121405 IMG 0858.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 100
+  },
+  {
+   "title": "File:202405131516 IMG 6604.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 125
+  },
+  {
+   "title": "File:Dongguan People's Park (54272778386).jpg",
+   "license": "CC BY-SA 2.0",
+   "iso": 125
+  },
+  {
+   "title": "File:Flinders Street Station Melbourne CBD May 15, 2025 202505151817 IMG 7973.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 160
+  },
+  {
+   "title": "File:202405131520 IMG 6631.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 320
+  },
+  {
+   "title": "File:Bourke Street Melbourne CBD May 13, 2025 202505131748 IMG 7458.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 500
+  },
+  {
+   "title": "File:Changi Airport May 24, 2025 202505242324 IMG 1603.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 3200
+  }
+ ]
+}

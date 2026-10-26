@@ -1,0 +1,162 @@
+{
+ "camera": "dslr2012",
+ "measured_on": 24,
+ "iso": 200,
+ "values": {
+  "noise_luma": 0.205,
+  "noise_chroma": 0.23,
+  "noise_size": 0.25,
+  "isp_denoise": 0.3,
+  "isp_sharpen": 0.2,
+  "isp_blocks": 0.1
+ },
+ "iqr": {
+  "noise_luma": [
+   0.129,
+   0.273
+  ],
+  "noise_chroma": [
+   0.194,
+   0.299
+  ],
+  "noise_size": [
+   0.188,
+   0.562
+  ],
+  "isp_denoise": [
+   0.0,
+   0.6
+  ],
+  "isp_sharpen": [
+   0.2,
+   0.2
+  ],
+  "isp_blocks": [
+   0.1,
+   0.1
+  ]
+ },
+ "noise_luma_per_iso_stop": -0.05456181145377656,
+ "sources": [
+  {
+   "title": "File:01 arrivée Pen duick.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 100
+  },
+  {
+   "title": "File:131203서울특별시 119특수구조단 장복수, 권용각 대원 3주기 추모식02.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 100
+  },
+  {
+   "title": "File:131203서울특별시 119특수구조단 장복수, 권용각 대원 3주기 추모식42.jpg",
+   "license": "CC BY-SA 4.0",
+   "iso": 100
+  },
+  {
+   "title": "File:20 Chargement.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 100
+  },
+  {
+   "title": "File:0 Escalles - Le Cap Blanc-Nez (2).JPG",
+   "license": "CC BY 3.0",
+   "iso": 100
+  },
+  {
+   "title": "File:0 Sluis - Brandweerkazerne (1).JPG",
+   "license": "CC BY-SA 3.0 nl",
+   "iso": 100
+  },
+  {
+   "title": "File:005 Liteň ke kinu na J.JPG",
+   "license": "CC BY-SA 4.0",
+   "iso": 100
+  },
+  {
+   "title": "File:012 Liteň cyklisté na Nádražní ulici u čerpací stanice 06.JPG",
+   "license": "CC BY-SA 4.0",
+   "iso": 125
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1322.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1364.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1405.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1445.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1485.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1525.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1567.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1607.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1648.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1689.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:2013-05-03 Fotoflug Nordholz Papenburg HP 1729.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:\"Prof Maari Thamizhpparithi imparting knowledge on Tamil Computing, Wikipedia Training\".JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 200
+  },
+  {
+   "title": "File:02 Michel Briand.jpg",
+   "license": "CC BY-SA 3.0",
+   "iso": 400
+  },
+  {
+   "title": "File:015 Beroun ul. Hrdlořezy V.JPG",
+   "license": "CC BY-SA 4.0",
+   "iso": 400
+  },
+  {
+   "title": "File:006 Fasching.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 1600
+  },
+  {
+   "title": "File:10 D. Cardon la pédagogie du savoir collectif.JPG",
+   "license": "CC BY-SA 3.0",
+   "iso": 10000
+  }
+ ]
+}

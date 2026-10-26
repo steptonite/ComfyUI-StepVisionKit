@@ -3,6 +3,9 @@
 Імена параметрів не міняти: workflow зберігає значення віджетів по них.
 SPEC: (name, lo, hi, step, group, label, tooltip[, kind]). kind 'i' - ціле."""
 
+import json
+import os
+
 PROFILE_CUSTOM = "Custom"
 DEFAULT_PROFILE = "ARRI Alexa 35"
 
@@ -164,12 +167,13 @@ PROFILES = {
                        depth_haze=0.15, depth_detail=0.15, shake=0.20, flicker=0.05, rolling_shutter=0.40,
                        highlight_clip=0.50, blacks=0.15, warmth=-0.05, saturation=0.10, skin_hue=0.40, banding=0.40,
                        motion_blur=0.35),
-    # iPhone: Smart HDR, Deep Fusion, акварель у тінях, портретне боке за глибиною, зелений привид; короткий затвор
+    # iPhone: Smart HDR, Deep Fusion, акварель у тінях; короткий затвор. Портретне боке і зелений привид вимкнено (26.10.2026):
+    # на справжніх кадрах їх немає, повзунки лишились для ручного вибору
     "iPhone": dict(iso=640, noise_luma=0.25, noise_chroma=0.10, noise_size=0.30, fixed_pattern=0.02,
                    bayer_amount=0.30, isp_denoise=0.50, isp_sharpen=0.40, isp_sharpen_radius=1.4, isp_blocks=0.25,
                    vignette=0.08, chroma_ab=0.06, corner_softness=0.15, veil=0.06, depth_detail=0.20,
                    shake=0.30, flicker=0.05, rolling_shutter=0.50, smart_hdr=0.75, deep_fusion=0.65, shadow_smear=0.60,
-                   portrait_bokeh=0.45, ghost_flare=0.65, blacks=-0.25, warmth=0.10, saturation=0.18, motion_blur=0.15),
+                   blacks=-0.25, warmth=0.10, saturation=0.18, motion_blur=0.15),
     # дзеркалка 2012 у відео (Canon 5D Mk III / 7D): пропуск рядків, плями в тінях, кліп світлих, вбиті чорні, тепла Canon
     "DSLR 2012": dict(iso=1600, noise_luma=0.30, noise_chroma=0.08, noise_size=0.25, fixed_pattern=0.08,
                       bayer_amount=0.50, isp_sharpen=0.15, isp_sharpen_radius=1.2, isp_blocks=0.35,
@@ -177,12 +181,20 @@ PROFILES = {
                       depth_haze=0.10, shake=0.25, flicker=0.05, rolling_shutter=0.45, line_skip=0.70,
                       chroma_blotch=0.60, banding=0.35, highlight_clip=0.60, blacks=0.35, warmth=0.25,
                       saturation=0.10, skin_hue=-0.30, motion_blur=0.50),
-    # 16 мм плівка: зерно емульсії, halation, плече й підняті тіні, gate weave, пил; без цифрового шуму, байєра й шарпу
+    # 16 мм плівка: зерно емульсії, halation, плече й підняті тіні, gate weave; без цифрового шуму, байєра й шарпу.
+    # Пил вимкнено (26.10.2026): білі цятки читаються як брак, а не як плівка
     "16mm film": dict(iso=800, noise_size=0.65, vignette=0.40, distortion=0.04, chroma_ab=0.20,
                       corner_softness=0.45, veil=0.20, depth_haze=0.20, shake=0.15, flicker=0.30,
-                      film_grain=0.80, halation=0.60, gate_weave=0.60, dust=0.50, highlight_rolloff=0.80,
+                      film_grain=0.80, halation=0.60, gate_weave=0.60, highlight_rolloff=0.80,
                       blacks=-0.20, warmth=0.20, saturation=-0.15, motion_blur=0.50),
 }
+# v3 (26.10.2026): шум і шумодав - із замірів на справжніх кадрах камер (calib/*.json, звідки й як - там само), не на око.
+# Беремо лише ключі, які заміри справді визначають; решта профілю (тон, оптика, відео) поки ручна.
+CALIBRATED = ("iso", "noise_luma", "noise_chroma", "noise_size", "isp_denoise")
+for _name, _fn in (("iPhone", "iphone.json"), ("DSLR 2012", "dslr2012.json")):
+    with open(os.path.join(os.path.dirname(__file__), "calib", _fn), encoding="utf-8") as _f:
+        _cal = json.load(_f)
+    PROFILES[_name].update({k: _cal["iso"] if k == "iso" else _cal["values"][k] for k in CALIBRATED})
 PROFILE_NAMES = list(PROFILES) + [PROFILE_CUSTOM]
 
 

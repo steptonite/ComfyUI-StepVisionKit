@@ -124,7 +124,7 @@ for name in P.PROFILES:
 c = P.resolve("Custom", 1.0, {"noise_luma": 0.4, "iso": 3200})
 check("Custom бере значення повзунків", c["noise_luma"] == 0.4 and c["iso"] == 3200 and c["vignette"] == P.WIDGET_DEFAULTS["vignette"])
 h = P.resolve("iPhone", 0.5)
-check("майстер-сила множить сили, не iso/радіус", abs(h["isp_sharpen"] - 0.2) < 1e-9 and h["iso"] == 640 and h["isp_sharpen_radius"] == 1.4 and abs(h["blacks"] + 0.125) < 1e-9)
+check("майстер-сила множить сили, не iso/радіус", abs(h["isp_sharpen"] - 0.2) < 1e-9 and h["iso"] == P.PROFILES["iPhone"]["iso"] and h["isp_sharpen_radius"] == 1.4 and abs(h["blacks"] + 0.125) < 1e-9)
 
 print("\nРЕЗУЛЬТАТ:", "усе ок" if not fails else "ПРОВАЛИ: " + "; ".join(fails))
 sys.exit(1 if fails else 0)
