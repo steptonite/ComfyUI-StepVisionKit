@@ -158,31 +158,40 @@ def _variable_blur(t, coc, max_sigma, streak_angle, streak_length, levels=8):
     return a * (1 - w) + b * w
 
 
-def _chroma_ab(img, px):
+def _chroma_ab(img, px, inplace=False):
+    """inplace=True: R і B переписуються в img (канал читається цілим до запису, G не чіпаємо) - без копії кадру.
+    Карти мапінгу будуються з одного рядка/стовпця (значення ті самі, що з np.mgrid, але без int64-сітки 4 площини)."""
     if abs(px) < 1e-3:
         return img
     H, W = img.shape[:2]
     cx, cy = (W - 1) / 2, (H - 1) / 2
     k = px / np.hypot(cx, cy)
-    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    out = img.copy()
+    x1 = np.arange(W, dtype=np.float32)
+    y1 = np.arange(H, dtype=np.float32)
+    out = img if inplace else img.copy()
+    mx = np.empty((H, W), np.float32)
+    my = np.empty((H, W), np.float32)
     for ch, sgn in ((0, 1.0), (2, -1.0)):
         s = 1.0 + sgn * k
-        mx = (cx + (xx - cx) / s).astype(np.float32)
-        my = (cy + (yy - cy) / s).astype(np.float32)
-        out[..., ch] = cv2.remap(img[..., ch], mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        mx[:] = (cx + (x1 - cx) / s).astype(np.float32)[None, :]
+        my[:] = (cy + (y1 - cy) / s).astype(np.float32)[:, None]
+        out[..., ch] = cv2.remap(np.ascontiguousarray(img[..., ch]), mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
     return out
 
 
-def film_grain(img, amount=27.0, size=54.0, roughness=35.0, seed=7, color=0.25, ref_width=2848):
+def film_grain(img, amount=27.0, size=54.0, roughness=35.0, seed=7, color=0.25, ref_width=2848, inplace=False):
     """Зерно в дусі Camera Raw (Effects > Grain), шкали 0..100 як у Camera Raw.
     amount    — сила (std шуму ~ amount/100*0.22 у display-просторі).
     size      — масштаб зерна: клітинка шуму ~ 0.8+size/100*2.4 px на ref_width (2848) і
                 масштабується з роздільністю, тож вигляд однаковий на half-res і на повному.
     roughness — нерівномірність: 0 = м'яке гладке, 100 = контрастне, з дрібною октавою.
     Ваги по тонах: сильніше в півтонах, слабше в чорних/світлах. Основа = яскравість,
-    + легка кольорова складова (color)."""
-    img = np.clip(img, 0, 1).astype(np.float32)
+    + легка кольорова складова (color).
+    inplace=True (img float32 C-contiguous): результат пишеться в сам img, без копій кадру (економія памʼяті на 12 Мп)."""
+    if inplace and img.dtype == np.float32:
+        np.clip(img, 0, 1, out=img)
+    else:
+        img = np.clip(img, 0, 1).astype(np.float32, copy=False)    # np.clip уже дав нову копію - друга astype не потрібна
     if amount <= 0:
         return img
     H, W = img.shape[:2]
@@ -217,13 +226,21 @@ def film_grain(img, amount=27.0, size=54.0, roughness=35.0, seed=7, color=0.25, 
     y = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     wgt = 0.22 + 0.78 * np.clip(4 * y * (1 - y), 0, 1) ** 0.8   # півтони
     k = amount / 100.0 * 0.22
+    # на місці, ті самі операції в тому ж порядку, що й раніше: ((n*(1-c) + chroma*c*0.8)*k)*wgt + img
     if color > 0:
-        chroma = layer(cell, 3)
-        chroma = chroma / (chroma.std() + 1e-6)
-        noise = (n[..., None] * (1 - color) + chroma * color * 0.8) * k
+        noise = layer(cell, 3)
+        noise /= (noise.std() + 1e-6)
+        noise *= color
+        noise *= 0.8
+        noise += n[..., None] * (1 - color)
+        noise *= k
     else:                                    # color 0: кольорова складова не потрібна (rng далі не читається)
         noise = n[..., None] * k
-    return np.clip(img + noise * wgt[..., None], 0, 1).astype(np.float32)
+    del n
+    noise *= wgt[..., None]
+    img += noise
+    del noise
+    return np.clip(img, 0, 1, out=img)
 
 
 # ---------------------------------------------------------------- main
@@ -333,7 +350,10 @@ def _gradient_map_pos(t, stops):
     xs = np.array([s[0] for s in stops], np.float32)
     S = np.array([_hex(s[1]) for s in stops], np.float32)
     t = np.clip(t, 0, 1)
-    return np.stack([np.interp(t, xs, S[:, c]) for c in range(3)], -1).astype(np.float32)
+    out = np.empty(t.shape + (3,), np.float32)       # по каналу: np.interp дає float64, три такі + stack = ~15 повних площин
+    for c in range(3):                               # (26.10); присвоєння в float32 дає те саме, що колишній .astype
+        out[..., c] = np.interp(t, xs, S[:, c])
+    return out
 
 
 def _line_kernel_oneside(length, angle_deg):
@@ -493,14 +513,40 @@ def _focus_from_target(d, blur_target):
     return float(p5 + float(np.clip(blur_target, 0, 1)) * (p95 - p5))
 
 
+def _unit(x):
+    """float32 0..1; копії нема, якщо масив уже такий (на 12 Мп кожна зайва копія кадру = 146 МБ). Результат НЕ змінювати на місці."""
+    x = np.asarray(x, np.float32)
+    if x.size and (x.min() < 0 or x.max() > 1):
+        x = np.clip(x, 0, 1)
+    return x
+
+
+def _lens_w(d, c, step):
+    return np.clip(1.0 - np.abs(d - c) / step, 0, 1).astype(np.float32)
+
+
+def _lens_layer(img, d, c, r, step, dispersion):
+    """Один шар: м'яка вага глибини -> диск-блюр premult RGBA з дисперсією каналів (R: r·(1+disp), B: r·(1−disp)), fp16."""
+    H, W = d.shape
+    w = _lens_w(d, c, step)
+    a = _disk_blur(w, r)
+    rgb = np.empty((H, W, 3), np.float16)             # пишемо прямо в fp16 (те саме округлення, що astype), без f32-копії 3 площин
+    for ch, mul in ((0, 1 + dispersion), (1, 1.0), (2, 1 - dispersion)):
+        rgb[..., ch] = _disk_blur(img[..., ch] * w, r * mul)
+    return dict(c=float(c), r=float(r), rgb=rgb, a=a.astype(np.float16))
+
+
 def prepare_lens(img, depth, *, focus=0.85, n_layers=10, r_min=0.0025, r_max=0.04, lens_gamma=0.8,
-                 dispersion=0.15, blur_amount=1.0, blur_target=-1.0):
+                 dispersion=0.15, blur_amount=1.0, blur_target=-1.0, lazy=False):
     """Шари глибини (м'які трикутні ваги, сума=1) -> диск-блюр premult RGBA з дисперсією каналів
     (R: r·(1+disp), B: r·(1−disp)). Залежить лише від img/depth/focus/r — кеш для повзунків кольору.
     blur_amount множить r_min і r_max; blur_target >= 0 перекриває focus (див. _focus_from_target).
-    Радіуси - частки довгої сторони кадру (портрет: = H, як було)."""
-    img = np.clip(img.astype(np.float32), 0, 1)
-    d = np.clip(depth.astype(np.float32), 0, 1)
+    Радіуси - частки довгої сторони кадру (портрет: = H, як було).
+    lazy=True (фінальний рендер, 26.10): шари НЕ рахуються наперед - у cache["layers"] лише заготовки {c, r, lazy}, а
+    cache["build"](заготовка) будує fp16-шар на вимогу. Було n_layers x 2 площини fp16 одночасно (~0.8 ГБ на 12 Мп), стало одна.
+    Заготовка тримає посилання на img/depth - їх не можна змінювати на місці."""
+    img = _unit(img)
+    d = _unit(depth)
     H, W = d.shape
     HL = max(H, W)
     r_min = r_min * blur_amount
@@ -511,43 +557,62 @@ def prepare_lens(img, depth, *, focus=0.85, n_layers=10, r_min=0.0025, r_max=0.0
     step = float(cs[1] - cs[0])
     layers = []
     for c in cs:                                      # від далекого (c=0) до ближнього (c=1)
-        w = np.clip(1.0 - np.abs(d - c) / step, 0, 1).astype(np.float32)
+        w = _lens_w(d, c, step)
         if w.max() < 1e-3:
             layers.append(None); continue
         r = (r_min + r_max * abs(float(c) - focus) ** lens_gamma) * HL
-        a = _disk_blur(w, r)
-        rgb = np.empty((H, W, 3), np.float32)
-        for ch, mul in ((0, 1 + dispersion), (1, 1.0), (2, 1 - dispersion)):
-            rgb[..., ch] = _disk_blur(img[..., ch] * w, r * mul)
-        layers.append(dict(c=float(c), r=float(r), rgb=rgb.astype(np.float16), a=a.astype(np.float16)))
-    return dict(layers=layers, focus=focus, r_max_px=(r_min + r_max) * HL, H=H, W=W, step=step)
+        del w
+        if lazy:
+            layers.append(dict(c=float(c), r=float(r), lazy=True))
+        else:
+            layers.append(_lens_layer(img, d, c, r, step, dispersion))
+    cache = dict(layers=layers, focus=focus, r_max_px=(r_min + r_max) * HL, H=H, W=W, step=step)
+    if lazy:
+        cache["build"] = lambda st: _lens_layer(img, d, st["c"], st["r"], step, dispersion)
+    return cache
 
 
 def _stretch_copies(img, m, N, length, vp, shift, blur, opacity, fade, shift_col, stops, focus_t0=0.0):
-    """Генератор (premult RGBA, k) копій предмета, від найдальшої до найближчої. По одній: список з 18 повнокадрових
-    RGBA float32 тримав ~3.5 ГБ на 12 Мп (26.10.2026), а споживач однаково кладе їх у comp одну за одною."""
+    """Генератор (premult RGB (H,W,3), альфа (H,W), k) копій предмета, від найдальшої до найближчої. По одній: список з 18
+    повнокадрових RGBA float32 тримав ~3.5 ГБ на 12 Мп (26.10.2026), а споживач однаково кладе їх у comp одну за одною.
+    Усе по площинах (warp/блюр/ділення працюють по каналах незалежно - результат той самий, що з 4-канальним RGBA), без
+    dstack і без повнокадрових проміжних RGBA: пік копії ~8 площин замість ~26. Споживач після використання робить del."""
     H, W = m.shape
-    lum = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    rgba = np.dstack([img * m[..., None], m]).astype(np.float32)
     vx, vy = vp[0] * W, vp[1] * H
     for k in range(N, 0, -1):
         u = k / N
         s = 1.0 - length * u
         M = np.array([[s, 0, vx * (1 - s) + shift[0] * W * u], [0, s, vy * (1 - s) + shift[1] * H * u]], np.float32)
-        c = cv2.warpAffine(rgba, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
         sg = blur * max(H, W) * (0.25 + u)
-        if sg > 0.4:
-            c = _gblur(c, sg)          # великі sigma - на зменшеній копії (було 2/3 часу рендера)
-        a = np.clip(c[..., 3], 1e-4, 1)
-        col = c[..., :3] / a[..., None]
+
+        def plane(src):
+            c = cv2.warpAffine(src, M, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+            return _gblur(c, sg) if sg > 0.4 else c      # великі sigma - на зменшеній копії (було 2/3 часу рендера)
+
+        a = np.clip(plane(m), 1e-4, 1)
+        col = np.empty((H, W, 3), np.float32)
+        for ch in range(3):
+            col[..., ch] = plane(img[..., ch] * m) / a
         g0 = _gradient_map_pos(np.full((1, 1), focus_t0 + u * (1 - focus_t0), np.float32), stops)[0, 0]
-        lm = cv2.cvtColor(np.clip(col, 0, 1).astype(np.float32), cv2.COLOR_RGB2GRAY)
-        g = g0[None, None, :] * (0.55 + 0.9 * np.clip(lm * 2.0, 0, 1))[..., None]
+        tmp = np.clip(col, 0, 1)
+        lm = cv2.cvtColor(tmp, cv2.COLOR_RGB2GRAY)
+        del tmp
+        gm = np.clip(lm * 2.0, 0, 1)
+        del lm
+        gm *= 0.9
+        gm += 0.55
         sc = float(np.clip(shift_col * (0.25 + 0.75 * u), 0, 1))
-        col = col * (1 - sc) + g * sc
-        f = opacity * (1 - u) ** fade
-        a2 = a * f
-        yield np.dstack([col * a2[..., None], a2]).astype(np.float32), k
+        a *= opacity * (1 - u) ** fade                   # a2 = a * f
+        for ch in range(3):                              # col*(1-sc) + (g0*gm)*sc, потім premult на a2
+            gc = gm * g0[ch]
+            gc *= sc
+            cc = col[..., ch] * (1 - sc)
+            cc += gc
+            cc *= a
+            col[..., ch] = cc
+        del gm, gc, cc
+        yield col, a, k
+        del col, a
 
 
 def _screen(a, b):
@@ -878,7 +943,12 @@ def _warp_map(d, nmap, warp, warp_scale, seed, phase):
     amp = warp * nmap * (max(H, W) * 0.04)
     fx, fy = _warp_fields(int(seed), gs, W, H, phase)
     gx, gy = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32))
-    return (gx + fx * amp).astype(np.float32), (gy + fy * amp).astype(np.float32)
+    fx *= amp                                                 # на місці: gx + fx*amp без двох тимчасових повнокадрових
+    gx += fx
+    del fx
+    fy *= amp
+    gy += fy
+    return gx, gy
 
 
 def _remap(x, mp):
@@ -904,7 +974,10 @@ def _smear_depth(d, nmap, smear, smear_angle, smear_radial):
         else:
             M = np.float32([[1, 0, np.cos(ang) * ln * t], [0, 1, np.sin(ang) * ln * t]])
         wk = (1 - t) ** 1.5 + 0.05
-        acc += cv2.warpAffine(AD, M, (W, H)) * wk
+        tw = cv2.warpAffine(AD, M, (W, H))
+        tw *= wk
+        acc += tw
+        del tw
         wsum += wk
     A2 = np.clip(np.maximum(AD[..., 0], acc[..., 0] / wsum * 1.6), 0, 1)
     D2 = np.minimum(np.maximum(AD[..., 1], acc[..., 1] / wsum * 1.6), A2)
@@ -944,8 +1017,8 @@ def depth_look_lens(img, depth, *, cache=None,
                     # анімація градієнта: grad_mode 0 static 1 camera 2 drift 3 shimmer 4 depth-walk 5 wave; grad_amount=0 або mode 0 = як без неї
                     grad_mode=0, grad_speed=0.25, grad_phase=0.0, grad_loop=0.0, grad_amount=1.0,
                     grad_angle=90.0, grad_wavelength=0.5, grad_amp=0.15, grad_offset_x=0.0, grad_offset_y=0.0):
-    img = np.clip(img.astype(np.float32), 0, 1)
-    d = np.clip(depth.astype(np.float32), 0, 1)
+    img = _unit(img)                                          # без копій кадру, якщо вже float32 0..1 (далі нічого не пишемо в img на місці)
+    d = _unit(depth)
     H, W = d.shape
     HL = max(H, W)                                            # радіуси - частки довгої сторони (портрет: = H)
     time = float(time)
@@ -954,7 +1027,7 @@ def depth_look_lens(img, depth, *, cache=None,
     if own_cache:
         cache = prepare_lens(img, d, focus=focus, n_layers=n_layers, r_min=r_min, r_max=r_max,
                              lens_gamma=lens_gamma, dispersion=dispersion, blur_amount=blur_amount,
-                             blur_target=blur_target)
+                             blur_target=blur_target, lazy=True)     # шари будуються по одному в циклі нижче
     focus = cache["focus"]
     rmaxpx = max(cache["r_max_px"], 1e-6)                     # blur_amount=0 -> радіус 0, без ділення на нуль
     comp = np.zeros((H, W, 4), np.float32)                    # premult RGB + A (над: назад -> вперед)
@@ -965,9 +1038,9 @@ def depth_look_lens(img, depth, *, cache=None,
     wmap = None
     if warp > 0 and nmap is not None:
         wmap = _warp_map(d, nmap, warp, warp_scale, warp_seed, warp_speed * time if warp_speed > 0 else 0.0)
-        d = np.clip(_remap(d, wmap), 0, 1)                    # глибина тим самим полем (далі все від неї)
-        img = _remap(img, wmap)                               # для копій предмета (stretch)
-        nmap = _near_map(d, cache["layers"], rmaxpx, gradient_onset)
+        d = _remap(d, wmap)                                   # глибина тим самим полем (далі все від неї)
+        np.clip(d, 0, 1, out=d)
+        nmap = _near_map(d, cache["layers"], rmaxpx, gradient_onset)   # img для копій предмета ремапиться лише перед stretch
     # сила 0 = не рахуємо: копії предмета (steps/opacity), градієнт (усі 4 споживачі) — пропуск усього блоку
     stretch_done = stretch_steps <= 0 or stretch_opacity <= 0
     if not stretch_done:
@@ -1029,9 +1102,11 @@ def depth_look_lens(img, depth, *, cache=None,
             c = _pingpong(c + g_wave)
         return np.broadcast_to(c, (H, W)).astype(np.float32)
 
-    def over(comp, rgb, a):
-        comp[..., :3] = rgb + comp[..., :3] * (1 - a[..., None])
-        comp[..., 3] = a + comp[..., 3] * (1 - a)
+    def over(comp, rgb, a):                                   # по каналах: ті самі операції, але без повнокадрових (H,W,3) тимчасових
+        ia = 1 - a
+        for ch in range(3):
+            comp[..., ch] = rgb[..., ch] + comp[..., ch] * ia
+        comp[..., 3] = a + comp[..., 3] * ia
 
     layers = cache["layers"]
     for li in range(len(layers)):
@@ -1041,17 +1116,29 @@ def depth_look_lens(img, depth, *, cache=None,
         if own_cache:                                         # кеш превʼю (Renderer) не чіпаємо: повзунки кольору його перевикористовують
             layers[li] = None
         if not stretch_done and L["c"] >= subject_lo:         # копії предмета лягають між фоном і предметом
-            for c4, _ in _stretch_copies(img, m, int(stretch_steps), stretch_length, vanishing_point,
-                                         stretch_shift, stretch_blur, stretch_opacity, stretch_fade,
-                                         stretch_color_shift, stops):
-                prev = comp[..., :3].copy() if stretch_lighten > 0 else None
-                over(comp, c4[..., :3], c4[..., 3])
-                if prev is not None:  # копія не може затемнити те, що під нею
-                    comp[..., :3] = comp[..., :3] * (1 - stretch_lighten) + np.maximum(comp[..., :3], prev) * stretch_lighten
+            img_s = _remap(img, wmap) if wmap is not None else img     # поле зсуву й для копій предмета; лише тут, не на весь рендер
+            for cp, ap, _ in _stretch_copies(img_s, m, int(stretch_steps), stretch_length, vanishing_point,
+                                             stretch_shift, stretch_blur, stretch_opacity, stretch_fade,
+                                             stretch_color_shift, stops):
+                ia = 1 - ap                                   # over() по каналах; з lighten копія не може затемнити те, що під нею
+                for ch in range(3):
+                    prev = comp[..., ch].copy() if stretch_lighten > 0 else None
+                    comp[..., ch] = cp[..., ch] + comp[..., ch] * ia
+                    if prev is not None:
+                        comp[..., ch] = comp[..., ch] * (1 - stretch_lighten) + np.maximum(comp[..., ch], prev) * stretch_lighten
+                    prev = None
+                comp[..., 3] = ap + comp[..., 3] * ia
+                del cp, ap, ia                                # інакше стара копія живе, поки генератор будує наступну
+            del img_s
+            m = None
             stretch_done = True
+        if L.get("lazy"):                                     # заготовка -> fp16-шар (один у памʼяті, не всі n_layers)
+            L = cache["build"](L)
+        Lr, Lc = L["r"], L["c"]
         a = L["a"].astype(np.float32)
         rgb = L["rgb"].astype(np.float32)
-        near_d = float(1 - _smooth(L["r"] / rmaxpx, gradient_onset, 0.55))
+        L = None
+        near_d = float(1 - _smooth(Lr / rmaxpx, gradient_onset, 0.55))
         if wmap is not None:                                  # те саме поле, що й для d (пошарової амплітуди більше нема)
             rgb = _remap(rgb, wmap)
             a = _remap(a, wmap)
@@ -1060,29 +1147,44 @@ def depth_look_lens(img, depth, *, cache=None,
             ln = smear * near_d * max(hh, ww) * 0.15
             ang = np.deg2rad(smear_angle)
             acc_rgb, acc_a, wsum = np.zeros_like(rgb), np.zeros_like(a), 0.0
+            if smear_radial > 0.5:  # центр мас предмета - раз на шар (a у циклі не змінюється)
+                ys, xs = np.nonzero(a > 0.5)
+                cx, cy = (xs.mean(), ys.mean()) if len(xs) else (ww / 2, hh / 2)
+                del ys, xs
             for k in range(12):
                 t = k / 11.0
                 if smear_radial > 0.5:  # радіальний (zoom) шлейф від центру мас предмета
-                    ys, xs = np.nonzero(a > 0.5)
-                    cx, cy = (xs.mean(), ys.mean()) if len(xs) else (ww / 2, hh / 2)
                     sc = 1 + (ln / hh) * 2.0 * t
                     M = np.float32([[sc, 0, cx * (1 - sc)], [0, sc, cy * (1 - sc)]])
                 else:
                     M = np.float32([[1, 0, np.cos(ang) * ln * t], [0, 1, np.sin(ang) * ln * t]])
                 wk = (1 - t) ** 1.5 + 0.05
-                acc_rgb += cv2.warpAffine(rgb, M, (ww, hh)) * wk
-                acc_a += cv2.warpAffine(a, M, (ww, hh)) * wk
+                tw = cv2.warpAffine(rgb, M, (ww, hh))
+                tw *= wk
+                acc_rgb += tw
+                tw = cv2.warpAffine(a, M, (ww, hh))
+                tw *= wk
+                acc_a += tw
+                del tw
                 wsum += wk
-            rgb = np.maximum(rgb, acc_rgb / wsum * 1.6)
-            a = np.clip(np.maximum(a, acc_a / wsum * 1.6), 0, 1)
-            rgb = np.minimum(rgb, a[..., None])
+            acc_rgb /= wsum
+            acc_rgb *= 1.6
+            np.maximum(rgb, acc_rgb, out=rgb)
+            del acc_rgb
+            acc_a /= wsum
+            acc_a *= 1.6
+            np.maximum(a, acc_a, out=a)
+            np.clip(a, 0, 1, out=a)
+            del acc_a
+            np.minimum(rgb, a[..., None], out=rgb)
         # колір шару: фото -> градієнт від глибини, чим більший радіус блюру, тим сильніше
-        mix = near_tint * (1 - _smooth(L["r"] / rmaxpx, 0, 0.1)) + far_gradient * _smooth(L["r"] / rmaxpx, gradient_onset, 0.55)
+        mix = near_tint * (1 - _smooth(Lr / rmaxpx, 0, 0.1)) + far_gradient * _smooth(Lr / rmaxpx, gradient_onset, 0.55)
         mix = float(np.clip(mix, 0, 1))
-        un = rgb / np.maximum(a[..., None], 1e-4)
+        un = rgb                                              # ділимо на місці (rgb далі не потрібен)
+        un /= np.maximum(a[..., None], 1e-4)
         lm = None
         if mix > 0:                                           # mix = 0 -> колір шару = фото, градієнт не рахуємо
-            t0 = float(np.clip(abs(focus - L["c"]) / max(focus, 1e-3), 0, 1))
+            t0 = float(np.clip(abs(focus - Lc) / max(focus, 1e-3), 0, 1))
             if gmode in (1, 2, 3):
                 t0 = grad_t0(t0)
             g = _gradient_map_pos(np.full((1, 1), t0, np.float32), stops)[0, 0]
@@ -1091,38 +1193,69 @@ def depth_look_lens(img, depth, *, cache=None,
                 gg = g_field4
             elif gmode == 5:
                 gg = _lut_apply(_pingpong(t0 + g_wave), g_lut)
-            lm = cv2.cvtColor(np.clip(un, 0, 1), cv2.COLOR_RGB2GRAY)
+            tmp = np.clip(un, 0, 1)
+            lm = cv2.cvtColor(tmp, cv2.COLOR_RGB2GRAY)
+            del tmp
             mod = (1 - luma_keep) + luma_keep * np.clip(lm * 2.5, 0, 1.3)
-            col = un * (1 - mix) + np.clip(gg * mod[..., None] * gradient_gain, 0, 1) * mix
+            tg = gg * mod[..., None]                          # col = un*(1-mix) + clip(gg*mod*gain)*mix - на місці
+            del mod
+            tg *= gradient_gain
+            np.clip(tg, 0, 1, out=tg)
+            tg *= mix
+            un *= (1 - mix)
+            un += tg
+            del tg
+            col = un
         else:
             col = un
         if subject_map > 0:  # стилізація близького: фото -> мапа градієнта від власної яскравості (силует замість реалізму)
             if lm is None:
-                lm = cv2.cvtColor(np.clip(un, 0, 1), cv2.COLOR_RGB2GRAY)
-            near_w = float(subject_map * (1 - _smooth(L["r"] / rmaxpx, gradient_onset, 0.55)))
+                tmp = np.clip(un, 0, 1)
+                lm = cv2.cvtColor(tmp, cv2.COLOR_RGB2GRAY)
+                del tmp
+            near_w = float(subject_map * (1 - _smooth(Lr / rmaxpx, gradient_onset, 0.55)))
             lc = np.clip((lm - 0.5) * subject_contrast + 0.5, 0, 1)
-            sm = _gradient_map_pos(lc.astype(np.float32), stops)
-            col = col * (1 - near_w) + np.clip(sm * gradient_gain, 0, 1) * near_w
+            sm = _gradient_map_pos(lc.astype(np.float32, copy=False), stops)
+            del lc
+            sm *= gradient_gain
+            np.clip(sm, 0, 1, out=sm)
+            sm *= near_w
+            col *= (1 - near_w)
+            col += sm
+            del sm
+        lm = None
         if bg_bands > 0:  # далеке розчиняється в смуги градієнта по висоті кадру (як фон рефа), сцена зникає
-            far_w = float(bg_bands * _smooth(L["r"] / rmaxpx, gradient_onset, 0.55))
+            far_w = float(bg_bands * _smooth(Lr / rmaxpx, gradient_onset, 0.55))
             hh = col.shape[0]
             yy = np.linspace(0, 1, hh, dtype=np.float32)
             yy = yy[::-1] if band_flip > 0.5 else yy
-            if gmode:
-                if band_c is None:                            # смуги однакові для всіх шарів - рахуємо раз
-                    band_c = cv2.GaussianBlur(_gradient_map_pos(grad_band_coord(), stops), (0, 0), max(1.0, max(hh, col.shape[1]) * 0.04))
-                band = band_c
-            else:
-                if band_c is None or band_c.shape[:2] != col.shape[:2]:   # смуги однакові для всіх шарів - рахуємо раз
-                    band_c = _gradient_map_pos(np.repeat(yy[:, None], col.shape[1], 1), stops)
-                    band_c = cv2.GaussianBlur(band_c, (0, 0), max(1.0, max(hh, col.shape[1]) * 0.04))
-                band = band_c
-            col = col * (1 - far_w) + np.clip(band * gradient_gain, 0, 1) * far_w
-        over(comp, col * a[..., None], a)
+            if band_c is None:                                # смуги однакові для всіх шарів - рахуємо раз
+                sg_b = max(1.0, max(hh, col.shape[1]) * 0.04)
+                if gmode:
+                    band_c = cv2.GaussianBlur(_gradient_map_pos(grad_band_coord(), stops), (0, 0), sg_b)
+                else:                                         # лише по y: рахуємо вузьку смугу (H,16) і лишаємо один стовпчик (H,1,3), далі broadcast
+                    try:
+                        strip = cv2.GaussianBlur(_gradient_map_pos(np.repeat(yy[:, None], 16, 1), stops), (0, 0), sg_b)
+                        band_c = np.ascontiguousarray(strip[:, :1])
+                    except cv2.error:                         # запасний шлях: смуга на всю ширину, як було
+                        band_c = cv2.GaussianBlur(_gradient_map_pos(np.repeat(yy[:, None], col.shape[1], 1), stops), (0, 0), sg_b)
+            band = band_c
+            bnd = band * gradient_gain
+            np.clip(bnd, 0, 1, out=bnd)
+            bnd *= far_w
+            col *= (1 - far_w)
+            col += bnd
+            del bnd
+        col *= a[..., None]
+        over(comp, col, a)
+        del col, un, rgb, a
     out = comp[..., :3] / np.maximum(comp[..., 3:4], 1e-3)
-    out = np.clip(out, 0, 1)
+    del comp
+    wmap = None
+    np.clip(out, 0, 1, out=out)
     if smear > 0 and nmap is not None:
         d = _smear_depth(d, nmap, smear, smear_angle, smear_radial)   # хвіст шлейфу = глибина предмета (для силуету/серпанку/шлейфу)
+    nmap = None
     if silhouette > 0:
         out = _silhouette(out, d, stops, silhouette, sil_lo, sil_hi, sil_bg, sil_bg_lo, sil_detail, sil_rim, sil_rim_radius)
     if haze > 0:
@@ -1132,16 +1265,20 @@ def depth_look_lens(img, depth, *, cache=None,
             trail_angle = float(trail_angle + trail_wobble * np.sin(2 * np.pi * time * 0.3))
         out = _light_trail(out, d, stops, trail, trail_angle, trail_length, trail_source, trail_threshold,
                            trail_decay, trail_tint, subject_lo, subject_hi)
-    out = _chroma_ab(out, chroma_ab * HL / 2144.0)
+    out = _chroma_ab(out, chroma_ab * HL / 2144.0, inplace=True)
 
     if halation_strength > 0:                                   # легкий halation по яскравому
         y = cv2.cvtColor(out, cv2.COLOR_RGB2GRAY)
         mk = _smooth(y, halation_threshold, min(halation_threshold + 0.2, 0.999)) * y
+        del y
         tint = np.array(halation_tint, np.float32)
-        glow_ = np.zeros_like(out)
-        for c, rm in ((0, 1.0), (1, 0.55), (2, 0.3)):
-            glow_[..., c] = cv2.GaussianBlur(mk, (0, 0), max(halation_radius * HL * rm, 0.5)) * tint[c]
-        out = 1 - (1 - out) * (1 - np.clip(glow_ * halation_strength * 2.0, 0, 1))
+        for c, rm in ((0, 1.0), (1, 0.55), (2, 0.3)):          # по каналу (було glow на весь кадр + 4 тимчасові (H,W,3))
+            gl = cv2.GaussianBlur(mk, (0, 0), max(halation_radius * HL * rm, 0.5)) * tint[c]
+            gl *= halation_strength
+            gl *= 2.0
+            np.clip(gl, 0, 1, out=gl)
+            out[..., c] = 1 - (1 - out[..., c]) * (1 - gl)
+        del mk, gl
     pulse = 1.0
     if glow_pulse:
         pulse = max(0.0, 1.0 + glow_pulse * float(np.sin(2 * np.pi * time * pulse_hz)))
@@ -1152,5 +1289,5 @@ def depth_look_lens(img, depth, *, cache=None,
     if grain_animate:                                           # нове зерно кожен кадр
         seed = int(seed) + int(np.floor(time * grain_fps))
     if grain_amount > 0:
-        out = film_grain(out, grain_amount, grain_size, grain_roughness, seed)
-    return np.clip(out, 0, 1).astype(np.float32)
+        out = film_grain(out, grain_amount, grain_size, grain_roughness, seed, inplace=True)
+    return np.clip(out, 0, 1, out=out).astype(np.float32, copy=False)

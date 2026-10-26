@@ -237,7 +237,13 @@ class _Lazy:
 
 
 EDGE_MIN = 0.12        # кореляція країв фото↔глибина: своя фотка 0.25, чужа (дзеркальна) 0.07
-GB_PER_MP = 0.6        # пік воркера на мегапіксель робочого кадру (заміри 23.10: 3 Мп ≈ 1.2-2.4 ГБ, грубо)
+# Пік ОДНОГО кадру (воркер, CPU-шлях) на мегапіксель робочого кадру. 26.10.2026: після потокового фіналу (шари fp16 будуються
+# по одному, копії предмета по площинах, композит і нормалізація на місці) ручний підрахунок = ~30 повнокадрових float32-площин
+# (~0.12 ГБ/Мп) у піку; 0.2 - це той підрахунок із запасом ~1.7x на аллокатор/буфери cv2/важчі пресети. ЗАМІРУ RSS ще нема -
+# tests/final_ram_check.py (на хмарному боксі) його дасть; тоді підправити. Було 0.6 (старий код: усі шари fp16 разом + 18 RGBA).
+GB_PER_MP = 0.2
+# Для вибору кількості паралельних процесів (відео) лишаємо старий консервативний запас, доки відео-шлях не заміряно.
+GB_PER_MP_PAR = 0.6
 
 
 def _edges(x, side=256):
@@ -375,7 +381,7 @@ def _mem_budget():
 
 
 def pick_workers(B, work_px, requested=None):
-    """Кількість процесів: requested -> env SVK_WORKERS -> ядра; ≤ кадрів; ≤ RAM (GB_PER_MP на Мп робочого кадру)."""
+    """Кількість процесів: requested -> env SVK_WORKERS -> ядра; ≤ кадрів; ≤ RAM (GB_PER_MP_PAR на Мп робочого кадру)."""
     if requested is None:
         requested = _cpus()
         env = os.environ.get("SVK_WORKERS", "").strip()
@@ -384,7 +390,7 @@ def pick_workers(B, work_px, requested=None):
     n = max(1, min(int(requested), int(B)))
     budget = _mem_budget()
     if n > 1 and budget:
-        per = GB_PER_MP * max(work_px, 1) / 1e6 * 1e9
+        per = GB_PER_MP_PAR * max(work_px, 1) / 1e6 * 1e9
         n = max(1, min(n, int(0.7 * budget / per)))
     return n
 
