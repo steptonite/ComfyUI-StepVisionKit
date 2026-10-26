@@ -2311,6 +2311,8 @@
     "preview (off)": "preview (вимк.)",
     "Nothing goes to the outputs: threshold, classes or selection dropped every box": "На виходи нічого не піде: поріг, класи чи вибір відсіяли всі бокси",
     "To the outputs": "На виходи піде",
-    "all": "усі"
+    "all": "усі",
+    "Video preview": "Відео-превʼю",
+    "Plays a piece of the clip with the current sliders. Run the node once, then it recomputes by itself": "Програє шматок кліпу з поточними повзунками. Один раз запусти ноду (Run) — далі превʼю перераховується саме"
   }
 }

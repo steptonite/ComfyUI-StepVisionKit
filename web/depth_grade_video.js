@@ -85,9 +85,10 @@ function toneValues(A) {
 }
 
 class VideoPanel {
-    constructor(node) {
+    constructor(node, opts = {}) {
         ensureStyles();
         this.node = node;
+        this.embedded = !!opts.embedded;   // у картці самої Depth Grade: джерело - ця нода, розмір ноди не чіпаємо
         this.A = null;           // нода Depth Grade за входом depth
         this.raw = null;         // payload превью (cache_key, frames_total, …) — ідентичність
         this.rawSeq = 0;         // лічильник появ payload (входить у підпис)
@@ -307,7 +308,7 @@ class VideoPanel {
 
     // ── опитування: джерело, payload, тони → режим; перемальовка DOM лише при зміні підпису
     tick() {
-        const A = findSource(this.node);
+        const A = this.embedded ? this.node : findSource(this.node);
         const raw = A ? rawOf(A) : null;
         if (raw !== this.raw) {
             this.raw = raw;
@@ -493,7 +494,7 @@ class VideoPanel {
     // одноразово (на кожну пропорцію кадру, у самій ноді): картинка вписується в ≤ AUTO_MAXH
     autoSize() {
         const m = this.meta;
-        if (!m || !m.w || !m.h) return;
+        if (this.embedded || !m || !m.w || !m.h) return;
         const node = this.node;
         const ar = m.w / m.h;
         const key = Math.round(ar * 100) / 100;
@@ -863,6 +864,33 @@ class VideoPanel {
         if (this.fragSel.value !== String(this.count())) this.fragSel.value = String(this.count());
         if (!has) setText(this.counter, "");
     }
+}
+
+// Відео-превʼю в картці Depth Grade - та сама панель, що в ноді View · відео, без окремої ноди (fps 24).
+// Панель живе, лише поки розгортка відкрита: закрив - опитування й запити зупиняються.
+export const EMBED_H = 380;
+export function videoSection(node) {
+    const det = document.createElement("details");
+    det.className = "svk-more svk-dg-video";
+    const sum = document.createElement("summary");
+    sum.innerHTML = `<span>${T("Video preview")}</span>`;
+    sum.title = T("Plays a piece of the clip with the current sliders. Run the node once, then it recomputes by itself");
+    const host = h("div", `height:${EMBED_H}px;margin-top:${GAP}px`);
+    det.append(sum, host);
+    let panel = null, restoring = false;
+    const open = () => { if (panel) return; panel = new VideoPanel(node, { embedded: true }); host.append(panel.root); panel.layout(); };
+    const close = () => { panel?.dispose(); panel?.root.remove(); panel = null; };
+    det.addEventListener("toggle", () => {
+        det.open ? open() : close();
+        node.properties ??= {};
+        node.properties.svkVideoOpen = det.open;
+        if (restoring) { restoring = false; return; }          // розмір ноди з workflow вже враховує відкриту панель
+        node.setSize([node.size[0], Math.max(80, node.size[1] + (det.open ? EMBED_H : -EMBED_H))]);
+        node.setDirtyCanvas?.(true, true);
+    });
+    const restore = () => { if (node.properties?.svkVideoOpen && !det.open) { restoring = true; det.open = true; } };
+    restore();
+    return { root: det, restore, extraH: () => (det.open ? EMBED_H : 0), dispose: close };
 }
 
 function registerVideo(nodeType) {

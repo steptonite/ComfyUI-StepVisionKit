@@ -6,6 +6,7 @@ import { el, W, control, morePanel, keepWheel, fitToNode, scrollHint, hideWidget
 import { api } from "../../scripts/api.js";
 import { T, LANG, DICT } from "./svk_i18n.js";
 import { yoloPreview, PREVIEW_H } from "./yolo_preview.js";
+import { videoSection } from "./depth_grade_video.js";
 
 const CSS_URL = new URL("./svk_ui.css", import.meta.url).href;
 const NODE_COLOR = "#2a2a2f", NODE_BG = "#151518";      // = --svk-line / --svk-card
@@ -42,6 +43,8 @@ const MAIN = {
 };
 // превʼю над керуваннями: кадр із боксами останнього Run
 const PREVIEW = { LexYOLODetect: yoloPreview, VKDetect: yoloPreview };
+// розгортка під головними керуваннями: відео-превʼю Depth Grade (окрема нода View · відео лишається для старих workflow)
+const EXTRA = { SVKDepthGrade: videoSection };
 // лише колір ноди: власний UI або превʼю картинок під віджетами, картку поверх них не ставимо; Live - стара, лишається як була
 const COLOR_ONLY = ["SVKSaveImageHDR", "SVKSaveDepth16", "SVKRawDepthLoad", "SVKDepthGradeLive", "SVKDepthGradeView", "SVKDepthGradeVideoView"];
 const COLOR_FIELDS = new Set(["color", "tint", "key_color"]);
@@ -82,12 +85,15 @@ function build(node, key, specs) {
         } else root.append(c.row);
         ctl.push(c);
     }
+    const extra = EXTRA[key]?.(node);
+    if (extra) { root.append(extra.root); root.extra = extra; }
     const rest = names.filter(n => !main.includes(n));
     const more = rest.length ? morePanel(node, specs, rest.map(n => { const { seg, ...o } = opts(node, n, specs[n]); return [n, label(key, n), o]; })) : null;
     if (more) root.append(more);
     scrollHint(root);
     root.sync = () => { ctl.forEach(c => c.sync()); more?.sync(); prev?.draw(); };
-    return { root, minH: (prev ? PREVIEW_H + ROW_H + 20 : 0) + main.length * ROW_H + (more ? ROW_H : 0) + CARD_PAD };
+    const minH = (prev ? PREVIEW_H + ROW_H + 20 : 0) + main.length * ROW_H + (more ? ROW_H : 0) + (extra ? ROW_H : 0) + CARD_PAD;
+    return { root, minH: () => minH + (extra?.extraH() || 0) };
 }
 
 function hideRepresented(node, specs) {
@@ -117,20 +123,22 @@ app.registerExtension({
             if (!card) return r;
             const { root, minH } = build(this, key, specs);
             this.__svkCard = root;
-            this.addDOMWidget("svk_card", "svk_card", root, { serialize: false, hideOnZoom: false, getMinHeight: () => minH });
+            this.addDOMWidget("svk_card", "svk_card", root, { serialize: false, hideOnZoom: false, getMinHeight: minH });
             hideRepresented(this, specs);
             const changed = this.onWidgetChanged;     // віджет змінили не з картки (скидання, пресет у Depth Grade View) -> оновити картку
             this.onWidgetChanged = function () { const r = changed?.apply(this, arguments); root.sync(); return r; };
             const sz = this.computeSize();
             this.setSize([Math.max(START_W, sz[0]), sz[1]]);
             fitToNode(this, root);
+            const removed = this.onRemoved;
+            this.onRemoved = function () { root.extra?.dispose(); return removed?.apply(this, arguments); };
             return r;
         };
         const onConfigure = nodeType.prototype.onConfigure;
         nodeType.prototype.onConfigure = function () {
             const r = onConfigure?.apply(this, arguments);
             this.color = NODE_COLOR; this.bgcolor = NODE_BG;
-            if (this.__svkCard) { hideRepresented(this, specs); this.__svkCard.sync(); }      // значення з workflow -> картка
+            if (this.__svkCard) { hideRepresented(this, specs); this.__svkCard.sync(); this.__svkCard.extra?.restore(); }  // значення з workflow -> картка
             return r;
         };
     },
