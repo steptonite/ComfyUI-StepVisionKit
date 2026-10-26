@@ -49,7 +49,16 @@ def _render_subproc(frames, dep, kw, progress, out_shape=None):
     import queue
     if out_shape is None:
         out_shape = tuple(frames.shape[:3]) + (3,)
-    job = os.path.join(_PARENT, "_cache", "jobs", uuid.uuid4().hex[:12])
+    jobs = os.path.join(_PARENT, "_cache", "jobs")
+    os.makedirs(jobs, exist_ok=True)
+    for old in os.listdir(jobs):                           # залишки прогону, який убили посеред рендеру (finally не встиг)
+        shutil.rmtree(os.path.join(jobs, old), ignore_errors=True)
+    need = frames.nbytes + dep.nbytes + 4 * int(np.prod(out_shape))
+    free = shutil.disk_usage(jobs).free
+    if free < need + 2**30:
+        raise RuntimeError("DepthLook: this clip needs ≈%.1f GB of free disk for rendering, only %.1f GB free. "
+                           "Delete old outputs or render fewer frames." % (need / 1e9, free / 1e9))
+    job = os.path.join(jobs, uuid.uuid4().hex[:12])
     proc = None
     try:
         if getattr(progress, "stage", None):
@@ -103,10 +112,9 @@ def _render_subproc(frames, dep, kw, progress, out_shape=None):
             errf.flush()
             tail = open(os.path.join(job, "err.txt"), errors="replace").read()[-1500:]
             raise RuntimeError("DepthLook worker exited with code %s:\n%s" % (rc, tail))
-        mmr = np.load(os.path.join(job, "out.npy"), mmap_mode="r")
-        arr = np.array(mmr)                                # справжня копія в памʼять процесу
-        del mmr
-        return arr
+        # результат лишається на диску (mmap), не копія в RAM: кліп 1080p не тримається в памʼяті вдруге.
+        # rmtree нижче лише відвʼязує файл - дані живуть, доки масив/тензор не звільнять
+        return np.load(os.path.join(job, "out.npy"), mmap_mode="r+")
     finally:
         if proc is not None:
             _kill_group(proc)

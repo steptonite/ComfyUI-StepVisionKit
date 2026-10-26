@@ -21,9 +21,9 @@ function readLang() {
 
 // Мова фіксується на завантаженні сторінки: назви нод уже зареєстровані, тож зміна діє після перезавантаження.
 export const LANG = readLang();
-let DICT = { nodes: {}, ui: {} };
+export let DICT = { nodes: {}, ui: {} };
 if (LANG === "uk") {
-    try { DICT = await (await fetch(new URL("./i18n/uk.json", import.meta.url))).json(); }
+    try { DICT = await (await fetch(new URL("./i18n/uk.json", import.meta.url), { cache: "no-cache" })).json(); }
     catch (e) { console.warn("[StepVisionKit] uk.json not loaded, staying in English", e); }
 }
 

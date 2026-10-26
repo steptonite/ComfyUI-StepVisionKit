@@ -117,7 +117,7 @@ class DepthLookVideo:
     _consumed = {}           # unique_id -> останній використаний render_token (one-shot: той самий токен фінал вдруге не запускає)
 
     RETURN_TYPES = ("IMAGE", "FLOAT", "IMAGE")
-    RETURN_NAMES = ("image", "play_fps", "final")
+    RETURN_NAMES = ("preview", "play_fps", "final")
     OUTPUT_NODE = True       # стрічка превʼю в ноді має рахуватись і без підключеного виходу
     FUNCTION = "run"
     CATEGORY = "StepVisionKit/Depth"
@@ -156,7 +156,8 @@ class DepthLookVideo:
         del prev_arr
         if not want_final:                                     # дозволено, але ні image=final, ні сокет final не потрібні: віддати превʼю
             return {"ui": ui, "result": (out_prev, play, out_prev)}
-        fin = to_result(self._render(*job, preview=False)[0], image)
+        with look_api.final_render():
+            fin = to_result(self._render(*job, preview=False)[0], image)
         if str(legacy(quality)).startswith("preview"):         # image = превʼю, final = фінал (як і раніше)
             return {"ui": ui, "result": (out_prev, play, fin)}
         return {"ui": ui, "result": (fin, float(fps), fin)}

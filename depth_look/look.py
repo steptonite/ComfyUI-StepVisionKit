@@ -524,12 +524,12 @@ def prepare_lens(img, depth, *, focus=0.85, n_layers=10, r_min=0.0025, r_max=0.0
 
 
 def _stretch_copies(img, m, N, length, vp, shift, blur, opacity, fade, shift_col, stops, focus_t0=0.0):
-    """Список (premult RGBA, k) для копій предмета, від найдальшої до найближчої."""
+    """Генератор (premult RGBA, k) копій предмета, від найдальшої до найближчої. По одній: список з 18 повнокадрових
+    RGBA float32 тримав ~3.5 ГБ на 12 Мп (26.10.2026), а споживач однаково кладе їх у comp одну за одною."""
     H, W = m.shape
     lum = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     rgba = np.dstack([img * m[..., None], m]).astype(np.float32)
     vx, vy = vp[0] * W, vp[1] * H
-    out = []
     for k in range(N, 0, -1):
         u = k / N
         s = 1.0 - length * u
@@ -547,8 +547,7 @@ def _stretch_copies(img, m, N, length, vp, shift, blur, opacity, fade, shift_col
         col = col * (1 - sc) + g * sc
         f = opacity * (1 - u) ** fade
         a2 = a * f
-        out.append((np.dstack([col * a2[..., None], a2]).astype(np.float32), k))
-    return out
+        yield np.dstack([col * a2[..., None], a2]).astype(np.float32), k
 
 
 def _screen(a, b):
@@ -951,7 +950,8 @@ def depth_look_lens(img, depth, *, cache=None,
     HL = max(H, W)                                            # радіуси - частки довгої сторони (портрет: = H)
     time = float(time)
     stops = gradient_stops or LENS_STOPS
-    if cache is None:
+    own_cache = cache is None                                 # свій кеш (фінальний рендер): шар звільняємо одразу після вжитку
+    if own_cache:
         cache = prepare_lens(img, d, focus=focus, n_layers=n_layers, r_min=r_min, r_max=r_max,
                              lens_gamma=lens_gamma, dispersion=dispersion, blur_amount=blur_amount,
                              blur_target=blur_target)
@@ -1033,9 +1033,13 @@ def depth_look_lens(img, depth, *, cache=None,
         comp[..., :3] = rgb + comp[..., :3] * (1 - a[..., None])
         comp[..., 3] = a + comp[..., 3] * (1 - a)
 
-    for L in cache["layers"]:
+    layers = cache["layers"]
+    for li in range(len(layers)):
+        L = layers[li]
         if L is None:
             continue
+        if own_cache:                                         # кеш превʼю (Renderer) не чіпаємо: повзунки кольору його перевикористовують
+            layers[li] = None
         if not stretch_done and L["c"] >= subject_lo:         # копії предмета лягають між фоном і предметом
             for c4, _ in _stretch_copies(img, m, int(stretch_steps), stretch_length, vanishing_point,
                                          stretch_shift, stretch_blur, stretch_opacity, stretch_fade,

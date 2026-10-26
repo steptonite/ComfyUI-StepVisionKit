@@ -130,18 +130,23 @@ class SVKLoadVideoPro:
         cmd += ["-f", "rawvideo", "-pix_fmt", pix, "-"]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         size = w * h * ch * 2
-        frames = []
+        bufs = []
         while True:
             buf = proc.stdout.read(size)
             if len(buf) < size:
                 break
-            frames.append(np.frombuffer(buf, np.uint16).reshape(h, w, ch).astype(np.float32) / 65535.0)
+            bufs.append(buf)
         err = proc.stderr.read().decode(errors="ignore")
         proc.wait()
-        if not frames:
+        if not bufs:
             raise RuntimeError(f"Load Video (Pro): no frames decoded from {p}. {err.strip()[-300:]}")
-        a = np.stack(frames)
-        rgb, al = a[..., :3], (a[..., 3] if alpha else np.ones(a.shape[:3], np.float32))
+        # 16-біт кадри -> один float32 масив покадрово, звільняючи буфери: пік ≈ розмір результату, не список + stack (×2+)
+        n = len(bufs)
+        a = np.empty((n, h, w, ch), np.float32)
+        for i in range(n):
+            np.multiply(np.frombuffer(bufs[i], np.uint16).reshape(h, w, ch), 1.0 / 65535.0, out=a[i], dtype=np.float32)
+            bufs[i] = None
+        rgb = a[..., :3]
         tr = s.get("color_transfer", "")
         if output_curve == "linear":
             rgb = to_linear(rgb, tr)
@@ -149,10 +154,11 @@ class SVKLoadVideoPro:
                 rgb = C.apply_matrix(rgb, C.M2020_TO_709)
         info = (f"{os.path.basename(p)} · {s.get('codec_name')} {s.get('profile', '')} · {s.get('pix_fmt')} · "
                 f"{s['width']}×{s['height']} @ {s['fps']:.3f} · trc {tr or '?'} · prim {s.get('color_primaries', '?')} · "
-                f"{len(frames)} frame(s) → {output_curve}")
+                f"{n} frame(s) → {output_curve}")
         print(f"[SVK Load Video] {info}")
-        return (torch.from_numpy(np.ascontiguousarray(rgb)), torch.from_numpy(np.ascontiguousarray(al)),
-                s["fps"] / every_nth, len(frames), info)
+        # без альфи - одна площина одиниць на весь кліп (вʼю), а не B×H×W float32
+        al = torch.from_numpy(np.ascontiguousarray(a[..., 3])) if alpha else torch.ones((1, h, w)).expand(n, h, w)
+        return (torch.from_numpy(np.ascontiguousarray(rgb)), al, s["fps"] / every_nth, n, info)
 
 
 def _read_seq_frame(f):

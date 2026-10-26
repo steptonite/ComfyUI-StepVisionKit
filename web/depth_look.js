@@ -2,8 +2,8 @@
 // (той самий tune.html, що й автономний тюнер). Параметри iframe -> віджет params_json (зберігається у workflow).
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { ICON, control, morePanel, keepWheel, stageLine, snapUI, restoreUI, migrateLegacyValues } from "./svk_ui.js";
-import { T } from "./svk_i18n.js";
+import { control, morePanel, markChanged, keepWheel, stageLine, snapUI, restoreUI, migrateLegacyValues } from "./svk_ui.js";
+import { T, LANG, DICT } from "./svk_i18n.js";
 
 const NODE = "DepthLook";
 const START_W = 1000, START_H = 900;
@@ -19,7 +19,7 @@ const PANELS = new Set();          // {node, frame}
 const OLD_ORDER = ["preset", "clean_depth", "depth_light_is_near", "overrides", "palette", "fps", "start_time",
                    "params_json", "max_side", "depth_levels", "mode"];
 const NEW_DEFAULTS = { output_size: "original", max_side: 0, depth_levels: "clip",
-                       mode: "tune (fast, 720)", overrides: "{}", palette: "", params_json: "" };
+                       mode: "tune (fast, 720)", overrides: "{}", palette: "", params_json: "", auto_run: true };
 function migrateOld(node, info) {
     const v = info?.widgets_values;
     // старий формат: на місці fps (індекс 5) і start_time (6) числа; у новому на 5-му depth_levels (рядок)
@@ -54,13 +54,17 @@ function hideWidget(w) {
     if (w.element?.style) w.element.style.display = "none";
 }
 
-function post(panel, msg) {
-    try { panel.frame.contentWindow?.postMessage(msg, "*"); } catch (_) { /* iframe ще не готовий */ }
+// галочка «світле = близько» -> тюнер одразу (без Run): сервер перебудовує глибину превʼю з сирої
+function sendLight(node) {
+    const w = node?.widgets?.find(x => x.name === "depth_light_is_near");
+    if (!w) return;
+    for (const p of PANELS) if (p.node === node) post(p, { type: "depth_look_light", value: !!w.value });
 }
 
-function markChanged() {
-    try { app.graph?.setDirtyCanvas(true, true); } catch (_) {}
-    try { app.extensionManager?.workflow?.activeWorkflow?.changeTracker?.checkState(); } catch (_) {}
+function autoWidget(node) { return node?.widgets?.find(x => x.name === "auto_run"); }
+
+function post(panel, msg) {
+    try { panel.frame.contentWindow?.postMessage(msg, "*"); } catch (_) { /* iframe ще не готовий */ }
 }
 
 function readParams(node) {
@@ -76,7 +80,18 @@ function onMessage(ev) {
     if (!panel) return;
     const node = panel.node;
     if (m.type === "depth_look_ready") {
+        if (LANG === "uk") post(panel, { type: "depth_look_i18n", ui: DICT.ui });
+        const lw = node.widgets?.find(x => x.name === "depth_light_is_near");
+        if (lw) post(panel, { type: "depth_look_light", value: !!lw.value });      // до init: перший рендер уже з нею
         post(panel, { type: "depth_look_init", params: initParams(node), preset: presetWidget(node)?.value });
+        post(panel, { type: "depth_look_auto", value: autoWidget(node)?.value !== false });
+    } else if (m.type === "depth_look_render_final") {
+        renderFinal(node);
+    } else if (m.type === "depth_look_open_full") {
+        openFull(node);
+    } else if (m.type === "depth_look_auto") {       // галочка в тюнері -> віджет auto_run; інший тюнер цієї ноди (повний екран) - синхронно
+        const w = autoWidget(node);
+        if (w) { w.value = !!m.value; markChanged(); for (const p of PANELS) if (p.node === node && p !== panel) post(p, { type: "depth_look_auto", value: w.value }); }
     } else if (m.type === "depth_look_params") {
         const w = paramsWidget(node);
         if (w && m.params) { w.value = JSON.stringify(m.params); markChanged(); }
@@ -84,6 +99,7 @@ function onMessage(ev) {
         const pw = presetWidget(node);
         if (pw && m.preset) {
             const vals = pw.options?.values;
+            if (Array.isArray(vals) && m.removed) { const i = vals.indexOf(m.removed); if (i >= 0) vals.splice(i, 1); }   // видалено в тюнері
             if (Array.isArray(vals) && !vals.includes(m.preset)) { vals.push(m.preset); vals.sort(); }
             pw.value = m.preset;     // напряму, без callback (він скидає params_json)
             markChanged();
@@ -139,7 +155,17 @@ function openFull(node) {
     node.__dlFull = { close };
     // вбудований тюнер ховаємо БЕЗ зміни розміру (display:none обнуляв iframe: тюнер перелічував сітку й кадр у 0×0, нода шрінкалась) - лише visibility
     if (node.__dlPanel) node.__dlPanel.frame.style.visibility = "hidden";
-    frame.src = tunerURL(node);
+    frame.src = tunerURL(node) + "&full=1";
+}
+
+const MODE_TUNE = "tune (fast, 720)", MODE_FULL = "full render";
+// «Render final»: режим full лише на одне завдання - граф серіалізується в queuePrompt, потім режим назад у превʼю
+async function renderFinal(node) {
+    const w = node.widgets?.find(x => x.name === "mode");
+    if (!w) return;
+    w.value = MODE_FULL; markChanged();
+    try { await app.queuePrompt(0, 1); } catch (e) { console.warn("[DepthLook]", e); }
+    w.value = MODE_TUNE; markChanged();
 }
 
 function createBar(node, specs) {
@@ -148,20 +174,12 @@ function createBar(node, specs) {
     bar.style.cssText = "height:auto;flex:none;padding:6px 2px 0;gap:6px";
     const row = document.createElement("div");
     row.className = "svk-bar";
-    const full = document.createElement("button");
-    full.className = "svk-ibtn"; full.type = "button"; full.innerHTML = ICON.full; full.title = T("tuner full screen (Esc — back)");
-    full.onclick = () => openFull(node);
-    row.append(full);
     const ctl = [];
-    if (specs.mode) {
-        const vals = specs.mode[0] || [];
-        const c = control(node, "mode", specs.mode, "", { seg: { [vals[0]]: T("preview"), [vals[1]]: T("final") }, tip: specs.mode[1]?.tooltip });
-        row.append(c.row); ctl.push(c);
-    }
+    // «Render final», галочка auto_run і кнопка повного екрана - у тюнері (tune.html), не тут (26.10.2026)
     // рядок стану (етап / кадр k з N) - у тому ж рядку, що й керування, займає вільне місце
     const st = stageLine(node); st.style.flex = "1"; row.append(st);
-    const grow = document.createElement("span"); grow.className = "grow"; row.append(grow);
-    const more = morePanel(node, specs, MORE);                       // «ще» - як на інших нодах: останній рядок на всю ширину
+    const more = morePanel(node, specs, MORE.map(([n, l, o]) =>      // «світле = близько» -> тюнер одразу
+        n === "depth_light_is_near" ? [n, l, { ...(o || {}), onChange: () => sendLight(node) }] : [n, l, o]));                       // «ще» - як на інших нодах: останній рядок на всю ширину
     bar.append(row, more);
     keepWheel(bar);
     bar.sync = () => { ctl.forEach(c => c.sync()); more.sync(); };
@@ -268,6 +286,8 @@ app.registerExtension({
             const r = onConfigure?.apply(this, arguments);
             migrateOld(this, info);
             migrateLegacyValues(this);
+            const mw = this.widgets?.find(x => x.name === "mode");
+            if (mw) mw.value = MODE_TUNE;          // старі графи з «final» у режимі: тепер фінал лише кнопкою
             hideAll(this);
             startPanel(this);
             return r;

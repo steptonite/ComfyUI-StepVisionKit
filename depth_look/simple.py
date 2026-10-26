@@ -123,8 +123,9 @@ class DepthLookSimple:
         kw = dict(grade=g, clean_depth=bool(clean_depth), light_is_near=bool(depth_light_is_near),
                   max_side=int(max_side or 0), depth_levels="clip", output_size=out_size, static=True)
         t0 = time.time()
-        arr = render(frames, dep, kw, make_progress(frames.shape[0], unique_id),
-                     out_shape(frames.shape[0], frames.shape[1], frames.shape[2], out_size))
+        with look_api.final_render():
+            arr = render(frames, dep, kw, make_progress(frames.shape[0], unique_id),
+                         out_shape(frames.shape[0], frames.shape[1], frames.shape[2], out_size))
         mix = float(min(max(look_mix, 0.0), 1.0))
         if mix < 1.0:                      # міксер оригінал↔лук: лінійно по кодованих значеннях (так само, як прозорість у превʼю картки)
             stage(unique_id, "mix")

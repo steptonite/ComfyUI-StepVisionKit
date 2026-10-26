@@ -51,6 +51,12 @@
 .svk-frame .svk-busy::after { content: ""; position: absolute; inset: 0; width: 40%; background: var(--svk-accent); animation: svk-slide 1.1s var(--svk-ease) infinite; }
 @keyframes svk-slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 .svk-frame.is-busy img.svk-look { filter: saturate(.85); }
+/* відео-нода: параметри змінено, а кадри ще від минулого прогону */
+.svk-frame .svk-stale { position: absolute; left: 6px; right: 6px; top: 6px; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 4px 6px 4px 9px;
+  border-radius: var(--svk-r-sm); background: rgba(14, 14, 16, .84); color: var(--svk-text); font-size: 11px; line-height: 1.3; }
+.svk-frame .svk-stale span { flex: 1 1 auto; min-width: 0; }
+.svk-frame .svk-stale .svk-btn { flex: none; padding: 2px 10px; font-size: 11px; }
+.svk-frame.is-stale > img { opacity: .5; transition: opacity .2s; }
 .svk-frame .svk-tag { position: absolute; left: 8px; bottom: 8px; padding: 2px 7px; border-radius: 99px; font-size: var(--svk-fs-cap);
   background: rgba(14, 14, 16, .72); color: var(--svk-dim); border: 1px solid var(--svk-line); }
 

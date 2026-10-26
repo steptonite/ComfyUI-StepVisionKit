@@ -300,7 +300,11 @@ async function doPreview(S) {
     S.frame.classList.add("is-busy");
     try {
         const r = await fetch(simpleURL(S.node, "render"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(collectBody(S)) });
-        if (r.status === 409) { S.info.node_frame = false; showEmpty(S); return; }
+        if (r.status === 409) {
+            const j = await r.json().catch(() => ({}));
+            if (j.busy) return;                            // іде фінальний рендер: лишаємо старе превʼю, після Run картка оновиться сама
+            S.info.node_frame = false; showEmpty(S); return;
+        }
         if (!r.ok) { let m = ""; try { m = (await r.json()).err; } catch (_) {} showEmpty(S, m || T("error {s}").replace("{s}", r.status)); return; }
         const blob = await r.blob();
         const url = URL.createObjectURL(blob);
@@ -445,7 +449,7 @@ async function renderFinal(node) {
     if (!hasFinal && q && Array.isArray(node.__svkv?.specs?.quality?.[0])) setW(node, "quality", node.__svkv.specs.quality[0][1]);   // у image підключено - він і має нести фінал
     markChanged();
     node.__svkv?.sync?.();
-    try { await app.queuePrompt(0, 1); } catch (e) { console.warn("[DepthLook]", e); }
+    await runVideo(node);
     setW(node, "render_token", "");          // токен уже в завданні; у графі не лишаємо - збережений граф сам фінал не запустить
     markChanged();
 }
@@ -461,12 +465,22 @@ function buildTop(node, specs, onChange) {
         bar.append(c.row); ctl.push(c);
     }
     // гейт рендеру: превʼю йде завжди, фінал - за кнопкою (одноразовий токен) або з галочкою auto
-    const gate = el("div", "svk-bar"); gate.style.cssText = "flex-basis:100%;align-items:center";
+    const gate = el("div", "svk-bar"); gate.style.cssText = "flex-basis:100%;justify-content:flex-end;align-items:center;gap:8px";
     const rb = el("button", "svk-btn primary", ICON.play + " " + T("Render final")); rb.type = "button";
-    rb.style.cssText = "display:inline-flex;align-items:center;gap:6px;flex:1";
+    rb.style.cssText = "display:inline-flex;align-items:center;gap:6px;flex:none;padding:3px 12px;font-size:12px";   // компактна, справа - не на всю ширину
     rb.title = T("Renders the final once with the current settings and passes it to the connected nodes (Video Combine / Save). A normal run only renders the preview.");
     rb.onclick = () => renderFinal(node);
-    gate.append(rb);
+    // авто-превʼю: властивість ноди, не віджет (widgets_values позиційні - новий віджет зсунув би старі графи)
+    const ap = el("label", "svk-num"); ap.style.cssText = "display:inline-flex;align-items:center;gap:4px;margin-right:auto;cursor:pointer";
+    ap.title = T("Re-render the preview by itself 1.5 s after you stop changing settings");
+    const apc = el("input"); apc.type = "checkbox"; apc.checked = autoOn(node);
+    apc.onchange = () => {
+        node.properties = node.properties || {}; node.properties.svk_auto_preview = apc.checked; markChanged();
+        const V = node.__svkv; if (V) { V.autoBlock = null; paintStale(V); tryAuto(V); }
+    };
+    ap.append(apc, document.createTextNode(T("Auto preview")));
+    ctl.push({ sync: () => { apc.checked = autoOn(node); } });
+    gate.append(ap, rb);
     if (specs.auto_render && W(node, "auto_render")) {
         const c = control(node, "auto_render", specs.auto_render, T("Auto"), { onChange });
         c.row.style.flex = "none"; gate.append(c.row); ctl.push(c);
@@ -477,6 +491,90 @@ function buildTop(node, specs, onChange) {
         if (fpsRow) { fpsRow.style.opacity = linked ? ".4" : ""; fpsRow.style.pointerEvents = linked ? "none" : ""; fpsRow.title = linked ? T("fps comes from the connected input") : fpsTip; }
     };
     return { bar, ctl, fpsRow, fpsTip, paintFps };
+}
+// ---- іменовані пресети руху/анімації відео-ноди (сервер: depth_look/video_presets.py). Зберігається все, що є в нативних віджетах
+// (сервер лишає лише ключі руху й анімації; fps, розмір, якість, службові поля не входять).
+const VP_URL = "/depth_look/video_presets";
+async function vpCall(path, body) {
+    const r = await api.fetchApi(VP_URL + path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.err || ("HTTP " + r.status));
+    return j;
+}
+function coerceToSpec(name, spec, v) {          // значення пресета -> допустиме для віджета (діапазон / список), інакше undefined
+    if (!spec) return undefined;
+    const [t, o = {}] = spec;
+    const opts = Array.isArray(t) ? t : t === "COMBO" ? (o.options || []) : null;
+    if (opts) return opts.includes(v) ? v : undefined;
+    if (t === "INT" || t === "FLOAT") {
+        if (typeof v !== "number" || !isFinite(v)) return undefined;
+        if (o.min != null) v = Math.max(o.min, v);
+        if (o.max != null) v = Math.min(o.max, v);
+        return t === "INT" ? Math.round(v) : v;
+    }
+    if (t === "BOOLEAN") return typeof v === "boolean" ? v : undefined;
+    if (t === "STRING") return typeof v === "string" && (!/color$/.test(name) || /^#[0-9a-fA-F]{6}$/.test(v)) ? v : undefined;
+    return undefined;
+}
+function presetRow(node, specs, onLoaded) {
+    const row = el("div", "svk-bar svk-field");
+    const sel = el("select"); sel.style.cssText = "flex:1;min-width:0;width:auto";
+    sel.title = T("Saved motion & animation settings — pick one to load it");
+    const save = el("button", "svk-btn", T("Save as…")); save.type = "button";
+    save.style.cssText = "flex:none;padding:3px 10px;font-size:12px";
+    save.title = T("Save the current motion & animation settings under a name");
+    const del = el("button", "svk-ibtn", "✕"); del.type = "button"; del.title = T("Delete this preset");
+    row.append(sel, save, del);
+    let list = [];
+    const cur = () => list.find(p => p.name === sel.value);
+    const paint = () => {
+        const off = !cur() || cur().locked;
+        del.disabled = off; del.style.opacity = off ? ".35" : ""; del.style.pointerEvents = off ? "none" : "";
+        del.title = cur()?.locked ? T("Built-in preset — cannot be deleted") : T("Delete this preset");
+    };
+    const fill = (pick) => {
+        sel.textContent = "";
+        sel.append(new Option(T("— preset —"), ""));
+        for (const p of list) sel.append(new Option(p.name, p.name));
+        sel.value = list.some(p => p.name === pick) ? pick : "";
+        paint();
+    };
+    const refresh = async (pick) => {
+        try { list = (await vpCall("")).presets || []; } catch (e) { console.warn("[DepthLook] presets:", e); list = []; }
+        fill(pick ?? sel.value);
+    };
+    sel.onchange = async () => {
+        paint();
+        if (!sel.value) return;
+        try {
+            const { values } = await vpCall("/" + encodeURIComponent(sel.value));
+            for (const [k, v] of Object.entries(values || {})) {
+                if (!W(node, k)) continue;
+                const c = coerceToSpec(k, specs[k], v);
+                if (c !== undefined) setW(node, k, c);
+            }
+            markChanged();
+            onLoaded?.();
+        } catch (e) { console.warn("[DepthLook] preset load:", e); window.alert(T("Could not load the preset") + ": " + e.message); }
+    };
+    save.onclick = async () => {
+        const name = (window.prompt(T("Preset name (letters, digits, _ - .)"), cur() && !cur().locked ? cur().name : "") || "").trim();
+        if (!name) return;
+        const exists = list.some(p => p.name.toLowerCase() === name.replace(/ /g, "_").toLowerCase());
+        if (exists && !window.confirm(T("Overwrite preset") + " «" + name + "»?")) return;
+        const values = {};
+        for (const w of node.widgets || []) if (["number", "string", "boolean"].includes(typeof w.value) && specs[w.name]) values[w.name] = w.value;
+        try { const j = await vpCall("/save", { name, values }); list = j.presets || list; fill(j.name); }
+        catch (e) { console.warn("[DepthLook] preset save:", e); window.alert(T("Could not save the preset") + ": " + e.message); }
+    };
+    del.onclick = async () => {
+        const p = cur(); if (!p || p.locked) return;
+        if (!window.confirm(T("Delete preset") + " «" + p.name + "»?")) return;
+        try { const j = await vpCall("/delete", { name: p.name }); list = j.presets || []; fill(""); }
+        catch (e) { console.warn("[DepthLook] preset delete:", e); window.alert(T("Could not delete the preset") + ": " + e.message); }
+    };
+    refresh("");
+    return { row, refresh };
 }
 // рух кольору + рух ефектів + «ще»: один збірник і для картки в ноді, і для панелі повного екрана
 function buildMotion(node, specs, onChange) {
@@ -527,6 +625,7 @@ function buildMotion(node, specs, onChange) {
         dmSub.push([name, box]);
     }
     const more = morePanel(node, specs, VIDEO_MORE);
+    const pr = presetRow(node, specs, () => { sync(); onChange?.(); });
     const refresh = () => {
         const mode = Number(W(node, "grad_mode")?.value || 0);
         modeSel.value = String(mode);
@@ -539,7 +638,7 @@ function buildMotion(node, specs, onChange) {
     };
     const sync = () => { ctl.forEach(c => c.sync()); more.sync(); refresh(); };
     refresh();
-    return { els: [col, fx, dm, more], more, ctl, refresh, sync };
+    return { els: [pr.row, col, fx, dm, more], more, ctl, refresh, sync };
 }
 function setupVideo(node, specs) {
     if (node.__svkv) return;
@@ -560,14 +659,20 @@ function setupVideo(node, specs) {
     const run = el("button", "svk-btn primary", ICON.play + " " + T("Preview"));
     run.style.cssText = "display:inline-flex;align-items:center;gap:6px";
     run.title = T("The frame strip appears after a preview run: set the mode to “preview” and run the graph");
-    run.onclick = () => { setW(node, "quality", (specs.quality?.[0] || [])[0] ?? W(node, "quality")?.value); markChanged(); try { app.queuePrompt(0, 1); } catch (e) { console.warn("[DepthLook]", e); } };
+    run.onclick = () => { setW(node, "quality", (specs.quality?.[0] || [])[0] ?? W(node, "quality")?.value); markChanged(); runVideo(node); };
     V.empty.append(run);
     V.play = el("button", "svk-ibtn", ICON.play); V.play.type = "button"; V.play.title = T("play the strip");
     V.play.style.cssText = "position:absolute;right:6px;bottom:6px;display:none";
-    view.append(V.img, V.empty, V.play);
+    V.badge = el("div", "svk-stale"); V.badge.style.display = "none";
+    V.badgeTxt = el("span");
+    V.badgeBtn = el("button", "svk-btn primary", T("Update")); V.badgeBtn.type = "button";
+    V.badgeBtn.title = T("Render the preview with the current settings now");
+    V.badgeBtn.onclick = () => runVideo(node);
+    V.badge.append(V.badgeTxt, V.badgeBtn);
+    view.append(V.img, V.empty, V.play, el("div", "svk-busy"), V.badge);
     V.strip = el("div", "svk-strip");
     V.status = stageLine(node);
-    const refresh = () => V.refresh?.();
+    const refresh = () => { V.refresh?.(); videoDirty(V); };      // зміна параметра користувачем: превʼю застаріло
     // fps + превʼю/фінал; повзунки руху й «ще» - ті самі збірники, що й у повному екрані (openVideoFull)
     const top = buildTop(node, specs, refresh);
     const bar = top.bar, ctl = top.ctl;
@@ -625,6 +730,43 @@ function syncFinalOut(node) {
     if (w) w.value = !!node.outputs?.find(o => o.name === "final")?.links?.length;
 }
 const fpsLinked = node => node.inputs?.some(i => i.name === "fps_in" && i.link != null);
+// ---- превʼю за параметрами: зміна → плашка «кадри старі» і (авто) перерахунок після 1.5 с тиші; черга Comfy зайнята - чекаємо її.
+// ver - скільки разів змінювали параметри, sentVer - з якою версією пішов прогін, shownVer - якій версії відповідають кадри
+let QUEUE_LEFT = 0;
+const AUTO_DELAY = 1500;
+const autoOn = node => node.properties?.svk_auto_preview !== false;
+const isStale = V => (V.ver || 0) !== (V.shownVer || 0);
+const canAuto = V => autoOn(V.node) && !!V.meta?.n && !W(V.node, "auto_render")?.value && V.autoBlock !== (V.ver || 0);
+async function runVideo(node) {            // усі запуски з відео-ноди йдуть сюди
+    const V = node.__svkv;
+    if (V) { V.sentVer = V.ver || 0; clearTimeout(V.autoT); V.autoT = null; V.waiting = true; paintStale(V); }
+    try { await app.queuePrompt(0, 1); } catch (e) { console.warn("[DepthLook]", e); if (V) { V.waiting = false; paintStale(V); } }
+}
+function videoDirty(V) {
+    V.ver = (V.ver || 0) + 1;
+    clearTimeout(V.autoT); V.autoT = null;
+    if (canAuto(V)) V.autoT = setTimeout(() => { V.autoT = null; tryAuto(V); }, AUTO_DELAY);
+    paintStale(V);
+}
+function tryAuto(V) {
+    if (!isStale(V) || !canAuto(V) || V.autoT || V.waiting) return;
+    if (QUEUE_LEFT > 0) { paintStale(V); return; }          // повернемось на події status, коли черга спорожніє
+    runVideo(V.node);
+}
+function paintStale(V) {
+    if (!V.badge) return;
+    const stale = isStale(V), sent = V.waiting && V.sentVer === (V.ver || 0);
+    V.view.classList.toggle("is-busy", !!V.waiting);
+    V.view.classList.toggle("is-stale", stale && !!V.meta?.n);
+    const show = stale && !!V.meta?.n;
+    V.badge.style.display = show ? "" : "none";
+    V.badgeTxt.textContent = sent ? T("Rendering the preview with the new settings…")
+        : canAuto(V) ? (QUEUE_LEFT > 0 ? T("Settings changed — the preview updates when the queue is free") : T("Settings changed — updating the preview…"))
+        : T("Settings changed — these frames are old");
+    V.badgeBtn.style.display = sent ? "none" : "";
+    V.full?.paintStale?.(show ? V.badgeTxt.textContent : "");
+}
+function videoNodes() { return (app.graph?._nodes || []).filter(n => n.__svkv); }
 function stripURL(node, i, stamp) { return api.apiURL("/depth_look/strip/" + encodeURIComponent(node.id) + "/" + i + "?v=" + (stamp || 0)); }
 function showShot(V, i) {
     V.sel = i;
@@ -659,7 +801,8 @@ function openVideoFull(V) {
     runBtn.title = T("queue a run with the current settings (a run already in progress is not changed)");
     const back = el("button", null, T("✕ back to graph (Esc)"));
     back.style.cssText = "padding:5px 14px;border:1px solid #444;border-radius:6px;background:#26262b;color:#eee;cursor:pointer";
-    bar.append(el("span", null, T("Depth Look · video node #") + node.id), play, cnt, stat, runBtn, back);
+    const staleEl = el("span", "svk-num"); staleEl.style.cssText = "color:var(--svk-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0";
+    bar.append(el("span", null, T("Depth Look · video node #") + node.id), play, cnt, stat, staleEl, runBtn, back);
     const body = el("div"); body.style.cssText = "flex:1;min-height:0;display:flex";
     const left = el("div"); left.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column";
     const stage = el("div"); stage.style.cssText = "flex:1;min-height:0;position:relative";
@@ -674,7 +817,7 @@ function openVideoFull(V) {
     const panel = el("div", "svk-card svk-scroll");
     panel.style.cssText = "flex:none;width:360px;height:100%;max-height:none;border-left:1px solid #2a2a2f;padding:10px 10px 12px;background:#151518";
     keepWheel(panel);
-    const onChange = () => { V.sync(); M.refresh(); top.paintFps(); };
+    const onChange = () => { V.sync(); M.refresh(); top.paintFps(); videoDirty(V); };
     const top = buildTop(node, specs, onChange);
     const M = buildMotion(node, specs, onChange);
     panel.append(top.bar, ...M.els);
@@ -734,12 +877,14 @@ function openVideoFull(V) {
         },
         reload() { fillStrip(); this.show(Math.min(V.sel, Math.max(0, (V.meta?.n || 1) - 1))); this.paintPlay(); },   // прийшла нова стрічка
         paintPlay() { play.innerHTML = V.timer ? ICON.pause : ICON.play; play.classList.toggle("is-on", !!V.timer); },
+        paintStale(t) { staleEl.textContent = t; staleEl.title = t; },
     };
     play.onclick = () => togglePlay(V);
-    runBtn.onclick = () => { markChanged(); try { app.queuePrompt(0, 1); } catch (e) { console.warn("[DepthLook]", e); } };
+    runBtn.onclick = () => { markChanged(); runVideo(node); };
     back.onclick = close;
     window.addEventListener("keydown", esc, true);
     V.full.reload();
+    paintStale(V);
 }
 function applyStrip(node, meta) {
     const V = node.__svkv; if (!V || !meta || !meta.n) return;
@@ -758,6 +903,11 @@ function applyStrip(node, meta) {
     }
     showShot(V, 0);
     V.full?.reload();                                  // повний екран лишається відкритим і підхоплює новий результат
+    // кадри від нашого прогону - версії, з якою він пішов; від чужого (кнопка Queue Comfy, перезавантаження) - поточних віджетів
+    V.shownVer = V.waiting ? V.sentVer : (V.ver || 0);
+    V.waiting = false;
+    paintStale(V);
+    tryAuto(V);                                        // поки рахувалось, параметри знову міняли
 }
 async function loadStripMeta(node) {          // після перезавантаження сторінки: стрічка з диска
     try {
@@ -783,6 +933,21 @@ app.registerExtension({
             const node = app.graph?.getNodeById?.(Number(id)) ?? app.graph?._nodes_by_id?.[id];
             if (node?.__svkv && ev.detail?.strip) applyStrip(node, ev.detail.strip);
         });
+        // черга спорожніла: прогін без нової стрічки (нода з кешу) - кадри й так відповідають тим параметрам; далі - відкладене авто-превʼю
+        api.addEventListener("status", ev => {
+            const left = ev.detail?.exec_info?.queue_remaining;
+            if (typeof left !== "number") return;
+            QUEUE_LEFT = left;
+            for (const n of videoNodes()) {
+                const V = n.__svkv;
+                if (!left && V.waiting) { V.waiting = false; V.shownVer = V.sentVer; }
+                paintStale(V); if (!left) tryAuto(V);
+            }
+        });
+        // збій/скасування: кадри лишаються старі, але сам не перезапускаємо, доки параметр не змінять (інакше коло помилок)
+        const stop = () => { for (const n of videoNodes()) { const V = n.__svkv; if (V.waiting) { V.waiting = false; V.autoBlock = V.ver || 0; paintStale(V); } } };
+        api.addEventListener("execution_error", stop);
+        api.addEventListener("execution_interrupted", stop);
     },
     async beforeRegisterNodeDef(nodeType, nodeData) {
         const name = nodeData?.name;
@@ -807,6 +972,9 @@ app.registerExtension({
             const r = onConfigure?.apply(this, arguments);
             migrateLegacyValues(this);
             this.color = NODE_COLOR; this.bgcolor = NODE_BG;
+            // верхній вихід - превʼю (26.10.2026); старі графи зберегли назву «image»
+            const o0 = (name === VIDEO || name === "DepthLook") ? this.outputs?.[0] : null;
+            if (o0 && o0.name === "image") { o0.name = "preview"; o0.label = "preview"; }
             if (name === SIMPLE && this.__svk) {
                 for (const w of this.widgets || []) if (w.name !== "svk_simple") hideWidget(w);
                 syncFromWidgets(this.__svk);

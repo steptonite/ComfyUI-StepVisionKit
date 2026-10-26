@@ -7,6 +7,7 @@
 Рендер іде в окремому процесі (worker.py): уся памʼять вертається ОС після кожного прогону.
 Ядро (apply_numpy тощо) — у core.py (без torch), запуск воркера - у render_proc.py."""
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -19,11 +20,15 @@ if _PARENT not in sys.path:
 _HERE = os.path.dirname(os.path.realpath(__file__))
 
 import numpy as np  # noqa: E402,F401
+try:
+    from comfy_execution.graph_utils import ExecutionBlocker  # noqa: E402
+except Exception:            # старий Comfy без блокера
+    ExecutionBlocker = None
 import look  # noqa: E402,F401
 import look_params  # noqa: E402
 import look_api  # noqa: E402
 from .core import (DEFAULT_PRESET, _EXTRA_KEYS, parse_palette, build_preset, _params_from_json,  # noqa: E402,F401
-                   _work_size, _Lazy, apply_numpy, check_inputs, watermark, SIZE_ORIGINAL, OUTPUT_SIZES,
+                   _work_size, _Lazy, apply_numpy, check_inputs, SIZE_ORIGINAL, OUTPUT_SIZES,
                    GRADE_TYPE, parse_output_size, legacy, validate_legacy, resolve_params, static_params, make_grade, out_shape)
 from .render_proc import (_interrupted, _render_subproc, tensors_to_numpy, make_progress, stage,  # noqa: E402,F401
                           render as _render, to_result)
@@ -55,17 +60,19 @@ class DepthLook:
                 "max_side": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8, "tooltip": "Working resolution: the look is computed on a frame with this long side and then upscaled to the final size. 0 = compute directly at final size. For long clips on 8 GB machines."}),
                 "depth_levels": (["clip", "frame"], {"default": "clip", "tooltip": "clip - shared depth levels across the whole clip (no flicker); frame - per-frame stretch. Only with clean_depth."}),
                 # спершу крутиш тюнер на швидкому прогоні, потім перемикаєш на повний рендер і запускаєш
-                "mode": ([MODE_TUNE, MODE_FULL], {"default": MODE_TUNE, "tooltip": "Tuning mode: fast, ≤720, with a PREVIEW watermark. Full render: size from output_size and max_side."}),
+                "mode": ([MODE_TUNE, MODE_FULL], {"default": MODE_TUNE, "tooltip": "Tuning mode: fast, ≤720, the image outputs stay blocked. Full render: size from output_size and max_side."}),
                 # службові (ховає js): стара текстова форма і значення вбудованого тюнера
                 "overrides": ("STRING", {"multiline": True, "default": "{}"}),
                 "palette": ("STRING", {"multiline": True, "default": ""}),
                 "params_json": ("STRING", {"multiline": False, "default": ""}),   # пише вбудований тюнер; JS ховає
+                # новий віджет - лише в кінець: widgets_values старих workflow лягають по порядку
+                "auto_run": ("BOOLEAN", {"default": True, "tooltip": "On: every Run renders the final and passes it to the connected nodes (Save / video). Off: Run renders only the preview, the final output stays blocked until 'Render final'."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
-    RETURN_TYPES = ("IMAGE", GRADE_TYPE)
-    RETURN_NAMES = ("image", "grade")
+    RETURN_TYPES = ("IMAGE", GRADE_TYPE, "IMAGE")
+    RETURN_NAMES = ("preview", "grade", "final")     # final - лише повний рендер: Save на ньому не пише превʼю з водяним знаком
     OUTPUT_NODE = True            # граф запускається й без Save-ноди (превʼю - у вбудованому тюнері)
     FUNCTION = "run"
     CATEGORY = "StepVisionKit/Depth"
@@ -77,11 +84,11 @@ class DepthLook:
 
     def run(self, image, depth, preset, clean_depth, depth_light_is_near, grade=None, output_size=SIZE_ORIGINAL,
             max_side=0, depth_levels="clip", mode=MODE_FULL, overrides="{}", palette="", params_json="",
-            fps=None, start_time=None, unique_id=None):
+            auto_run=True, fps=None, start_time=None, unique_id=None):
         # fps/start_time - лише щоб API-запити зі старих workflow не падали: у статичній ноді їх нема (time = 0)
         frames, dep = tensors_to_numpy(image, depth)
         preset, output_size, mode = legacy(preset), legacy(output_size), legacy(mode)
-        full = (mode == MODE_FULL)
+        full = (mode == MODE_FULL) or bool(auto_run)    # фінал: кнопка «Render final» (mode) або галочка auto
         if not full:                                       # швидкий прогін: look на ≤720, назад до рідного розміру
             max_side = min(int(max_side), TUNE_SIDE) if int(max_side or 0) > 0 else TUNE_SIDE
         out_size = parse_output_size(output_size) if full else 0     # превʼю і фінал не залежать одне від одного
@@ -105,20 +112,22 @@ class DepthLook:
         t0 = time.time()
         kw = dict(grade=g, clean_depth=bool(clean_depth), light_is_near=bool(depth_light_is_near),
                   max_side=int(max_side or 0), depth_levels=depth_levels, output_size=out_size, static=True)
-        arr = _render(frames, dep, kw, progress, out_shape(frames.shape[0], frames.shape[1], frames.shape[2], out_size))
+        with (look_api.final_render() if full else contextlib.nullcontext()):
+            arr = _render(frames, dep, kw, progress, out_shape(frames.shape[0], frames.shape[1], frames.shape[2], out_size))
         mix = float(min(max((grade or {}).get("look_mix", 1.0), 0.0), 1.0))     # «сила луку» з простої ноди
         if mix < 1.0:
             from .simple import mix_with_original
             stage(unique_id, "mix")
             arr = mix_with_original(arr, frames, mix)
             g = dict(g, look_mix=mix)
-        if not full:                                       # щоб превʼю не пішло у фінал непоміченим
-            watermark(arr)
         ui["depth_look_warn"] = warns
         stage(unique_id, "done", secs=round(time.time() - t0, 1))
         print("[DepthLook] %s: %d frame(s) %dx%d -> %dx%d in %.1f s, look strength %.2f" % (
             mode, frames.shape[0], frames.shape[2], frames.shape[1], arr.shape[2], arr.shape[1], time.time() - t0, mix))
-        return {"ui": ui, "result": (to_result(arr, image), g)}
+        out = to_result(arr, image)
+        if not full:                                       # без auto_run / «Render final» далі по графу не йде нічого: превʼю живе в тюнері
+            out = ExecutionBlocker(None) if ExecutionBlocker else None
+        return {"ui": ui, "result": (out, g, out)}
 
 
 from .simple import DepthLookSimple  # noqa: E402
@@ -267,6 +276,39 @@ def register_routes(routes):
         except Exception:
             return web.Response(status=404)
         return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    # ---- пресети руху/анімації відео-ноди (video_presets.py): список / завантажити / зберегти / видалити
+    @routes.get("/depth_look/video_presets")
+    async def dl_vp_list(request):
+        from . import video_presets as VP
+        return _jr(200, {"presets": VP.list_presets()})
+
+    @routes.get("/depth_look/video_presets/{name}")
+    async def dl_vp_load(request):
+        from . import video_presets as VP
+        try:
+            return _jr(200, {"name": request.match_info["name"], "values": VP.load_preset(request.match_info["name"])})
+        except (ValueError, OSError) as e:
+            return _jr(404, {"err": str(e)})
+
+    @routes.post("/depth_look/video_presets/save")
+    async def dl_vp_save(request):
+        from . import video_presets as VP
+        try:
+            body = await request.json()
+            return _jr(200, {"name": VP.save_preset(body.get("name"), body.get("values")), "presets": VP.list_presets()})
+        except (ValueError, OSError, AttributeError) as e:
+            return _jr(400, {"err": str(e)})
+
+    @routes.post("/depth_look/video_presets/delete")
+    async def dl_vp_delete(request):
+        from . import video_presets as VP
+        try:
+            body = await request.json()
+            VP.delete_preset(body.get("name"))
+            return _jr(200, {"presets": VP.list_presets()})
+        except (ValueError, OSError, AttributeError) as e:
+            return _jr(400, {"err": str(e)})
 
     @routes.route("*", "/depth_look/api/{node}/{tail:.*}")
     async def depth_look_api(request):

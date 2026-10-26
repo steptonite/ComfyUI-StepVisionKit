@@ -184,14 +184,19 @@ class SVKDepthReceiver:
     def receive(self, da3_geometry, sky_to_far):
         d = da3_geometry["depth"].float()
         sky = da3_geometry.get("sky") if sky_to_far else None
-        ground = d if sky is None else d[sky < 0.3]
-        if ground.numel() == 0:
-            ground = d
-        lo, hi = float(ground.min()), float(ground.max())
-        v = 1.0 - ((d - lo) / max(hi - lo, 1e-12)).clamp(0.0, 1.0)
+        lo, hi = float("inf"), float("-inf")
+        if sky is not None:                                    # межі по землі покадрово: без маски-копії на весь кліп
+            for i in range(d.shape[0]):
+                g = d[i][sky[i] < 0.3]
+                if g.numel():
+                    lo, hi = min(lo, float(g.min())), max(hi, float(g.max()))
+        if lo > hi:
+            lo, hi = float(d.min()), float(d.max())
+        v = d.sub(lo).div_(max(hi - lo, 1e-12)).clamp_(0.0, 1.0).neg_().add_(1.0)   # одна копія, далі на місці
         if sky is not None:
-            v = torch.where(sky >= 0.3, torch.zeros_like(v), v)
-        return (v.unsqueeze(-1).repeat(1, 1, 1, 3).contiguous(),)
+            v.masked_fill_(sky >= 0.3, 0.0)
+        # 3 канали - вʼю (stride 0): кліп 1080p не множиться втричі в RAM; споживачі лише читають
+        return (v.unsqueeze(-1).expand(-1, -1, -1, 3),)
 
 
 class SVKSaveDepth16:

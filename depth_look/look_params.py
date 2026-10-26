@@ -265,12 +265,29 @@ def load_preset(name_or_path):
     return p
 
 
+def _preset_name(name):
+    return "".join(ch for ch in name if ch.isalnum() or ch in "_-.").strip(".") or "look"
+
+
 def save_preset(name, p):
-    name = "".join(ch for ch in name if ch.isalnum() or ch in "_-.").strip(".") or "look"
+    name = _preset_name(name)
     if name in LOCKED:
         raise ValueError("preset %s is locked, save it under a different name" % name)
     path = os.path.join(PRESETS_DIR, name + ".json")
     json.dump(p, open(path, "w"), indent=1, ensure_ascii=False)
+    return path
+
+
+def delete_preset(name):
+    """Видаляє збережений користувачем пресет; вбудовані (LOCKED) і імена зі «сміттям» (../x) відхиляє."""
+    if not isinstance(name, str) or _preset_name(name) != name:
+        raise ValueError("invalid preset name %r" % (name,))
+    if name in LOCKED:
+        raise ValueError("preset %s is locked, it cannot be deleted" % name)
+    path = os.path.join(PRESETS_DIR, name + ".json")
+    if os.path.dirname(os.path.abspath(path)) != os.path.abspath(PRESETS_DIR) or not os.path.isfile(path):
+        raise ValueError("preset %s not found" % name)
+    os.remove(path)
     return path
 
 

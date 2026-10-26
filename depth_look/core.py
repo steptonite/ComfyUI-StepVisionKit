@@ -281,7 +281,8 @@ def check_inputs(frames_np, depths_np, max_side=0, output_size=0):
         warns.append("depth is flat (a single level) - the look does not work without the 3D part")
     else:
         if lv <= 256:
-            warns.append("depth is 8-bit (%d levels) - the blur will show banding. Connect depth from DA3 directly, not through PNG" % lv)
+            warns.append("depth is 8-bit (%d levels) - the blur will show banding. Connect DA3 directly, or keep depth in float: "
+                         "Raw Depth Save (EXR) -> Raw Depth Load -> Depth Receiver -> depth. An 8-bit PNG through Load Image loses levels" % lv)
         for i in sorted({0, B // 2}):
             di = depths_np[i if dB > 1 else 0]
             di = di[..., 0] if di.ndim == 3 else di
@@ -309,11 +310,16 @@ def watermark(arr, text="PREVIEW 720 - mode: full render for final"):
     th = max(1, int(round(sc * 2)))
     (tw, tht), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, sc, th)
     x, y = int(12 * sc), H - int(14 * sc)
+    y0, y1 = max(0, y - tht - int(8 * sc)), min(H, y + int(8 * sc))
+    x0, x1 = max(0, x - int(8 * sc)), min(W, x + tw + int(8 * sc))
+    # штамп у uint8 і змішування як альфа: cv2.putText з OpenCV 5 (Vast) приймає лише CV_8U
+    stamp = np.zeros((y1 - y0, x1 - x0), np.uint8)
+    cv2.putText(stamp, text, (x - x0, y - y0), cv2.FONT_HERSHEY_SIMPLEX, sc, 255, th, cv2.LINE_AA)
+    a = (stamp.astype(np.float32) / 255.0)[:, :, None]
     for i in range(B):
-        f = arr[i]
-        y0, x1 = max(0, y - tht - int(8 * sc)), min(W, x + tw + int(8 * sc))
-        f[y0:min(H, y + int(8 * sc)), max(0, x - int(8 * sc)):x1] *= 0.45
-        cv2.putText(f, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, sc, (1.0, 1.0, 1.0), th, cv2.LINE_AA)
+        roi = arr[i, y0:y1, x0:x1]
+        roi *= 0.45 * (1.0 - a)
+        roi += a
     return arr
 
 
@@ -419,11 +425,47 @@ def _render_parallel(render_frame, out, B, n_workers, progress):
     return out
 
 
+def _torch_device(device):
+    """None -> CPU numpy-шлях (дефолт). Рядок ("cuda"/"cpu"/"mps"/"auto") або env SVK_TORCH (1/cuda/cpu/mps) -> цей пристрій."""
+    if device is None or device == "":
+        device = os.environ.get("SVK_TORCH", "").strip()
+    if isinstance(device, str) and device.lower() in ("", "0", "false", "no", "off", "none"):
+        return None
+    return device
+
+
+def _render_torch(device, prep_frame, post_frame, out, B, progress):
+    """Кадри йдуть по одному на пристрої (look_torch); CPU-підготовка (глибина, зерно) наперед у потоках: cv2 і numpy RNG
+    відпускають GIL, тож GPU не чекає. Порядок і результат не залежать від кількості потоків."""
+    import look_torch                                              # імпорт torch лише тут
+    from concurrent.futures import ThreadPoolExecutor
+    nth = max(1, min(6, _cpus()))
+    ahead = nth + 2
+
+    def job(i):
+        rgb, d, k = prep_frame(i)
+        return rgb, d, k, look_torch.make_noise_for(rgb.shape[0], rgb.shape[1], k)
+
+    with ThreadPoolExecutor(nth) as ex:
+        futs = {i: ex.submit(job, i) for i in range(min(B, ahead))}
+        for i in range(B):
+            rgb, d, k, nz = futs.pop(i).result()
+            if i + ahead < B:
+                futs[i + ahead] = ex.submit(job, i + ahead)
+            res = look_torch.depth_look_lens(rgb, np.ascontiguousarray(d, np.float32), device=device, noise=nz, **k)
+            out[i] = post_frame(res, d, k)
+            if progress is not None:
+                progress(i + 1, B)
+            if (i + 1) % 10 == 0:
+                print("[DepthLook] %d/%d (torch)" % (i + 1, B))
+    return out
+
+
 def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=True,
                 light_is_near=True, overrides="{}", palette="", fps=24.0, start_time=0.0,
                 params_json="", max_side=0, depth_levels="clip", out=None, progress=None,
                 output_size=0, static=False, grade=None, anim=None, frame_step=1, workers=None, motion=None,
-                hdr_linear=False):
+                hdr_linear=False, device=None):
     """frames_np: (B,H,W,3) float 0..1; depths_np: (B|1,h,w) або (B|1,h,w,C) float (канал 0).
     Кадр i отримує time = start_time + i/fps (анімаційні повзунки: хвиля, пульс глоу, серпанок, шлейф) і
     seed зерна = seed + i (зерно живе; warp_seed стала). Кадри йдуть по одному, без великих проміжних стеків.
@@ -441,6 +483,9 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
     hdr_linear=True: кадри scene-linear (1.0 = дифузний білий, світло > 1). Кожен кадр кодується в HLG-сигнал 0..1
     (запас до ~3.8x білого) замість обрізання на 1, лук рахується на сигналі, і ВИХІД теж HLG-сигнал - назад у linear
     його переводить викликач (video_node), після превʼю-стрічки.
+    device (етап 1 GPU-порту, 25.10.2026): None / "" = звичайний CPU-шлях (numpy+cv2, байт-в-байт як раніше);
+    "cuda" / "cpu" / "mps" / "auto" = look.depth_look_lens рахується в look_torch.py на пристрої (опційно; паритет <= 1/255).
+    Те саме вмикає змінна середовища SVK_TORCH=1 (або =cuda/cpu/mps), якщо device не задано. Глибина, motion, ресайз - як було (CPU).
     out: готовий (B,Ho,Wo,3) float32 масив для результату (напр. numpy-вʼю torch-тензора). -> out."""
     if not isinstance(frames_np, np.ndarray):
         frames_np = np.asarray(frames_np)
@@ -509,9 +554,8 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
 
     motion_on = bool(motion) and not static and depth_motion.active(motion)
 
-    def render_frame(i):
-        """Кадр i -> (Ho,Wo,3) float32. Залежить ЛИШЕ від i (time, seed, офсети камери) і від спільних levels/offs - тож
-        порядок і кількість процесів не змінюють результат."""
+    def prep_frame(i):
+        """Кадр i -> (rgb, d, k): вхід look. Залежить ЛИШЕ від i (time, seed, офсети камери) і від спільних levels/offs."""
         rgb = get_rgb(i)
         d = look_api.prepare_frame_depth(rgb, get_depth(i), clean_depth, light_is_near, levels)
         si = i * step                                              # справжній номер кадру в кліпі
@@ -521,13 +565,29 @@ def apply_numpy(frames_np, depths_np, preset_name=DEFAULT_PRESET, clean_depth=Tr
         if offs is not None:
             k["grad_offset_x"] = base_ox + float(offs[i][0])
             k["grad_offset_y"] = base_oy + float(offs[i][1])
-        res = look.depth_look_lens(rgb, np.ascontiguousarray(d, np.float32), **k)
+        return rgb, d, k
+
+    def post_frame(res, d, k):
         if (Ww, Hw) != (Wo, Ho):
             res = np.clip(cv2.resize(res, (Wo, Ho), interpolation=cv2.INTER_CUBIC), 0, 1)
         if motion_on:                                              # рух по глибині: глибина - під розмір ФІНАЛЬНОГО кадру
             dm_d = d if d.shape == (Ho, Wo) else cv2.resize(d, (Wo, Ho), interpolation=cv2.INTER_CUBIC)
             res = depth_motion.apply(res, np.clip(dm_d, 0, 1), k["time"], motion)
         return res
+
+    def render_frame(i):
+        """Кадр i -> (Ho,Wo,3) float32. Залежить ЛИШЕ від i (time, seed, офсети камери) і від спільних levels/offs - тож
+        порядок і кількість процесів не змінюють результат."""
+        rgb, d, k = prep_frame(i)
+        res = look.depth_look_lens(rgb, np.ascontiguousarray(d, np.float32), **k)
+        return post_frame(res, d, k)
+
+    tdev = _torch_device(device)
+    if tdev is not None:
+        try:
+            return _render_torch(tdev, prep_frame, post_frame, out, B, progress)
+        except ImportError as e:
+            print("[DepthLook] torch-шлях недоступний (%s) - рахую на CPU" % e)
 
     n_workers = pick_workers(B, Ww * Hw, workers)
     if n_workers > 1:

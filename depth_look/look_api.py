@@ -14,7 +14,7 @@ LookApi.handle(method, raw_path, body) -> (status, content_type, bytes, extra_he
 повний кадр у робочій роздільності рахується ОДИН раз на набір параметрів (окремий рендерер, кеш шарів превʼю
 не чіпає), а далі кожна ділянка — миттєвий зріз. Нові параметри = новий розрахунок лише коли лупа ввімкнена.
 """
-import io, json, os, sys, threading, time
+import contextlib, gc, io, json, os, sys, threading, time, weakref
 from urllib.parse import urlparse, parse_qs, unquote
 os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")   # EXR-глибина: до імпорту cv2
 import numpy as np, cv2
@@ -130,25 +130,30 @@ def read_node_meta(node_id):
 _LEVELS = {}
 
 
-def _node_levels(node_id, meta, imgs, deps):
+def _node_levels(node_id, meta, imgs, deps, light_is_near=None):
     """Рівні глибини кліпу для превʼю: ті самі ≤8 кадрів, що й clip_levels бачить у run() (у ≤1080 для швидкості)."""
-    key = (node_id, meta["stamp"])
+    if light_is_near is None:
+        light_is_near = meta["light_is_near"]
+    key = (node_id, meta["stamp"], bool(light_is_near))
     if key not in _LEVELS:
         _LEVELS.clear()
         preps = []
         for k in range(imgs.shape[0]):
             rgb = _cap(np.clip(np.asarray(imgs[k], np.float32), 0, 1), 1080)
             d = np.asarray(deps[k if deps.shape[0] > 1 else 0], np.float32)
-            preps.append(look.prepare_depth(d, rgb, light_is_near=meta["light_is_near"], stretch=False))
+            preps.append(look.prepare_depth(d, rgb, light_is_near=light_is_near, stretch=False))
         _LEVELS[key] = look.clip_levels(preps)
     return _LEVELS[key]
 
 
-def load_node_frame(node_id, k):
-    """-> (rgb f32, depth_clean f32) k-го кешованого кадру. Читає лише потрібний кадр (mmap)."""
+def load_node_frame(node_id, k, light_is_near=None):
+    """-> (rgb f32, depth_clean f32) k-го кешованого кадру. Читає лише потрібний кадр (mmap).
+    light_is_near=None - як у кеші з останнього Run; True/False - поточна галочка ноди (кеш тримає сиру глибину)."""
     meta = read_node_meta(node_id)
     if meta is None:
         raise NeedRun(NEED_RUN_MSG)
+    if light_is_near is None:
+        light_is_near = meta["light_is_near"]
     ip, dp, _ = node_paths(node_id)
     imgs = np.load(ip, mmap_mode="r")
     deps = np.load(dp, mmap_mode="r")
@@ -157,8 +162,8 @@ def load_node_frame(node_id, k):
     d = np.asarray(deps[k if deps.shape[0] > 1 else 0], np.float32)
     levels = None
     if meta["clean_depth"] and meta.get("depth_levels", "clip") == "clip":
-        levels = _node_levels(node_id, meta, imgs, deps)
-    return rgb, prepare_frame_depth(rgb, d, meta["clean_depth"], meta["light_is_near"], levels)
+        levels = _node_levels(node_id, meta, imgs, deps, light_is_near)
+    return rgb, prepare_frame_depth(rgb, d, meta["clean_depth"], bool(light_is_near), levels)
 
 
 # ---------------------------------------------------------------- рендерер
@@ -180,7 +185,7 @@ class Renderer:
             if kind == "photo":
                 rgb, d = LP.load_frame(photo=a)
             elif kind == "npy":
-                rgb, d = load_node_frame(a, b[1])
+                rgb, d = load_node_frame(a, b[1], b[2] if len(b) > 2 else None)
             else:
                 rgb, d = LP.load_frame(image=a, depth=b)
             self.full[src] = (d.shape[1], d.shape[0])
@@ -259,9 +264,30 @@ def _jpeg(img8, q=90):
 
 
 # ---------------------------------------------------------------- API
+FINAL_RUNNING = [0]     # скільки фінальних рендерів іде зараз: превʼю й лупа стоять, їхня памʼять віддана рендеру
+BUSY_MSG = "final render running - preview paused"
+_LIVE = weakref.WeakSet()  # усі превʼю (тюнери, картки Simple, плитки): фінальний рендер забирає їхню памʼять
+
+
+@contextlib.contextmanager
+def final_render():
+    """Фінальний рендер будь-якої ноди Depth Look: превʼю й лупа всіх нод на паузі й віддають памʼять,
+    у Comfy лишаються лише вхідні кадри. Після рендеру превʼю збереться наново на першому запиті."""
+    FINAL_RUNNING[0] += 1
+    try:
+        for api in list(_LIVE):
+            api.free()
+        _LEVELS.clear()
+        gc.collect()
+        yield
+    finally:
+        FINAL_RUNNING[0] -= 1
+
+
 class LookApi:
     def __init__(self, photo=None, image=None, depth=None, preset="look_v1", node_id=None, anim=False):
         self.R = Renderer()
+        _LIVE.add(self)
         self.node_id = node_id
         self.anim = bool(anim)           # False = статична нода: відео-групи (LP.ANIM_GROUPS) у тюнері не показуємо
         self.lock = threading.RLock()
@@ -288,7 +314,7 @@ class LookApi:
             raise NeedRun(NEED_RUN_MSG)
         k = max(0, min(int(self.state["frame"]), len(meta["indices"]) - 1))
         self.state["frame"] = k
-        return ("npy", self.node_id, (meta["stamp"], k))
+        return ("npy", self.node_id, (meta["stamp"], k, self.state.get("light")))
 
     def _cur(self, size=None):
         sz = int(size) if size else self.state["size"]
@@ -337,6 +363,7 @@ class LookApi:
             if q.get("free"):                                    # лупу вимкнено: віддати памʼять
                 self.RL, self.full_img, self.full_key = None, None, None
                 return self._j(200, {"ok": True})
+            self._take_light(q.get("light"))
             self._set_frame(q.get("frame"))
             src = self._src()
             params = self._params(q["params"])
@@ -362,10 +389,26 @@ class LookApi:
                    "X-Cached": "1" if cached else "0", "X-Render-Ms": str(int((time.time() - t0) * 1000))}
             return 200, "image/png", png, hdr
 
+    def _take_light(self, v):
+        """Галочка depth_light_is_near з ноди: превʼю бере її одразу, без Run (None/порожньо - як у кеші Run)."""
+        if v is None or v == "":
+            return
+        self.state["light"] = v in (True, 1, "1", "true", "True")
+
+    def free(self):
+        """Віддати памʼять фінальному рендеру: кадр, лінзові шари, повний кадр лупи. Наступне превʼю збере їх наново."""
+        with self.lock:
+            self.R.reset()
+        with self.crop_lock:
+            self.RL, self.full_img, self.full_key = None, None, None
+
     # ---- вхід
     def handle(self, method, raw_path, body=b""):
         u = urlparse(raw_path)
         path, qs = u.path, parse_qs(u.query)
+        if FINAL_RUNNING[0] and method == "POST" and path in ("/api/render", "/api/render_crop") \
+                and b'"free"' not in (body or b""):              # звільнення памʼяті лупою пропускаємо
+            return self._j(409, {"err": BUSY_MSG, "busy": True})
         if method == "POST" and path == "/api/render_crop":      # лупа: свій замок, без блокування превʼю
             try:
                 return self._render_crop(json.loads(body or b"{}"))
@@ -386,6 +429,7 @@ class LookApi:
         return r if r is not None else self._j(404, {"err": "no"})
 
     def _get(self, path, qs):
+        self._take_light(qs.get("light", [None])[0])
         if path == "/api/state":
             st = self.state
             d = dict(spec=LP.spec_json(self.anim), groups=LP.groups_json(self.anim), anim=self.anim,
@@ -419,6 +463,7 @@ class LookApi:
 
     def _post(self, path, q):
         st, R = self.state, self.R
+        self._take_light(q.get("light"))
         if path == "/api/render":
             if self.node_id is None and q.get("photo") and q["photo"] in LP.photo_list():
                 st["src"] = ("photo", q["photo"], None)
@@ -465,6 +510,8 @@ class LookApi:
             return self._j(200, dict(w=fw, h=fh, name=self._src_name(new)))
         if path == "/api/save":
             return self._j(200, {"path": LP.save_preset(q["name"], q["params"])})
+        if path == "/api/preset/delete":      # POST {"name": ...}; вбудовані (locked) не видаляються
+            return self._j(200, {"path": LP.delete_preset(q["name"])})
         if path == "/api/gradients/save":
             name = safe_grad_name(q["name"])
             if name.lower() in [n.lower() for n, _ in builtin_grads()]:
