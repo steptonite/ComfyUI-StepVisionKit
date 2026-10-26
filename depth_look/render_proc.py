@@ -136,15 +136,32 @@ def tensors_to_numpy(image, depth):
     return frames, dep
 
 
+LAST_STAGE = {}      # node id -> останній етап; вкладка після обриву звʼязку забирає його з /svk/stages
+
+
 def stage(uid, name, **kw):
     """Етап виконання -> рядок стану на картці ноди (подія svk.stage; js: svk_ui.stageLine). Без Comfy або id - нічого."""
     if uid is None:
         return
+    s = dict(node=str(uid), stage=name, **kw)
+    LAST_STAGE[str(uid)] = dict(s, t=time.time())
     try:
         from server import PromptServer
-        PromptServer.instance.send_sync("svk.stage", dict(node=str(uid), stage=name, **kw))
+        PromptServer.instance.send_sync("svk.stage", s)
     except Exception:
         pass
+
+
+try:
+    from server import PromptServer
+    from aiohttp import web
+
+    @PromptServer.instance.routes.get("/svk/stages")
+    async def _svk_stages(request):
+        now = time.time()
+        return web.json_response({k: v for k, v in LAST_STAGE.items() if now - v["t"] < 6 * 3600})
+except Exception:
+    pass
 
 
 def make_progress(n, uid=None):

@@ -19,6 +19,7 @@ import cv2
 import numpy as np
 import torch
 
+import comfy.utils
 import folder_paths
 
 RAW_DIR = "svk_raw"
@@ -50,9 +51,17 @@ def _clip_dir(path):
     return max(clips, key=lambda c: os.path.getmtime(os.path.join(c, "meta.json")))
 
 
+def _float_ext():
+    # OpenCV 5 з pip зібраний без OpenEXR (Vast 26.10: Raw Save падав після 7 хв DA3) -> float32 TIFF, теж без втрат
+    if cv2.haveImageWriter(".exr"):
+        return ".exr"
+    print("[SVK] OpenCV has no OpenEXR writer - saving float32 TIFF instead (pip install \"opencv-python<5\" brings EXR back)")
+    return ".tif"
+
+
 def _write_exr(path, a):
     if not cv2.imwrite(path, np.ascontiguousarray(a, dtype=np.float32)):
-        raise RuntimeError(f"EXR not written: {path} (OpenCV without OpenEXR?)")
+        raise RuntimeError(f"float image not written: {path}")
 
 
 def _read_exr(path):
@@ -99,14 +108,17 @@ class SVKRawDepthSave:
         image = g["image"].cpu().numpy()
         n = depth.shape[0]
         extra = [k for k in ("sky", "confidence") if k in g]
+        ext = _float_ext()
+        pbar = comfy.utils.ProgressBar(n)
         for f in range(n):
-            _write_exr(os.path.join(d, f"depth_{f:05d}.exr"), depth[f])
+            _write_exr(os.path.join(d, f"depth_{f:05d}{ext}"), depth[f])
             for k in extra:
-                _write_exr(os.path.join(d, f"{k}_{f:05d}.exr"), g[k][f].cpu().numpy())
+                _write_exr(os.path.join(d, f"{k}_{f:05d}{ext}"), g[k][f].cpu().numpy())
             rgb = np.clip(image[f, ..., :3] * 65535.0 + 0.5, 0, 65535).astype(np.uint16)
             cv2.imwrite(os.path.join(d, f"image_{f:05d}.png"), rgb[..., ::-1])
+            pbar.update_absolute(f + 1, n)
 
-        meta = {"frames": n, "mode": g.get("mode", "mono"), "extra": extra,
+        meta = {"frames": n, "mode": g.get("mode", "mono"), "extra": extra, "ext": ext,
                 "height": int(depth.shape[1]), "width": int(depth.shape[2]),
                 "depth_min": float(depth.min()), "depth_max": float(depth.max())}
         for k in ("extrinsics", "intrinsics"):
@@ -148,10 +160,11 @@ class SVKRawDepthLoad:
         with open(os.path.join(d, "meta.json")) as fh:
             meta = json.load(fh)
         n = meta["frames"]
+        ext = meta.get("ext", ".exr")
         g = {"mode": meta["mode"],
-             "depth": torch.from_numpy(np.stack([_read_exr(os.path.join(d, f"depth_{f:05d}.exr")) for f in range(n)]))}
+             "depth": torch.from_numpy(np.stack([_read_exr(os.path.join(d, f"depth_{f:05d}{ext}")) for f in range(n)]))}
         for k in meta["extra"]:
-            g[k] = torch.from_numpy(np.stack([_read_exr(os.path.join(d, f"{k}_{f:05d}.exr")) for f in range(n)]))
+            g[k] = torch.from_numpy(np.stack([_read_exr(os.path.join(d, f"{k}_{f:05d}{ext}")) for f in range(n)]))
         imgs = []
         for f in range(n):
             a = cv2.imread(os.path.join(d, f"image_{f:05d}.png"), cv2.IMREAD_UNCHANGED)
@@ -234,7 +247,8 @@ class SVKSaveDepth16:
                 if not folder.strip():
                     ui.append({"filename": file, "subfolder": sub, "type": "output"})
             else:
-                file = f"{fname}_{counter:05}_.exr"
+                file = f"{fname}_{counter:05}_{_float_ext() if f == 0 else ext}"
+                ext = file[-4:]
                 _write_exr(os.path.join(full, file), px)
             counter += 1
         print(f"[SVK Save 16] {a.shape[0]} file(s) → {os.path.join(full, fname)}_*  ({format})")

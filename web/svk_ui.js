@@ -253,6 +253,11 @@ function hookStages() {
     if (stagesHooked) return;
     stagesHooked = true;
     api.addEventListener("svk.stage", ev => stageFor(ev.detail?.node)?.set(ev.detail));
+    // вкладку перезавантажили або звʼязок рвався: довгий прогін іде далі, стан беремо з сервера
+    const replay = () => api.fetchApi("/svk/stages").then(r => r.ok ? r.json() : {})
+        .then(m => { for (const [id, s] of Object.entries(m)) stageFor(id)?.set(s); }).catch(() => {});
+    api.addEventListener("reconnected", replay);
+    setTimeout(replay, 2000);
     api.addEventListener("execution_start", () => {             // новий прогін: наші ноди в черзі - «чекає»
         for (const v of STAGES) { v.set({ stage: "queued" }); v.box.dataset.queued = "1"; }
     });
