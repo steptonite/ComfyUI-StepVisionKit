@@ -10,7 +10,8 @@ const START_W = 1000, START_H = 900;
 // на ноді лише тюнер: усі нативні віджети сховані (значення лишаються у workflow і йдуть у Run).
 // Пресет обирається в тюнері; режим - сегментом у рядку під тюнером; рідкісне - під «ще».
 const MORE = [["output_size", T("Output size")], ["max_side", T("Working resolution")], ["depth_levels", T("Depth levels"), { names: { clip: T("shared across clip"), frame: T("per frame") } }],
-              ["clean_depth", T("Clean depth")], ["depth_light_is_near", T("Light = near")]];
+              ["clean_depth", T("Clean depth")], ["depth_light_is_near", T("Light = near")],
+              ["hdr", T("HDR input"), { names: { "SDR or HLG/PQ as encoded": T("SDR / HLG·PQ as is"), "linear (keeps highlights)": T("linear, keep highlights") } }]];
 function hideAll(node) { for (const w of node.widgets || []) if (w.name !== "look_ui") hideWidget(w); node.__dlBar?.sync(); }
 const PANELS = new Set();          // {node, frame}
 

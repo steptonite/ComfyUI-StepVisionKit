@@ -30,6 +30,8 @@ import look_api  # noqa: E402
 from .core import (DEFAULT_PRESET, _EXTRA_KEYS, parse_palette, build_preset, _params_from_json,  # noqa: E402,F401
                    _work_size, _Lazy, apply_numpy, check_inputs, SIZE_ORIGINAL, OUTPUT_SIZES,
                    GRADE_TYPE, parse_output_size, legacy, validate_legacy, resolve_params, static_params, make_grade, out_shape)
+from ..media import color as C  # noqa: E402
+from .video_node import HDR_OFF, HDR_LINEAR  # noqa: E402
 from .render_proc import (_interrupted, _render_subproc, tensors_to_numpy, make_progress, stage,  # noqa: E402,F401
                           render as _render, to_result)
 
@@ -67,6 +69,9 @@ class DepthLook:
                 "params_json": ("STRING", {"multiline": False, "default": ""}),   # пише вбудований тюнер; JS ховає
                 # новий віджет - лише в кінець: widgets_values старих workflow лягають по порядку
                 "auto_run": ("BOOLEAN", {"default": True, "tooltip": "On: every Run renders the final and passes it to the connected nodes (Save / video). Off: Run renders only the preview, the final output stays blocked until 'Render final'."}),
+                "hdr": ([HDR_OFF, HDR_LINEAR], {"default": HDR_OFF,
+                        "tooltip": "Load RAW with output_curve linear (or a linear EXR) -> pick linear: light above 1 goes through the look "
+                                   "instead of clipping; the output stays linear (save as EXR / 16-bit). SDR or display-encoded images: leave as is."}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -84,9 +89,10 @@ class DepthLook:
 
     def run(self, image, depth, preset, clean_depth, depth_light_is_near, grade=None, output_size=SIZE_ORIGINAL,
             max_side=0, depth_levels="clip", mode=MODE_FULL, overrides="{}", palette="", params_json="",
-            auto_run=True, fps=None, start_time=None, unique_id=None):
+            auto_run=True, hdr=HDR_OFF, fps=None, start_time=None, unique_id=None):
         # fps/start_time - лише щоб API-запити зі старих workflow не падали: у статичній ноді їх нема (time = 0)
         frames, dep = tensors_to_numpy(image, depth)
+        hdr_lin = hdr == HDR_LINEAR                        # як у відео-ноді: лук на HLG-сигналі, назад у linear наприкінці
         preset, output_size, mode = legacy(preset), legacy(output_size), legacy(mode)
         full = (mode == MODE_FULL) or bool(auto_run)    # фінал: кнопка «Render final» (mode) або галочка auto
         if not full:                                       # швидкий прогін: look на ≤720, назад до рідного розміру
@@ -101,8 +107,10 @@ class DepthLook:
         if unique_id is not None:                          # кадри батча (≤8, float16) для превʼю вбудованого тюнера
             try:
                 stage(unique_id, "cache")
-                meta = look_api.save_node_cache(unique_id, frames, dep, clean_depth, depth_light_is_near,
+                cf = np.stack([C.hlg_encode(f[..., :3]) for f in frames]) if hdr_lin else frames   # тюнер бачить той самий сигнал
+                meta = look_api.save_node_cache(unique_id, cf, dep, clean_depth, depth_light_is_near,
                                                 depth_levels=depth_levels)
+                del cf
                 ui = {"depth_look": [{"frames": meta["indices"], "stamp": meta["stamp"]}]}
             except Exception as e:
                 print("[DepthLook] preview cache not written: %s" % e)
@@ -112,14 +120,19 @@ class DepthLook:
         t0 = time.time()
         kw = dict(grade=g, clean_depth=bool(clean_depth), light_is_near=bool(depth_light_is_near),
                   max_side=int(max_side or 0), depth_levels=depth_levels, output_size=out_size, static=True)
+        if hdr_lin:
+            kw["hdr_linear"] = True
         with (look_api.final_render() if full else contextlib.nullcontext()):
             arr = _render(frames, dep, kw, progress, out_shape(frames.shape[0], frames.shape[1], frames.shape[2], out_size))
         mix = float(min(max((grade or {}).get("look_mix", 1.0), 0.0), 1.0))     # «сила луку» з простої ноди
         if mix < 1.0:
             from .simple import mix_with_original
             stage(unique_id, "mix")
-            arr = mix_with_original(arr, frames, mix)
+            arr = mix_with_original(arr, frames, mix, C.hlg_encode if hdr_lin else None)
             g = dict(g, look_mix=mix)
+        if hdr_lin:                                        # HLG-сигнал -> scene-linear (світло > 1 збережене)
+            for i in range(arr.shape[0]):
+                arr[i] = C.hlg_decode(arr[i])
         ui["depth_look_warn"] = warns
         stage(unique_id, "done", secs=round(time.time() - t0, 1))
         print("[DepthLook] %s: %d frame(s) %dx%d -> %dx%d in %.1f s, look strength %.2f" % (
