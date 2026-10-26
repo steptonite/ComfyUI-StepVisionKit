@@ -117,6 +117,19 @@ def _cache_put(uid, kind, key, arr, play, ui):
     _CACHE[k] = (key, arr, play, ui)
 
 
+def _shrink(a, side):
+    """(B,H,W[,C]) -> довга сторона <= side (INTER_AREA), float32; менше вже - як є (без копії)."""
+    H, W = int(a.shape[1]), int(a.shape[2])
+    s = float(side) / max(H, W)
+    if s >= 1.0:
+        return a
+    w, h = max(1, round(W * s)), max(1, round(H * s))
+    out = np.empty((a.shape[0], h, w) + tuple(a.shape[3:]), np.float32)
+    for i in range(a.shape[0]):
+        out[i] = cv2.resize(np.asarray(a[i], np.float32), (w, h), interpolation=cv2.INTER_AREA).reshape(out.shape[1:])
+    return out
+
+
 class DepthLookVideo:
     @classmethod
     def INPUT_TYPES(cls):
@@ -263,6 +276,8 @@ class DepthLookVideo:
                 dep = dep[::step]
         out_size = preview_side if preview else parse_output_size(output_size)
         ms = 0 if preview else int(max_side or 0)
+        if preview:                                            # превʼю: кадри й глибину зменшити ДО завдання воркеру - інакше на диск
+            frames, dep = _shrink(frames, preview_side), _shrink(dep, preview_side)   # іде повний 1080p кліп (226 кадрів ≈ 5.6 ГБ)
         for w in check_inputs(frames, dep, ms, out_size):
             print("[DepthLookVideo] ⚠ " + w)
         kw = dict(grade=g, clean_depth=bool(g.get("clean_depth", True)), light_is_near=bool(g.get("light_is_near", True)),
