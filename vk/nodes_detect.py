@@ -17,14 +17,14 @@ class VKDetect:
         models = sorted(f for f in os.listdir(d) if f.endswith(".pt")) if os.path.isdir(d) else []
         return {
             "required": {
-                "images": ("IMAGE",),
+                "images": ("IMAGE", {"tooltip": "frames to detect on"}),
                 "model_name": (models or ["yolo11n.pt"], {"tooltip": "Files in models/yolov8. yolo11n.pt is the small fast one."}),
                 "device": (["auto", "mps", "cpu", "cuda"], {"default": "auto",
                            "tooltip": "auto picks cuda on a rented NVIDIA box and mps on a Mac."}),
                 "confidence": ("FLOAT", {"default": 0.25, "min": 0.01, "max": 0.95, "step": 0.01, "tooltip": "Lower finds more objects and more junk."}),
                 "image_size": ("INT", {"default": 640, "min": 320, "max": 1280, "step": 32, "tooltip": "Detection resolution. Bigger is slower and finds small objects."}),
                 "classes": ("STRING", {"default": "", "tooltip": "Comma-separated class names to keep, e.g. person,car. LEAVE EMPTY for rendered or CG footage — YOLO often calls a CG figure 'kite' and a filter would drop most frames."}),
-                "max_objects": ("INT", {"default": 10, "min": 1, "max": 100}),
+                "max_objects": ("INT", {"default": 10, "min": 1, "max": 100, "tooltip": "keep at most this many boxes per frame"}),
                 "track": ("BOOLEAN", {"default": True, "tooltip": "Give every object an id that stays the same across the whole video, so Select Box can follow one object. Off = plain per-frame detection."}),
                 "sort_by": (SORT_BY, {"default": "area", "tooltip": "What decides the #index order. On video, area re-shuffles the order whenever objects change size — use a track id to follow one object instead."}),
                 "on_missing": (ON_MISSING, {"default": "previous", "tooltip": "Frames with no detection. SAM2 crashes on an empty frame, so keep 'previous' when feeding it."}),
@@ -103,4 +103,4 @@ class VKDetect:
 
 
 NODES = {"VKDetect": VKDetect}
-DISPLAY = {"VKDetect": "Detect Objects (YOLO)"}
+DISPLAY = {"VKDetect": "Detect Objects · YOLO"}

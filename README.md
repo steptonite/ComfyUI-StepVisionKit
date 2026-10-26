@@ -12,16 +12,16 @@ Menu category: **`StepVisionKit`** → `Detect` · `HUD` · `Depth`.
 | node | purpose |
 |---|---|
 | `YOLO Detect` | ultralytics called directly, returns boxes in two formats at once. No tracking — fast |
-| `Detect Objects (YOLO)` | the same + **ByteTrack**: returns a stable `track_id` through the whole video |
+| `Detect Objects · YOLO` | the same + **ByteTrack**: returns a stable `track_id` through the whole video |
 | `Select Box` | pick ONE object — by `track_id`, index, point or class |
-| `Boxes → BBOX (for SAM2)` | convert any box format to `BBOX` for SAM2 |
-| `HUD Boxes (corners/labels)` | a corner-bracket frame drawn in code |
-| `HUD Sprite (custom PNG frame + cutout)` | **your own PNG frame** follows the box; 9-slice corners, a cutout in the video, separate alpha |
+| `Boxes → BBOX · SAM2` | convert any box format to `BBOX` for SAM2 |
+| `HUD Boxes · corners` | a corner-bracket frame drawn in code |
+| `HUD Sprite · PNG frame` | **your own PNG frame** follows the box; 9-slice corners, a cutout in the video, separate alpha |
 | `Overlay On Boxes` | your own graphic on EVERY box, selectable by `track_id` |
 | `Cut By Mask` | cut by a mask to black/white/transparent/blur/color, batched |
-| `Depth Curve (DA3 → V2 look)` | Depth Anything 3 → V2 look: Levels, clarity, deband. Does not run a model |
+| `Depth Curve · DA3 → V2` | Depth Anything 3 → V2 look: Levels, clarity, deband. Does not run a model |
 | `Depth Grade` and `Depth Grade View` | depth grading with anti-flicker, plus frame/video views for calibration |
-| `Depth Receiver`, `Raw Depth Save` / `Load`, `Save Depth 16-bit / EXR` | raw DA3 depth to float depth, EXR/16-bit I/O |
+| `Depth Receiver`, `Raw Depth Save` / `Load`, `Save Depth · 16-bit / EXR` | raw DA3 depth to float depth, EXR/16-bit I/O |
 | `Depth Look · Full / Simple / Video` | lens blur by depth, palette, silhouette, haze, trail, halation, grain (see [depth_look/README.md](depth_look/README.md)) |
 
 ## Installation
@@ -108,7 +108,7 @@ Runs ultralytics directly (e.g. on MPS) and returns boxes in two formats at once
 
 ---
 
-## Node `HUD Sprite (custom PNG frame + cutout)` — `LexHUDSprite`
+## Node `HUD Sprite · PNG frame` — `LexHUDSprite`
 
 Takes an **external PNG** with a frame and places it on the box, following the object.
 
@@ -217,7 +217,7 @@ LoadImage (HUD.png) ──────────────→ LexHUDSprite
 
 ---
 
-## Node `Depth Curve (DA3 → V2 look)` — `LexDepthCurve`
+## Node `Depth Curve · DA3 → V2` — `LexDepthCurve`
 
 **Why.** Depth Anything **V2** outputs disparity (≈1/distance) — a non-linearity that stretches
 the foreground. **V3** outputs DISTANCE, and the `v2_style` mode in `DA3Render` stretches it **linearly**

@@ -46,7 +46,7 @@ class SVKSaveImageHDR:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "images": ("IMAGE",),
+            "images": ("IMAGE", {"tooltip": "images to save"}),
             "filename_prefix": ("STRING", {"default": "svk/image", "tooltip": "file name prefix; a/b makes subfolder a"}),
             "format": (FORMATS, {"default": "exr half",
                        "tooltip": "exr half = 16-bit float, standard for grading and compositing; exr float = 32-bit; png 16-bit = 65536 levels, display sRGB"}),
@@ -103,4 +103,4 @@ class SVKSaveImageHDR:
 
 
 NODES = {"SVKSaveImageHDR": SVKSaveImageHDR}
-DISPLAY = {"SVKSaveImageHDR": "Save Image HDR (EXR / PNG 16-bit)"}
+DISPLAY = {"SVKSaveImageHDR": "Save Image · HDR"}

@@ -16,12 +16,12 @@ class VKSelectBox:
                 "mode": (MODE, {"default": "largest", "tooltip": "track_id is the only mode that stays on the SAME object through a video. index re-shuffles whenever the sort order changes."}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 200, "tooltip": "For mode=index. Read the #N printed on the preview from Draw Boxes."}),
                 "track_id": ("INT", {"default": 1, "min": 0, "max": 100000, "tooltip": "For mode=track_id. Read the id:N printed on the preview."}),
-                "point_x": ("INT", {"default": 0, "min": 0, "max": 16384}),
-                "point_y": ("INT", {"default": 0, "min": 0, "max": 16384}),
+                "point_x": ("INT", {"default": 0, "min": 0, "max": 16384, "tooltip": "for mode=nearest_to_point: x in frame pixels"}),
+                "point_y": ("INT", {"default": 0, "min": 0, "max": 16384, "tooltip": "for mode=nearest_to_point: y in frame pixels"}),
                 "class_filter": ("STRING", {"default": "", "tooltip": "Keep only these classes, comma-separated. Empty = all."}),
                 "pad": ("INT", {"default": 0, "min": -512, "max": 512, "tooltip": "Grow (+) or shrink (-) the box by N pixels."}),
-                "format_in": (FORMATS, {"default": "auto"}),
-                "on_missing": (ON_MISSING, {"default": "previous"}),
+                "format_in": (FORMATS, {"default": "auto", "tooltip": "box layout of the input: auto detects it; xyxy = corners, xywh_topleft / xywh_center = size from the top-left corner / centre"}),
+                "on_missing": (ON_MISSING, {"default": "previous", "tooltip": "frame with no box: previous = repeat the last box, full_frame = whole frame, empty = no box (SAM2 fails on an empty frame)"}),
             },
             "optional": {
                 "image": ("IMAGE", {"tooltip": "Connect the frames so boxes get clipped to the frame edges."}),
@@ -62,11 +62,11 @@ class VKBoxesToBBOX:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boxes": (any_type,),
-                "format_in": (FORMATS, {"default": "auto"}),
-                "on_missing": (ON_MISSING, {"default": "previous"}),
+                "boxes": (any_type, {"tooltip": "boxes from any detector"}),
+                "format_in": (FORMATS, {"default": "auto", "tooltip": "box layout of the input: auto detects it; xyxy = corners, xywh_topleft / xywh_center = size from the top-left corner / centre"}),
+                "on_missing": (ON_MISSING, {"default": "previous", "tooltip": "frame with no box: previous = repeat the last box, full_frame = whole frame, empty = no box (SAM2 fails on an empty frame)"}),
             },
-            "optional": {"image": ("IMAGE",)},
+            "optional": {"image": ("IMAGE", {"tooltip": "connect the frames so boxes get clipped to the frame edges"})},
         }
 
     RETURN_TYPES = ("BBOX", "STRING")
@@ -87,4 +87,4 @@ class VKBoxesToBBOX:
 
 
 NODES = {"VKSelectBox": VKSelectBox, "VKBoxesToBBOX": VKBoxesToBBOX}
-DISPLAY = {"VKSelectBox": "Select Box", "VKBoxesToBBOX": "Boxes To BBOX"}
+DISPLAY = {"VKSelectBox": "Select Box", "VKBoxesToBBOX": "Boxes → BBOX"}

@@ -64,9 +64,9 @@ class DepthLook:
                 # спершу крутиш тюнер на швидкому прогоні, потім перемикаєш на повний рендер і запускаєш
                 "mode": ([MODE_TUNE, MODE_FULL], {"default": MODE_TUNE, "tooltip": "Tuning mode: fast, ≤720, the image outputs stay blocked. Full render: size from output_size and max_side."}),
                 # службові (ховає js): стара текстова форма і значення вбудованого тюнера
-                "overrides": ("STRING", {"multiline": True, "default": "{}"}),
-                "palette": ("STRING", {"multiline": True, "default": ""}),
-                "params_json": ("STRING", {"multiline": False, "default": ""}),   # пише вбудований тюнер; JS ховає
+                "overrides": ("STRING", {"multiline": True, "default": "{}", "tooltip": "written by the tuner: edits on top of the preset (JSON)"}),
+                "palette": ("STRING", {"multiline": True, "default": "", "tooltip": "written by the tuner: colour palette"}),
+                "params_json": ("STRING", {"multiline": False, "default": "", "tooltip": "written by the tuner: all look parameters (JSON)"}),   # пише вбудований тюнер; JS ховає
                 # новий віджет - лише в кінець: widgets_values старих workflow лягають по порядку
                 "auto_run": ("BOOLEAN", {"default": True, "tooltip": "On: every Run renders the final and passes it to the connected nodes (Save / video). Off: Run renders only the preview, the final output stays blocked until 'Render final'."}),
                 "hdr": ([HDR_OFF, HDR_LINEAR], {"default": HDR_OFF,
@@ -76,6 +76,7 @@ class DepthLook:
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
+    DESCRIPTION = "Depth Look with the built-in tuner: pick a look, edit it on the frame, then render at full size."
     RETURN_TYPES = ("IMAGE", GRADE_TYPE, "IMAGE")
     RETURN_NAMES = ("preview", "grade", "final")     # final - лише повний рендер: Save на ньому не пише превʼю з водяним знаком
     OUTPUT_NODE = True            # граф запускається й без Save-ноди (превʼю - у вбудованому тюнері)

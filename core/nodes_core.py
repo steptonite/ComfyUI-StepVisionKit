@@ -28,15 +28,16 @@ class LexBoxesToBBOX:
                 "boxes": (any_type, {"tooltip": "BOUNDING_BOX (core), BOXES (ComfyUI-YOLO) or BBOX"}),
                 "mode": (["largest", "all", "index"], {"default": "largest",
                          "tooltip": "largest = the biggest box in the frame, CLASS IS IGNORED (saves you on CG renders where YOLO says 'kite')"}),
-                "index": ("INT", {"default": 0, "min": 0, "max": 64}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 64, "tooltip": "box number for mode=index"}),
                 "pad": ("INT", {"default": 0, "min": -256, "max": 256, "tooltip": "expand the box by N pixels"}),
-                "format_in": (["auto", "xyxy", "xywh_topleft", "xywh_center"], {"default": "auto"}),
+                "format_in": (["auto", "xyxy", "xywh_topleft", "xywh_center"], {"default": "auto", "tooltip": "box layout of the input: auto detects it; xyxy = corners, xywh_topleft / xywh_center = size from the top-left corner / centre"}),
                 "on_miss": (["previous", "full_frame", "empty"], {"default": "previous",
                             "tooltip": "SAM2 fails if a frame has no box — keep 'previous'"}),
             },
             "optional": {"image": ("IMAGE", {"tooltip": "clamp boxes to the frame bounds"})},
         }
 
+    DESCRIPTION = "Turns detector boxes into one BBOX per frame for SAM2."
     RETURN_TYPES = ("BBOX", "STRING")
     RETURN_NAMES = ("bboxes", "info")
     FUNCTION = "convert"
@@ -75,17 +76,18 @@ class LexHUDBoxes:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",),
-                "boxes": (any_type,),
-                "style": (["corners", "solid", "round"], {"default": "corners"}),
-                "thickness": ("INT", {"default": 2, "min": 1, "max": 12}),
-                "corner_len": ("INT", {"default": 24, "min": 4, "max": 200}),
-                "color": ("STRING", {"default": "#00FF9C"}),
-                "show_label": ("BOOLEAN", {"default": True}),
-                "format_in": (["auto", "xyxy", "xywh_topleft", "xywh_center"], {"default": "auto"}),
+                "images": ("IMAGE", {"tooltip": "frames to draw on"}),
+                "boxes": (any_type, {"tooltip": "BOUNDING_BOX / BOXES / BBOX from a detector"}),
+                "style": (["corners", "solid", "round"], {"default": "corners", "tooltip": "corners = brackets on the corners, solid = full rectangle, round = rounded rectangle"}),
+                "thickness": ("INT", {"default": 2, "min": 1, "max": 12, "tooltip": "line width, px"}),
+                "corner_len": ("INT", {"default": 24, "min": 4, "max": 200, "tooltip": "corners style: length of each bracket arm, px"}),
+                "color": ("STRING", {"default": "#00FF9C", "tooltip": "line and text colour, hex"}),
+                "show_label": ("BOOLEAN", {"default": True, "tooltip": "class name above each box"}),
+                "format_in": (["auto", "xyxy", "xywh_topleft", "xywh_center"], {"default": "auto", "tooltip": "box layout of the input: auto detects it; xyxy = corners, xywh_topleft / xywh_center = size from the top-left corner / centre"}),
             },
         }
 
+    DESCRIPTION = "Draws HUD boxes (corner brackets, solid or round) with class labels over the frames."
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "draw"
     CATEGORY = "StepVisionKit"
@@ -141,12 +143,12 @@ class LexYOLODetect:
         models = sorted([f for f in os.listdir(d) if f.endswith(".pt")]) if os.path.isdir(d) else []
         return {
             "required": {
-                "images": ("IMAGE",),
-                "model_name": (models or ["yolo11n.pt"],),
+                "images": ("IMAGE", {"tooltip": "frames to detect on"}),
+                "model_name": (models or ["yolo11n.pt"], {"tooltip": "files in models/yolov8; yolo11n.pt is the small fast one"}),
                 "device": (["auto", "mps", "cpu", "cuda"], {"default": "auto",
                            "tooltip": "auto = picks cuda on a rented NVIDIA box and mps on a Mac. A hard-coded 'mps' in a saved workflow will fail on someone else's machine"}),
-                "conf": ("FLOAT", {"default": 0.25, "min": 0.01, "max": 0.95, "step": 0.01}),
-                "imgsz": ("INT", {"default": 640, "min": 320, "max": 1280, "step": 32}),
+                "conf": ("FLOAT", {"default": 0.25, "min": 0.01, "max": 0.95, "step": 0.01, "tooltip": "lower finds more objects and more junk"}),
+                "imgsz": ("INT", {"default": 640, "min": 320, "max": 1280, "step": 32, "tooltip": "detection resolution; bigger is slower and finds small objects"}),
                 "class_filter": ("STRING", {"default": "", "tooltip": "empty = NO class filter (needed for renders)"}),
                 "track": ("BOOLEAN", {"default": True,
                           "tooltip": "SMOOTHNESS LEVER #1. true = ByteTrack: every object gets a stable id, and an internal Kalman filter PREDICTS the position — the box moves smoothly and lags slightly behind sudden motion. false = raw per-frame YOLO: jittery, but shows exactly what the detector saw on THIS frame; there are no ids and select=track_id does not work"}),
@@ -172,6 +174,7 @@ class LexYOLODetect:
             },
         }
 
+    DESCRIPTION = "Runs a YOLO model from models/yolov8 on every frame, with tracking and smoothing, and picks which boxes to pass on."
     RETURN_TYPES = ("BOUNDING_BOX", "BBOX", "IMAGE", "STRING")
     RETURN_NAMES = ("bounding_box", "bbox_for_sam2", "preview", "info")
     FUNCTION = "detect"

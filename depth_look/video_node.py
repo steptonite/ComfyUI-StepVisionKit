@@ -183,6 +183,7 @@ class DepthLookVideo:
 
     _consumed = {}           # unique_id -> останній використаний render_token (one-shot: той самий токен фінал вдруге не запускає)
 
+    DESCRIPTION = "Takes a grade from Depth Look and applies it to video: timing, animation, final size and a fast preview."
     RETURN_TYPES = ("IMAGE", "FLOAT", "IMAGE")
     RETURN_NAMES = ("preview", "play_fps", "final")
     OUTPUT_NODE = True       # стрічка превʼю в ноді має рахуватись і без підключеного виходу

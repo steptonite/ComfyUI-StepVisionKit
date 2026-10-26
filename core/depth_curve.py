@@ -84,7 +84,7 @@ class LexDepthCurve:
                                 "tooltip": "what step height counts as noise rather than a real edge. 0.06 — banding only · 0.12 default · 0.2–0.35 also catches ragged leaf clutter but starts to erode silhouette sharpness"}),
                 "clip_low": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.5,
                              "tooltip": "lower clipping percentile, %"}),
-                "clip_high": ("FLOAT", {"default": 99.0, "min": 80.0, "max": 100.0, "step": 0.5}),
+                "clip_high": ("FLOAT", {"default": 99.0, "min": 80.0, "max": 100.0, "step": 0.5, "tooltip": "percentile taken as the far/near limit; lower clips more of the extreme values"}),
                 "invert": ("BOOLEAN", {"default": False,
                            "tooltip": "invert the result if near came out dark"}),
                 "normalize": (["batch", "per_frame"], {"default": "batch",
@@ -92,6 +92,7 @@ class LexDepthCurve:
             },
         }
 
+    DESCRIPTION = "Tone curve for a Depth Anything 3 map so it reads like Depth Anything V2: levels, gamma, focus band, clarity, deband."
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("depth", "depth_mask", "info")
     FUNCTION = "curve"

@@ -497,6 +497,7 @@ class SVKDepthGrade:
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
+    DESCRIPTION = "Grades a depth map in plain terms (levels, near/far, focus) and removes frame-to-frame flicker on video."
     RETURN_TYPES = ("IMAGE", "MASK", "STRING")
     RETURN_NAMES = ("depth", "depth_mask", "info")
     FUNCTION = "grade"

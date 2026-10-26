@@ -226,9 +226,9 @@ class SVKSaveDepth16:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "images": ("IMAGE",),
-            "filename_prefix": ("STRING", {"default": "depth16/depth"}),
-            "format": (["png 16-bit", "exr float32"], {"default": "png 16-bit"}),
+            "images": ("IMAGE", {"tooltip": "depth images to save"}),
+            "filename_prefix": ("STRING", {"default": "depth16/depth", "tooltip": "file name prefix; a/b makes subfolder a"}),
+            "format": (["png 16-bit", "exr float32"], {"default": "png 16-bit", "tooltip": "png 16-bit = 65536 levels, opens anywhere; exr float32 = exact depth for compositing"}),
             "folder": ("STRING", {"default": "", "tooltip": "where to save; empty = ComfyUI output"}),
         }}
 

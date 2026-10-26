@@ -84,11 +84,12 @@ class DepthLookSimple:
                 # нові входи - в кінець, щоб widgets_values старих workflow не зсунулись
                 "look_mix": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "label": "look strength",
                                        "tooltip": "Master mix: 0 = original, 1 = full look. Applies to the image output (the grade output does not carry it)."}),
-                "extra_json": ("STRING", {"multiline": False, "default": "{}"}),   # службове: ефекти, додані поверх пресету (пише js)
+                "extra_json": ("STRING", {"multiline": False, "default": "{}", "tooltip": "written by the card: effects added on top of the preset (JSON)"}),   # службове: ефекти, додані поверх пресету (пише js)
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
+    DESCRIPTION = "Depth Look without the tuner: a preset plus on/strength for each effect group. Outputs the image and a grade for other Depth Look nodes."
     RETURN_TYPES = ("IMAGE", GRADE_TYPE)
     RETURN_NAMES = ("image", "grade")
     OUTPUT_NODE = True            # граф запускається й без Save/Preview; кадр для живого превʼю картки пишемо в кеш

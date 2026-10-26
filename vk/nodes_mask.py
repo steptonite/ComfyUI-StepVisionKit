@@ -18,7 +18,7 @@ class VKCutByMask:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",),
+                "images": ("IMAGE", {"tooltip": "frames to cut"}),
                 "mask": ("MASK", {"tooltip": "White = keep. From SAM2, MediaPipe, anything."}),
                 "background": (BACKGROUND, {"default": "black", "tooltip": "What replaces everything outside the mask. transparent gives a black image plus a mask — send both to Join Image With Alpha and save as webp or png, because h264 has no alpha."}),
                 "color": ("STRING", {"default": "#000000", "tooltip": "For background=color."}),

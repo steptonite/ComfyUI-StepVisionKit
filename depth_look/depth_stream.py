@@ -141,7 +141,7 @@ class SVKVideoDepthStream:
         return {"required": {
             "da3_model": ("DA3_MODEL", {"tooltip": "Load Depth Anything 3 (Mono-Large gives the sky mask)"}),
             "file": (V._video_files(), {"tooltip": "video from ComfyUI/input - the same one Load Video Pro reads"}),
-            "start_frame": ("INT", {"default": 0, "min": 0, "max": 10_000_000}),
+            "start_frame": ("INT", {"default": 0, "min": 0, "max": 10_000_000, "tooltip": "first frame to read"}),
             "frame_count": ("INT", {"default": 0, "min": 0, "max": 100_000, "tooltip": "0 = to the end; RAM does not grow with it"}),
             "pre_scale": ("FLOAT", {"default": 0.5, "min": 0.05, "max": 1.0, "step": 0.05,
                                     "tooltip": "frame scale before DA3, like Image Scale By (area). The model works at 'resolution' anyway; "
@@ -158,12 +158,12 @@ class SVKVideoDepthStream:
                                                    "if not, it goes to a file on disk (mmap). 0 = always disk. Raw DA3 cache is on disk anyway (~1 MB/frame)"}),
         }, "optional": {
             "path": ("STRING", {"default": "", "tooltip": "absolute path to a video; overrides 'file' when set"}),
-            "every_nth": ("INT", {"default": 1, "min": 1, "max": 1000}),
+            "every_nth": ("INT", {"default": 1, "min": 1, "max": 1000, "tooltip": "take every N-th frame; 1 = all"}),
             "max_width": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 2, "tooltip": "as in Load Video Pro"}),
             "output_curve": (["as encoded", "linear"], {"default": "as encoded", "tooltip": "as in Load Video Pro"}),
-            "gamut": (["keep source", "Rec.709 / sRGB"], {"default": "keep source"}),
-            "scale_method": (["area", "bilinear", "bicubic", "lanczos", "nearest-exact"], {"default": "area"}),
-            "resize_method": (["upper_bound_resize", "lower_bound_resize"], {"default": "upper_bound_resize"}),
+            "gamut": (["keep source", "Rec.709 / sRGB"], {"default": "keep source", "tooltip": "as in Load Video Pro"}),
+            "scale_method": (["area", "bilinear", "bicubic", "lanczos", "nearest-exact"], {"default": "area", "tooltip": "filter for pre_scale"}),
+            "resize_method": (["upper_bound_resize", "lower_bound_resize"], {"default": "upper_bound_resize", "tooltip": "how DA3 fits the frame to its resolution: upper bound = long side, lower bound = short side"}),
             "cache_folder": ("STRING", {"default": "", "tooltip": "empty = output/svk_depth_cache"}),
         }}
 
@@ -365,4 +365,4 @@ class SVKVideoDepthStream:
 
 
 NODE_CLASS_MAPPINGS = {"SVKVideoDepthStream": SVKVideoDepthStream}
-NODE_DISPLAY_NAME_MAPPINGS = {"SVKVideoDepthStream": "Video Depth · DA3 streaming (low RAM, cached)"}
+NODE_DISPLAY_NAME_MAPPINGS = {"SVKVideoDepthStream": "Video Depth · DA3 stream"}

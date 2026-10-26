@@ -127,4 +127,4 @@ class SVKLoadRAW:
 
 
 NODES = {"SVKLoadRAW": SVKLoadRAW}
-DISPLAY = {"SVKLoadRAW": "Load RAW Photo"}
+DISPLAY = {"SVKLoadRAW": "Load RAW · photo"}

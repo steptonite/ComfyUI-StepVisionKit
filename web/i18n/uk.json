@@ -36,7 +36,8 @@
         "auto_run": {
           "tooltip": "Увімкнено: граф іде далі (Save / відео-ноди отримують результат). Вимкнено: Run лише завантажує новий кадр у тюнер, нічого не рендериться, усі виходи заблоковано - Save не треба вимикати."
         }
-      }
+      },
+      "description": "Depth Look із вбудованим тюнером: обери лук, підкрути на кадрі, потім рендер у повному розмірі."
     },
     "DepthLookSimple": {
       "display_name": "Depth Look · простий",
@@ -125,7 +126,8 @@
         "look_mix": {
           "tooltip": "Загальний міксер: 0 = оригінал, 1 = повний лук. Діє на вихід image (вихід grade його не несе)."
         }
-      }
+      },
+      "description": "Depth Look без тюнера: пресет плюс «увімк + сила» для кожної групи ефектів. Віддає картинку і грейд для інших нод Depth Look."
     },
     "DepthLookVideo": {
       "display_name": "Depth Look · відео",
@@ -298,10 +300,11 @@
         "dm_light_spec": {
           "tooltip": "Рух по глибині · світло: відблиск"
         }
-      }
+      },
+      "description": "Бере грейд із Depth Look і накладає на відео: час, анімація, фінальний розмір і швидке превʼю."
     },
     "LexBoxesToBBOX": {
-      "display_name": "Boxes → BBOX (для SAM2)",
+      "display_name": "Boxes → BBOX · SAM2",
       "inputs": {
         "boxes": {
           "tooltip": "BOUNDING_BOX (ядро), BOXES (ComfyUI-YOLO) або BBOX"
@@ -318,10 +321,11 @@
         "image": {
           "tooltip": "щоб обрізати бокси по межах кадру"
         }
-      }
+      },
+      "description": "Перетворює рамки детектора на один BBOX на кадр для SAM2."
     },
     "LexDepthCurve": {
-      "display_name": "Depth Curve (DA3 → вигляд як V2)",
+      "display_name": "Depth Curve · DA3 → V2",
       "inputs": {
         "depth": {
           "tooltip": "вихід DA3Render (або будь-який депсмеп-IMAGE)"
@@ -371,13 +375,15 @@
         "normalize": {
           "tooltip": "🥇 ВІДЕО: 'batch' — чорна й біла точки рахуються ОДИН раз на всю пачку кадрів. Саме це прибирає мерехтіння яскравості депсу. 'per_frame' — по кожному кадру окремо (старa поведінка; годиться для одиночних фото)"
         }
-      }
+      },
+      "description": "Тонова крива для карти Depth Anything 3, щоб вона читалась як Depth Anything V2: рівні, гама, смуга фокуса, чіткість, дебенд."
     },
     "LexHUDBoxes": {
-      "display_name": "HUD Boxes (кути/підписи)"
+      "display_name": "HUD Boxes · кути",
+      "description": "Малює HUD-рамки (кути, суцільні чи заокруглені) з назвами класів поверх кадрів."
     },
     "LexHUDSprite": {
-      "display_name": "HUD Sprite (кастомна рамка PNG + дірка)",
+      "display_name": "HUD Sprite · рамка PNG",
       "inputs": {
         "boxes": {
           "tooltip": "BOUNDING_BOX / BOXES / BBOX — вихід LexYOLODetect"
@@ -430,7 +436,8 @@
         "hud_image": {
           "tooltip": "кастомна рамка. Батч >1 = анімований HUD (циклом по кадрах)"
         }
-      }
+      },
+      "description": "Ставить вашу PNG-рамку на знайдені рамки й може вирізати під нею дірку у відео. Віддає композит, окремий HUD і маски."
     },
     "LexYOLODetect": {
       "inputs": {
@@ -473,10 +480,12 @@
         "make_preview": {
           "tooltip": "🔴 превʼю = ПОВНА друга копія всіх кадрів у RAM (200 кадрів FullHD ≈ 5 ГБ). Вмикай на 1-2 кадрах, щоб прочитати #N та id:N, і вимикай на прогоні"
         }
-      }
+      },
+      "display_name": "YOLO Detect",
+      "description": "Запускає модель YOLO з models/yolov8 на кожному кадрі, з трекінгом і згладжуванням, і обирає, які рамки передати далі."
     },
     "SVKDepthGrade": {
-      "display_name": "Depth Grade 🎚 (грейд глибини + антимерехтіння)",
+      "display_name": "Depth Grade · антимерехтіння",
       "inputs": {
         "depth": {
           "tooltip": "карта глибини: вихід DA3Render або будь-який депсмеп"
@@ -544,10 +553,11 @@
         "motion_guide": {
           "tooltip": "ВІДЕО: підключи СВОЄ оригінальне відео (ті самі кадри). Рух тоді рахується по картинці, а не по депсу — точніше, менше шлейфів"
         }
-      }
+      },
+      "description": "Грейд карти глибини людською мовою (рівні, близьке/далеке, фокус) і прибирання мерехтіння між кадрами на відео."
     },
     "SVKDepthGradeLive": {
-      "display_name": "Depth Grade Live (стара, заміни на Depth Grade + Depth Grade View)",
+      "display_name": "Depth Grade · Live (стара)",
       "inputs": {
         "depth": {
           "tooltip": "карта глибини: вихід DA3Render або будь-який депсмеп"
@@ -618,7 +628,7 @@
       }
     },
     "SVKDepthGradeVideoView": {
-      "display_name": "Depth Grade View · відео (живе прев'ю)",
+      "display_name": "Depth Grade View · відео",
       "description": "Живе прев'ю відео: під'єднай до виходу depth ноди Depth Grade, натисни Run один раз — далі прев'ю перераховується саме при зміні повзунків, у зменшеному розмірі. Clarity, texture і smooth_banding на малому розмірі видно слабше — точний вигляд дає Run.",
       "inputs": {
         "depth": {
@@ -630,7 +640,7 @@
       }
     },
     "SVKDepthGradeView": {
-      "display_name": "Depth Grade View · кадр (калібрування)",
+      "display_name": "Depth Grade View · кадр",
       "description": "Калібрування кадру: під'єднай до виходу depth ноди Depth Grade. Вхід іде на вихід без змін, тож ланцюжок не рветься. Піпетки й криві пишуть у ті самі повзунки Depth Grade.",
       "inputs": {
         "depth": {
@@ -639,11 +649,11 @@
       }
     },
     "SVKDepthReceiver": {
-      "display_name": "Приймач глибини (сира DA3 → float)",
+      "display_name": "Приймач глибини · сира DA3",
       "description": "Сира геометрія DA3 → глибина для Depth Grade, float32, близьке біле, нічого не обрізано."
     },
     "SVKRawDepthLoad": {
-      "display_name": "Завантажити сиру глибину (EXR float32)",
+      "display_name": "Завантажити сиру глибину · EXR",
       "description": "Сира глибина назад як DA3_GEOMETRY. Вкажи теку кліпу або теку, куди пише Raw Save, — візьметься найсвіжіший кліп.",
       "inputs": {
         "folder": {
@@ -652,7 +662,7 @@
       }
     },
     "SVKRawDepthSave": {
-      "display_name": "Зберегти сиру глибину (EXR float32)",
+      "display_name": "Зберегти сиру глибину · EXR",
       "description": "Сира геометрія DA3 у нову підтеку обраної теки (порожньо = output/svk_raw): DA3 рахується раз, грейд — скільки завгодно.",
       "inputs": {
         "name": {
@@ -664,7 +674,7 @@
       }
     },
     "SVKSaveDepth16": {
-      "display_name": "Зберегти глибину 16 біт / EXR",
+      "display_name": "Зберегти глибину · 16 біт / EXR",
       "description": "Вихід без 8-бітних сходинок: PNG 16 біт або EXR float32.",
       "inputs": {
         "folder": {
@@ -846,7 +856,41 @@
         "frame_offset": {
           "tooltip": "Номер першого кадру цього батча в усьому кліпі. Став, коли кліп обробляється шматками, щоб тремтіння й мерехтіння тривали безшовно."
         }
-      }
+      },
+      "description": "Робить рендер схожим на зйомку справжньою камерою: шум сенсора, обробка камери, оптика, тон. Обери профіль камери; «ще» відкриває всі налаштування."
+    },
+    "VKDetect": {
+      "display_name": "Знайти обʼєкти · YOLO"
+    },
+    "VKSelectBox": {
+      "display_name": "Вибрати рамку"
+    },
+    "VKBoxesToBBOX": {
+      "display_name": "Рамки → BBOX"
+    },
+    "VKDrawBoxes": {
+      "display_name": "Намалювати рамки · HUD"
+    },
+    "VKCutByMask": {
+      "display_name": "Вирізати за маскою"
+    },
+    "VKOverlayOnBoxes": {
+      "display_name": "Накласти на рамки"
+    },
+    "SVKLoadRAW": {
+      "display_name": "Завантажити RAW · фото"
+    },
+    "SVKSaveImageHDR": {
+      "display_name": "Зберегти зображення · HDR"
+    },
+    "SVKLoadVideoPro": {
+      "display_name": "Завантажити відео · Pro"
+    },
+    "SVKLoadImageSequence": {
+      "display_name": "Завантажити послідовність · HDR"
+    },
+    "SVKSaveVideoHDR": {
+      "display_name": "Зберегти відео · HDR"
     }
   },
   "ui": {

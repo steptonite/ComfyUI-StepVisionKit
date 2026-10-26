@@ -18,23 +18,23 @@ class VKDrawBoxes:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE",),
-                "boxes": (any_type,),
+                "images": ("IMAGE", {"tooltip": "frames to draw on"}),
+                "boxes": (any_type, {"tooltip": "boxes from Detect Objects or Select Box"}),
                 "style": (STYLE, {"default": "corner_brackets", "tooltip": "Shape of the box. none = labels and trails only."}),
                 "color": ("STRING", {"default": "#FFFFFF", "tooltip": "Line and text colour, hex."}),
-                "thickness": ("INT", {"default": 2, "min": 1, "max": 16}),
+                "thickness": ("INT", {"default": 2, "min": 1, "max": 16, "tooltip": "line width, px"}),
                 "corner_length": ("INT", {"default": 24, "min": 4, "max": 400, "tooltip": "corner_brackets only: how long each bracket arm is."}),
                 "fill_opacity": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip": "Tint inside the box. 0 = no fill."}),
-                "show_class": ("BOOLEAN", {"default": True}),
-                "show_confidence": ("BOOLEAN", {"default": False}),
+                "show_class": ("BOOLEAN", {"default": True, "tooltip": "class name on each box"}),
+                "show_confidence": ("BOOLEAN", {"default": False, "tooltip": "detector confidence on each box"}),
                 "show_index": ("BOOLEAN", {"default": True, "tooltip": "The #N you type into Select Box."}),
                 "show_track_id": ("BOOLEAN", {"default": True, "tooltip": "The id:N that stays on the same object across the whole video."}),
                 "label_text": ("STRING", {"default": "", "tooltip": "Fixed text on every box. Leave empty to use the detector's own labels. Massive Attack's screens used invented text, not real data."}),
-                "label_size": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 4.0, "step": 0.05}),
-                "label_position": (LABEL_POS, {"default": "above"}),
+                "label_size": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 4.0, "step": 0.05, "tooltip": "text size"}),
+                "label_position": (LABEL_POS, {"default": "above", "tooltip": "where the text sits relative to the box"}),
                 "label_background": ("BOOLEAN", {"default": False, "tooltip": "Solid plate behind the text."}),
                 "trail_length": ("INT", {"default": 0, "min": 0, "max": 240, "tooltip": "Draw the path of each tracked object over the last N frames. Needs track ids from Detect Objects."}),
-                "format_in": (FORMATS, {"default": "auto"}),
+                "format_in": (FORMATS, {"default": "auto", "tooltip": "box layout of the input: auto detects it; xyxy = corners, xywh_topleft / xywh_center = size from the top-left corner / centre"}),
             },
         }
 
@@ -137,4 +137,4 @@ class VKDrawBoxes:
 
 
 NODES = {"VKDrawBoxes": VKDrawBoxes}
-DISPLAY = {"VKDrawBoxes": "Draw Boxes (HUD)"}
+DISPLAY = {"VKDrawBoxes": "Draw Boxes · HUD"}

@@ -139,25 +139,25 @@ class LexHUDSprite:
         return {
             "required": {
                 "boxes": (any_type, {"tooltip": "BOUNDING_BOX / BOXES / BBOX — output of LexYOLODetect"}),
-                "mode": (["largest", "index", "all"], {"default": "largest"}),
-                "index": ("INT", {"default": 0, "min": 0, "max": 64}),
+                "mode": (["largest", "index", "all"], {"default": "largest", "tooltip": "largest = the biggest box only, index = the box number below, all = a frame on every box"}),
+                "index": ("INT", {"default": 0, "min": 0, "max": 64, "tooltip": "box number for mode=index"}),
                 "margin_pct": ("FLOAT", {"default": 25.0, "min": -50.0, "max": 400.0, "step": 1.0,
                                "tooltip": "make the HUD N% larger than the box so the frame does NOT clip the subject"}),
-                "margin_px": ("INT", {"default": 0, "min": -512, "max": 512}),
+                "margin_px": ("INT", {"default": 0, "min": -512, "max": 512, "tooltip": "extra margin in pixels on top of margin_pct; negative shrinks"}),
                 "aspect": (ASPECTS, {"default": "box",
                            "tooltip": "'box' = the frame takes the shape of the YOLO box itself: a vertical face gives a vertical frame. The other options force a ratio and the shorter side is extended (the subject is never cropped). 'png' = the aspect of the frame file itself: no deformation at all"}),
                 "min_width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8,
                               "tooltip": "minimum HUD size in frame pixels"}),
-                "min_height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8}),
-                "offset_x": ("INT", {"default": 0, "min": -4096, "max": 4096}),
-                "offset_y": ("INT", {"default": 0, "min": -4096, "max": 4096}),
+                "min_height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 8, "tooltip": "minimum HUD height in frame pixels"}),
+                "offset_x": ("INT", {"default": 0, "min": -4096, "max": 4096, "tooltip": "shift the HUD right (+) or left (-), px"}),
+                "offset_y": ("INT", {"default": 0, "min": -4096, "max": 4096, "tooltip": "shift the HUD down (+) or up (-), px"}),
                 "smooth": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 0.98, "step": 0.02,
                            "tooltip": "0 = raw box (jumpy), 0.5–0.8 = smooth follow. Has no effect in 'all' mode"}),
                 "nine_slice": ("INT", {"default": 0, "min": 0, "max": 512, "step": 4,
                                "tooltip": "px of the corners that must NOT be stretched. 0 = plain resize"}),
                 "hole": (["none", "box", "hud_rect"], {"default": "box",
                          "tooltip": "what to cut out of the video: nothing / the YOLO box itself / the whole HUD rectangle"}),
-                "hole_feather": ("INT", {"default": 0, "min": 0, "max": 128}),
+                "hole_feather": ("INT", {"default": 0, "min": 0, "max": 128, "tooltip": "soft edge of the cut-out, px"}),
                 "alpha_mode": (["loadimage", "mask_direct", "luma", "opaque"], {"default": "loadimage",
                                "tooltip": "loadimage = MASK from LoadImage (it is inverted!). mask_direct = the MASK is already the alpha"}),
                 "label": ("STRING", {"default": "auto",
@@ -178,10 +178,11 @@ class LexHUDSprite:
             "optional": {
                 "images": ("IMAGE", {"tooltip": "background video. Without it only the HUD on transparent is returned"}),
                 "hud_image": ("IMAGE", {"tooltip": "custom frame. Batch >1 = animated HUD (looped over frames)"}),
-                "hud_mask": ("MASK",),
+                "hud_mask": ("MASK", {"tooltip": "alpha of the custom frame (MASK from Load Image)"}),
             },
         }
 
+    DESCRIPTION = "Puts your own PNG frame on detected boxes and can cut a hole in the video under it. Returns the composite, the HUD alone and masks."
     RETURN_TYPES = ("IMAGE", "MASK", "IMAGE", "MASK", "MASK", "STRING")
     RETURN_NAMES = ("composite", "composite_alpha", "hud_rgb", "hud_alpha", "box_mask", "info")
     FUNCTION = "run"

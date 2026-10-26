@@ -193,10 +193,10 @@ class SVKLoadImageSequence:
         return {"required": {
             "folder": ("STRING", {"default": "", "tooltip": "folder with the frames: absolute path or a subfolder of ComfyUI/input"}),
             "pattern": ("STRING", {"default": "*", "tooltip": "file name filter, e.g. shot_*.exr; files are sorted by name"}),
-            "start_frame": ("INT", {"default": 0, "min": 0, "max": 10_000_000}),
+            "start_frame": ("INT", {"default": 0, "min": 0, "max": 10_000_000, "tooltip": "first frame to load (by sorted name)"}),
             "frame_count": ("INT", {"default": 0, "min": 0, "max": 100_000, "tooltip": "0 = all"}),
         }, "optional": {
-            "every_nth": ("INT", {"default": 1, "min": 1, "max": 1000}),
+            "every_nth": ("INT", {"default": 1, "min": 1, "max": 1000, "tooltip": "take every N-th frame; 1 = all"}),
             "input_curve": (["as stored", "sRGB → linear"], {"default": "as stored",
                             "tooltip": "EXR is normally linear already; use sRGB → linear for display-encoded PNG/TIFF/JPG"}),
         }}
@@ -266,11 +266,11 @@ class SVKSaveVideoHDR:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "images": ("IMAGE",),
-            "filename_prefix": ("STRING", {"default": "svk/video"}),
+            "images": ("IMAGE", {"tooltip": "frames to write"}),
+            "filename_prefix": ("STRING", {"default": "svk/video", "tooltip": "file name prefix; a/b makes subfolder a"}),
             "format": (list(VIDEO_FORMATS), {"default": "ProRes 422 HQ",
                        "tooltip": "ProRes/DNxHR = editing masters (.mov); HEVC 10-bit = delivery (.mp4, plays HDR on Apple devices); EXR = linear frames for grading/compositing"}),
-            "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.001}),
+            "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.001, "tooltip": "frame rate of the file"}),
             "transfer": (TRANSFERS, {"default": "SDR Rec.709",
                          "tooltip": "SDR = regular Rec.709; PQ = HDR10 (Rec.2020, absolute nits); HLG = broadcast HDR. Ignored for EXR (always linear)"}),
             "input_curve": (INPUT_CURVES, {"default": "sRGB",
@@ -283,7 +283,7 @@ class SVKSaveVideoHDR:
             "hevc_crf": ("INT", {"default": 16, "min": 0, "max": 51, "tooltip": "HEVC quality: lower = better and bigger; 12–18 is visually lossless"}),
             "max_nits": ("INT", {"default": 1000, "min": 203, "max": 10000, "step": 1,
                          "tooltip": "PQ only: brightest value written to HDR10 metadata (MaxCLL) and the clip point"}),
-            "exr_compression": (list(EXR_COMP), {"default": "zip"}),
+            "exr_compression": (list(EXR_COMP), {"default": "zip", "tooltip": "EXR only: zip and piz are lossless; dwaa is lossy and small"}),
         }}
 
     RETURN_TYPES = ("STRING",)
@@ -381,6 +381,6 @@ class SVKSaveVideoHDR:
 
 NODES = {"SVKLoadVideoPro": SVKLoadVideoPro, "SVKLoadImageSequence": SVKLoadImageSequence,
          "SVKSaveVideoHDR": SVKSaveVideoHDR}
-DISPLAY = {"SVKLoadVideoPro": "Load Video (ProRes / DNxHR / HEVC 10-bit)",
-           "SVKLoadImageSequence": "Load Image Sequence (EXR / PNG 16 / DPX)",
-           "SVKSaveVideoHDR": "Save Video HDR (ProRes / DNxHR / HEVC / EXR)"}
+DISPLAY = {"SVKLoadVideoPro": "Load Video · Pro",
+           "SVKLoadImageSequence": "Load Image Sequence · HDR",
+           "SVKSaveVideoHDR": "Save Video · HDR"}

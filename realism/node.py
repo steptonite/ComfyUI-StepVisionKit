@@ -39,6 +39,7 @@ class SVKCameraRealism:
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
+    DESCRIPTION = "Makes a render look shot on a real camera: sensor noise, camera processing, optics, tone. Pick a camera profile; «more» opens every setting."
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("image",)
     FUNCTION = "run"
