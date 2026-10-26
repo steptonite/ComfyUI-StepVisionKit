@@ -20,6 +20,12 @@
 14. **Рядок етапів** (`stageLine`): під превʼю нода показує, що робить зараз — «чекає в черзі → читає кадри → запуск рушія → кадр k / N · ~залишок → змішування → готово за N с», або «з кешу» / помилку. Python шле `render_proc.stage(unique_id, ...)` (подія `svk.stage`), воркер — рядок `STAGE <назва>`.
 12. **Ключі нод не перейменовуються.** Збережені workflow шукають ноду за `type`, тому, наприклад, `DepthLook*` лишились із попереднього окремого паку. Змінюються лише категорія меню (`StepVisionKit/<Розділ>`) і відображувана назва.
 
+15. **Кожен вхід має `tooltip`, кожна нода — `DESCRIPTION`.** Підказка пояснює, що змінює вхід і в який бік; опис ноди — одне-два речення, що вона робить і з чим зʼєднується. Українські тексти — у `web/i18n/uk.json` (`nodes[ключ].display_name / description / inputs[імʼя].tooltip / label`).
+16. **Назва — «Назва · варіант»** (Depth Look · Video, Detect Objects · YOLO, Save Video · HDR). Дужок і пояснень у назві немає, пояснення — в `DESCRIPTION`.
+17. **Ноди без власного UI беруть спільну картку `web/svk_cards.js`.** У таблицю `MAIN` пишуть 3–5 головних віджетів у порядку картки, решта сама йде під «ще», тож новий вхід не губиться. `null` — усі віджети на видноті (коли їх ≤3). Ноди, під віджетами яких Comfy показує збережені картинки, або ноди з власною кнопкою стоять у `COLOR_ONLY`: лише колір ноди, картки поверх немає.
+18. **Текстові поля й колір** — через той самий `control()`: рядок STRING стає полем вводу, а `opts.color` додає пікер кольору. Окремих віджетів-кнопок під колір немає.
+19. **Гейт `depth_look/tests/ui_widgets_gate.py`** ловить вхід без місця в UI (Depth Look, Camera Realism) та одруківку в `MAIN` спільної картки. Запускати перед комітом UI.
+
 ## Анатомія картки
 
 ```
@@ -31,32 +37,14 @@
 └ назва ноди (Nodes 2.0 — внизу)             ┘
 ```
 
-## Таблиця «нода SVK → що змінити»
+## Таблиця «нода SVK → стан»
 
-Таблиця згенерована з `object_info` (24.10.2026). Позначка «✅ зроблено» означає, що нода вже відповідає правилам вище.
+Повна таблиця розбіжностей з еталоном і що зроблено — `docs/svk_unify_plan.md` (26.10.2026).
 
-| Категорія | Нода | Ключ | Віджетів | Що змінити |
-|---|---|---|---|---|
-| StepVisionKit/Depth | Depth Curve (DA3 → вигляд як V2) | `LexDepthCurve` | 16 | 16 віджетів: 3–4 головні на видноті, решта під «ще» |
-| StepVisionKit/Depth | Depth Grade Live (стара, заміни на Depth Grade + Depth Grade View) | `SVKDepthGradeLive` | 20 | має свій JS (depth_grade_ui.js): звести на svk_ui.css/svk_ui.js, тексти → title |
-| StepVisionKit/Depth | Depth Grade View · відео (живе прев'ю) | `SVKDepthGradeVideoView` | 1 | має свій JS (depth_grade_ui.js): звести на svk_ui.css/svk_ui.js, тексти → title |
-| StepVisionKit/Depth | Depth Grade View · кадр (калібрування) | `SVKDepthGradeView` | 0 | має свій JS (depth_grade_ui.js): звести на svk_ui.css/svk_ui.js, тексти → title |
-| StepVisionKit/Depth | Depth Grade 🎚 (грейд глибини + антимерехтіння) | `SVKDepthGrade` | 20 | має свій JS (depth_grade_ui.js): звести на svk_ui.css/svk_ui.js, тексти → title |
-| StepVisionKit/Depth | Depth Look · відео | `DepthLookVideo` | 23 | ✅ зроблено: картка, «ще», підказки |
-| StepVisionKit/Depth | Depth Look · повний | `DepthLook` | 10 | ✅ зроблено: картка, «ще», підказки |
-| StepVisionKit/Depth | Depth Look · простий | `DepthLookSimple` | 27 | ✅ зроблено: картка, «ще», підказки |
-| StepVisionKit/Depth | Depth Receiver (raw DA3 → float depth) | `SVKDepthReceiver` | 1 | лише колір/категорія; тексти tooltip перевірити |
-| StepVisionKit/Depth | Raw Depth Load (EXR float32 → DA3 geometry) | `SVKRawDepthLoad` | 1 | має свій JS (depth_raw_ui.js): звести на svk_ui.css/svk_ui.js, тексти → title |
-| StepVisionKit/Depth | Raw Depth Save (DA3 geometry → EXR float32) | `SVKRawDepthSave` | 2 | має свій JS (depth_raw_ui.js): звести на svk_ui.css/svk_ui.js, тексти → title |
-| StepVisionKit/Depth | Save Depth 16-bit / EXR | `SVKSaveDepth16` | 3 | має свій JS (depth_raw_ui.js): звести на svk_ui.css/svk_ui.js, тексти → title |
-| StepVisionKit/Detect | Boxes To BBOX | `VKBoxesToBBOX` | 2 | лише колір/категорія; тексти tooltip перевірити |
-| StepVisionKit/Detect | Boxes → BBOX (для SAM2) | `LexBoxesToBBOX` | 5 | лише колір/категорія; тексти tooltip перевірити |
-| StepVisionKit/Detect | Detect Objects (YOLO) | `VKDetect` | 9 | 9 віджетів: 3–4 головні на видноті, решта під «ще» |
-| StepVisionKit/Detect | Select Box | `VKSelectBox` | 9 | 9 віджетів: 3–4 головні на видноті, решта під «ще» |
-| StepVisionKit/Detect | YOLO Detect | `LexYOLODetect` | 16 | 16 віджетів: 3–4 головні на видноті, решта під «ще» |
-| StepVisionKit/HUD | Cut By Mask | `VKCutByMask` | 6 | 6 віджетів: 3–4 головні на видноті, решта під «ще» |
-| StepVisionKit/HUD | Draw Boxes (HUD) | `VKDrawBoxes` | 15 | 15 віджетів: 3–4 головні на видноті, решта під «ще» |
-| StepVisionKit/HUD | HUD Boxes (кути/підписи) | `LexHUDBoxes` | 6 | 6 віджетів: 3–4 головні на видноті, решта під «ще» |
-| StepVisionKit/HUD | HUD Sprite (кастомна рамка PNG + дірка) | `LexHUDSprite` | 21 | 21 віджетів: 3–4 головні на видноті, решта під «ще» |
-| StepVisionKit/HUD | Overlay On Boxes | `VKOverlayOnBoxes` | 15 | 15 віджетів: 3–4 головні на видноті, решта під «ще» |
-
+| Нода | Ключ | Стан |
+|---|---|---|
+| Depth Look · Full / Simple / Video | `DepthLook`, `DepthLookSimple`, `DepthLookVideo` | ✅ еталон: картка, «ще», підказки, опис |
+| Camera Realism | `SVKCameraRealism` | ✅ картка за еталоном |
+| Detect / HUD / Depth Curve / IO / Video Depth (18 нод) | `Lex*`, `VK*`, `SVKLoad*`, `SVKSaveVideoHDR`, `SVKVideoDepthStream`, `SVKRawDepthSave`, `SVKDepthReceiver` | ✅ спільна картка `svk_cards.js`, підказки, опис, назви · 🟡 наживо не перевірено |
+| Save Image · HDR, Save Depth · 16-bit / EXR, Raw Depth Load · EXR | `SVKSaveImageHDR`, `SVKSaveDepth16`, `SVKRawDepthLoad` | ✅ колір, підказки, назви · ⏳ картка, що не накриває превʼю; кнопку теки — у `.svk-ibtn` |
+| Depth Grade · anti-flicker / Live, Depth Grade View · Frame / Video | `SVKDepthGrade*` | ✅ назви, опис · ⏳ свій UI (`depth_grade_ui.js`) звести на `svk_ui` |
