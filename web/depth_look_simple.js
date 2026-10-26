@@ -465,7 +465,7 @@ function buildTop(node, specs, onChange) {
         bar.append(c.row); ctl.push(c);
     }
     // гейт рендеру: превʼю йде завжди, фінал - за кнопкою (одноразовий токен) або з галочкою auto
-    const gate = el("div", "svk-bar"); gate.style.cssText = "flex-basis:100%;justify-content:flex-end;align-items:center;gap:8px";
+    const gate = el("div", "svk-bar"); gate.style.cssText = "flex-basis:100%;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap";
     const rb = el("button", "svk-btn primary", ICON.play + " " + T("Render final")); rb.type = "button";
     rb.style.cssText = "display:inline-flex;align-items:center;gap:6px;flex:none;padding:3px 12px;font-size:12px";   // компактна, справа - не на всю ширину
     rb.title = T("Renders the final once with the current settings and passes it to the connected nodes (Video Combine / Save). A normal run only renders the preview.");
@@ -480,7 +480,13 @@ function buildTop(node, specs, onChange) {
     };
     ap.append(apc, document.createTextNode(T("Auto preview")));
     ctl.push({ sync: () => { apc.checked = autoOn(node); } });
-    gate.append(ap, rb);
+    gate.append(ap);
+    if (specs.preview_side && W(node, "preview_side")) {         // роздільність превʼю: компактний select між «Auto preview» і «Render final»
+        const c = control(node, "preview_side", specs.preview_side, T("Preview"), { onChange, tip: T("Preview size (long side)") + ", px" });
+        c.row.style.cssText = "flex:none;gap:5px"; c.row.querySelector("select").style.width = "62px";
+        gate.append(c.row); ctl.push(c);
+    }
+    gate.append(rb);
     if (specs.auto_render && W(node, "auto_render")) {
         const c = control(node, "auto_render", specs.auto_render, T("Auto"), { onChange });
         c.row.style.flex = "none"; gate.append(c.row); ctl.push(c);
@@ -764,7 +770,7 @@ function paintStale(V) {
         : canAuto(V) ? (QUEUE_LEFT > 0 ? T("Settings changed — the preview updates when the queue is free") : T("Settings changed — updating the preview…"))
         : T("Settings changed — these frames are old");
     V.badgeBtn.style.display = sent ? "none" : "";
-    V.full?.paintStale?.(show ? V.badgeTxt.textContent : "");
+    V.full?.paintState?.({ busy: !!V.waiting, stale: show, text: V.badgeTxt.textContent, sent });
 }
 function videoNodes() { return (app.graph?._nodes || []).filter(n => n.__svkv); }
 function stripURL(node, i, stamp) { return api.apiURL("/depth_look/strip/" + encodeURIComponent(node.id) + "/" + i + "?v=" + (stamp || 0)); }
@@ -801,16 +807,25 @@ function openVideoFull(V) {
     runBtn.title = T("queue a run with the current settings (a run already in progress is not changed)");
     const back = el("button", null, T("✕ back to graph (Esc)"));
     back.style.cssText = "padding:5px 14px;border:1px solid #444;border-radius:6px;background:#26262b;color:#eee;cursor:pointer";
-    const staleEl = el("span", "svk-num"); staleEl.style.cssText = "color:var(--svk-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0";
-    bar.append(el("span", null, T("Depth Look · video node #") + node.id), play, cnt, stat, staleEl, runBtn, back);
+    // смужка прогресу в низу шапки: частка готових кадрів (дзеркало .bar рядка стану картки, див. paintStat)
+    const prog = el("div"); prog.style.cssText = "position:absolute;left:0;bottom:0;height:2px;width:0;background:var(--svk-accent);transition:width .3s;opacity:0";
+    bar.style.position = "relative";
+    bar.append(el("span", null, T("Depth Look · video node #") + node.id), play, cnt, stat, runBtn, back, prog);
     const body = el("div"); body.style.cssText = "flex:1;min-height:0;display:flex";
     const left = el("div"); left.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column";
-    const stage = el("div"); stage.style.cssText = "flex:1;min-height:0;position:relative";
+    // ті самі класи, що й у кадру картки (.svk-frame): is-busy - смужка зверху, is-stale - затемнений кадр, плашка «параметри змінено» з кнопкою
+    const stage = el("div", "svk-frame"); stage.style.cssText = "flex:1;min-height:0;position:relative;border:0;border-radius:0;background:transparent";
     const img = el("img"); img.alt = ""; img.draggable = false;
     img.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block";
     const none = el("div", null, T("No frames yet — press Run, the preview strip appears when it finishes"));
     none.style.cssText = "position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#888";
-    stage.append(img, none);
+    const badge = el("div", "svk-stale"); badge.style.display = "none";
+    const badgeTxt = el("span");
+    const badgeBtn = el("button", "svk-btn primary", T("Update")); badgeBtn.type = "button";
+    badgeBtn.title = T("Render the preview with the current settings now");
+    badgeBtn.onclick = () => { markChanged(); runVideo(node); };
+    badge.append(badgeTxt, badgeBtn);
+    stage.append(img, none, el("div", "svk-busy"), badge);
     const strip = el("div", "svk-strip"); strip.style.cssText += ";padding:8px 12px;justify-content:center";
     left.append(stage, strip);
     // права панель: ті самі збірники, що й на ноді; зміна тут одразу видна й на ноді (V.sync), і навпаки після виходу
@@ -827,9 +842,14 @@ function openVideoFull(V) {
     top.paintFps();
     // рядок стану ноди (етап / кадр k з N) дзеркалимо в шапку, не створюючи другий stageLine (він перехопив би події в ноди)
     const st = V.status.querySelector(".st"), tm = V.status.querySelector(".tm");
-    const paintStat = () => { stat.textContent = V.status.style.display === "none" ? "" : ((st?.textContent || "") + " " + (tm?.textContent || "")).trim(); };
+    const paintStat = () => {
+        stat.textContent = V.status.style.display === "none" ? "" : ((st?.textContent || "") + " " + (tm?.textContent || "")).trim();
+        const run = V.status.style.display !== "none" && V.status.classList.contains("is-run");      // смужка лише поки етап іде
+        prog.style.opacity = run ? "1" : "0";
+        prog.style.width = (parseFloat(V.status.style.getPropertyValue("--p")) || 0) + "%";
+    };
     const mo = new MutationObserver(paintStat);
-    mo.observe(V.status, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["style"] });
+    mo.observe(V.status, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["style", "class"] });
     paintStat();
     const esc = e => {
         const tag = (e.target?.tagName || "").toUpperCase();
@@ -877,7 +897,14 @@ function openVideoFull(V) {
         },
         reload() { fillStrip(); this.show(Math.min(V.sel, Math.max(0, (V.meta?.n || 1) - 1))); this.paintPlay(); },   // прийшла нова стрічка
         paintPlay() { play.innerHTML = V.timer ? ICON.pause : ICON.play; play.classList.toggle("is-on", !!V.timer); },
-        paintStale(t) { staleEl.textContent = t; staleEl.title = t; },
+        // той самий стан, що й на кадрі картки (paintStale): перерендер - смужка й затемнення, «параметри змінено» - плашка; по завершенні знімається
+        paintState({ busy, stale, text, sent }) {
+            stage.classList.toggle("is-busy", !!busy);
+            stage.classList.toggle("is-stale", !!stale);
+            badge.style.display = stale ? "" : "none";
+            badgeTxt.textContent = text || "";
+            badgeBtn.style.display = sent ? "none" : "";
+        },
     };
     play.onclick = () => togglePlay(V);
     runBtn.onclick = () => { markChanged(); runVideo(node); };

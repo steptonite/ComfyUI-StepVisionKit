@@ -37,7 +37,17 @@ _EXTRA_KEYS = {"vp_x", "vp_y", "shift_x", "shift_y", "palette"}
 # фінальний розмір рендеру (довга сторона, px). "original" = розмір входу; max_side - окремо, робоча роздільність
 SIZE_ORIGINAL = "original"
 OUTPUT_SIZES = [SIZE_ORIGINAL, "3840", "2560", "1920", "1440", "1080", "720"]
-PREVIEW_SIDE = 480            # довга сторона превʼю відео-ноди
+PREVIEW_SIDE = 480            # довга сторона превʼю відео-ноди (за замовч.)
+PREVIEW_SIDES = ["320", "480", "640", "960"]      # що можна обрати в preview_side; PREVIEW_SIDE має бути серед них
+
+
+def parse_preview_side(v):
+    """'640' / 640 -> довга сторона превʼю в px; усе недопустиме -> PREVIEW_SIDE."""
+    try:
+        v = int(float(v))
+    except (TypeError, ValueError):
+        return PREVIEW_SIDE
+    return v if str(v) in PREVIEW_SIDES else PREVIEW_SIDE
 GRADE_TYPE = "DL_GRADE"       # тип сокета між нодами (звичайний dict)
 
 # значення combo до перекладу (жовтень 2026): старі workflow і API-запити несуть їх далі -> мапимо на нові

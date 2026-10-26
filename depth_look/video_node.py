@@ -1,6 +1,7 @@
 """Depth Look · відео: бере `grade` (DL_GRADE) зі статичної/простої ноди й додає те, чого там нема:
 час (fps, start_time), анімацію (look_params.ANIM_KEYS), фінальний розмір і швидке превʼю.
 Повзунки анімації генеруються зі SPEC (look_params), у порядку GROUP_ORDER - нових ключів руками додавати не треба."""
+import hashlib
 import json
 import os
 import time
@@ -12,7 +13,7 @@ import look_api
 import look_params
 import depth_motion
 
-from .core import (SIZE_ORIGINAL, OUTPUT_SIZES, GRADE_TYPE, PREVIEW_SIDE, parse_output_size, check_inputs,
+from .core import (SIZE_ORIGINAL, OUTPUT_SIZES, GRADE_TYPE, PREVIEW_SIDE, PREVIEW_SIDES, parse_output_size, parse_preview_side, check_inputs,
                    legacy, validate_legacy, params_from_grade, out_shape, watermark)
 from .render_proc import tensors_to_numpy, make_progress, render, to_result, stage
 from ..media import color as C
@@ -65,6 +66,53 @@ def save_strip(unique_id, arr):
     return idx
 
 
+# ---- кеш готових кліпів (26.10.2026): повторний «Render final» з новим render_token, коли нічого, що впливає на кадри, не змінилось
+# (змінили лише Save/даунстрім), не рахує кліп заново. По одному запису на (нода, превʼю|фінал). Ключ - хеш параметрів + відбиток тензорів.
+CACHE_MAX_BYTES = 1 << 30      # масив у RAM (не mmap воркера) більший за це в кеш не кладемо
+_CACHE = {}                    # (str(unique_id), "preview"|"final") -> (ключ, ndarray, play, ui)
+
+
+def _tensor_sig(t):
+    """Відбиток тензора без копії кліпу: форма, тип, пристрій, адреса й версія + сітка ~32x32 пікселів у ≤5 кадрах."""
+    h = hashlib.blake2b(digest_size=16)
+    h.update(repr((tuple(t.shape), str(t.dtype), str(t.device), int(t.data_ptr()), int(getattr(t, "_version", 0)))).encode())
+    B = int(t.shape[0])
+    for i in sorted({0, B // 4, B // 2, (3 * B) // 4, B - 1}):
+        f = t[i]
+        if f.dim() >= 2:
+            f = f[::max(1, int(f.shape[0]) // 32), ::max(1, int(f.shape[1]) // 32)]
+        h.update(f.detach().float().cpu().numpy().tobytes())
+    return h.hexdigest()
+
+
+def _job_key(image, depth, *parts):
+    """Ключ завдання або None (не вдалось порахувати -> кешу немає, рахуємо як раніше)."""
+    try:
+        h = hashlib.blake2b(digest_size=20)
+        h.update(json.dumps(parts, sort_keys=True, default=str, ensure_ascii=False).encode())
+        h.update(_tensor_sig(image).encode())
+        h.update(_tensor_sig(depth).encode())
+        return h.hexdigest()
+    except Exception as e:
+        print("[DepthLookVideo] cache key not built (%s) - rendering without cache" % e)
+        return None
+
+
+def _cache_get(uid, kind, key):
+    e = _CACHE.get((str(uid), kind))
+    return e if (e is not None and key is not None and e[0] == key) else None
+
+
+def _cache_put(uid, kind, key, arr, play, ui):
+    k = (str(uid), kind)
+    _CACHE.pop(k, None)
+    if key is None or uid is None:
+        return
+    if getattr(arr, "filename", None) is None and arr.nbytes > CACHE_MAX_BYTES:      # не файлова: тримати в RAM задорого
+        return
+    _CACHE[k] = (key, arr, play, ui)
+
+
 class DepthLookVideo:
     @classmethod
     def INPUT_TYPES(cls):
@@ -85,9 +133,9 @@ class DepthLookVideo:
             else:
                 req[key] = ("FLOAT", {"default": float(d), "min": float(lo), "max": float(hi), "step": float(step), "tooltip": tip})
         req.update({
-            "output_size": (OUTPUT_SIZES, {"default": SIZE_ORIGINAL, "tooltip": "Final frame size (long side, px). The first option keeps the input size. Ignored in preview (it uses %d)." % PREVIEW_SIDE}),
+            "output_size": (OUTPUT_SIZES, {"default": SIZE_ORIGINAL, "tooltip": "Final frame size (long side, px). The first option keeps the input size. Ignored in preview (it uses preview_side)."}),
             "max_side": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8, "tooltip": "Working resolution: the look is computed on a frame with this long side and then upscaled to the final size. 0 = compute directly at final size. For long clips on 8 GB machines."}),
-            "quality": ([QUALITY_PREVIEW, QUALITY_FINAL], {"default": QUALITY_PREVIEW, "tooltip": "Preview: long side %d, every Nth frame, PREVIEW watermark - to check how the gradient moves. Final: size from output_size, all frames." % PREVIEW_SIDE}),
+            "quality": ([QUALITY_PREVIEW, QUALITY_FINAL], {"default": QUALITY_PREVIEW, "tooltip": "Preview: long side = preview_side, every Nth frame, PREVIEW watermark - to check how the gradient moves. Final: size from output_size, all frames."}),
             "preview_every": ("INT", {"default": 3, "min": 1, "max": 60, "step": 1, "tooltip": "Preview only: take every Nth frame. To watch at real speed, set the playback rate to fps/N (second output)."}),
         })
         opt = {"fps_in": ("FLOAT", {"forceInput": True, "min": 1.0, "max": 240.0, "step": 0.01,
@@ -112,6 +160,8 @@ class DepthLookVideo:
         opt["auto_render"] = ("BOOLEAN", {"default": False, "tooltip": "Off: every run only renders the preview and the outputs stay blocked (Video Combine / Save do not run) - press 'Render final' on the node. "
                                                                        "On: every run also renders the final and passes it on, with the settings the node already has."})
         opt["render_token"] = ("STRING", {"default": "", "multiline": False, "tooltip": "Set by the 'Render final' button (one-shot). Do not edit."})
+        # preview_side (26.10.2026): теж лише в кінці - значення віджетів у старих графах позиційні
+        opt["preview_side"] = (PREVIEW_SIDES, {"default": str(PREVIEW_SIDE), "tooltip": "Preview only: long side of the preview frames, px. Smaller = faster, bigger = more detail."})
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID"}}
 
     _consumed = {}           # unique_id -> останній використаний render_token (one-shot: той самий токен фінал вдруге не запускає)
@@ -139,13 +189,25 @@ class DepthLookVideo:
         return False
 
     def run(self, image, depth, grade, fps, start_time, output_size, max_side, quality, preview_every,
-            unique_id=None, fps_in=None, hdr=HDR_OFF, final_out=False, auto_render=False, render_token="", **anim):
+            unique_id=None, fps_in=None, hdr=HDR_OFF, final_out=False, auto_render=False, render_token="",
+            preview_side=str(PREVIEW_SIDE), **anim):
         if fps_in is not None:                                 # сокет fps (напр. від Video Info) має перевагу над полем
             fps = float(fps_in)
         want_final = str(legacy(quality)).startswith("final") or bool(final_out)
+        side = parse_preview_side(preview_side)
         job = (image, depth, grade, fps, start_time, output_size, max_side, preview_every, unique_id, hdr, anim)
-        # (1) превʼю - завжди першим; стрічка йде в ноду одразу, ще до фіналу
-        prev_arr, play, ui = self._render(*job, preview=True)
+        # (1) превʼю - завжди першим; стрічка йде в ноду одразу, ще до фіналу. Ті самі входи, що й минулого разу -> з кешу
+        pkey = _job_key(image, depth, "preview", grade, float(fps), float(start_time), hdr, anim, int(preview_every), side)
+        hit = _cache_get(unique_id, "preview", pkey)
+        if hit and hit[3].get("depth_look_strip") and not os.path.exists(strip_path(unique_id, 0)):
+            hit = None                                         # jpg стрічки з кешу диска зникли - перегенерувати
+        if hit:
+            prev_arr, play, ui = hit[1], hit[2], hit[3]
+            stage(unique_id, "cached")
+            print("[DepthLookVideo] preview unchanged - taken from cache")
+        else:
+            prev_arr, play, ui = self._render(*job, side, preview=True)
+            _cache_put(unique_id, "preview", pkey, prev_arr, play, ui)
         self._push_strip(unique_id, ui)
         # (2) фінал - лише за кнопкою (свіжий токен) або з auto_render; інакше всі виходи блокуються
         if not self._gate_open(unique_id, auto_render, render_token):
@@ -156,8 +218,21 @@ class DepthLookVideo:
         del prev_arr
         if not want_final:                                     # дозволено, але ні image=final, ні сокет final не потрібні: віддати превʼю
             return {"ui": ui, "result": (out_prev, play, out_prev)}
-        with look_api.final_render():
-            fin = to_result(self._render(*job, preview=False)[0], image)
+        # фінал не залежить від preview_every/preview_side/quality/render_token: змінилось лише це (або лише Save) - кліп той самий
+        fkey = _job_key(image, depth, "final", grade, float(fps), float(start_time), parse_output_size(output_size),
+                        int(max_side or 0), hdr, anim)
+        fhit = _cache_get(unique_id, "final", fkey)
+        if fhit:
+            fin_arr = fhit[1]
+            stage(unique_id, "cached")
+            print("[DepthLookVideo] final unchanged - taken from cache (%d frame(s))" % fin_arr.shape[0])
+        else:
+            _CACHE.pop((str(unique_id), "final"), None)        # старий фінал вже не знадобиться: не тримати два кліпи разом
+            with look_api.final_render():
+                fin_arr = self._render(*job, side, preview=False)[0]
+            _cache_put(unique_id, "final", fkey, fin_arr, None, None)
+        fin = to_result(fin_arr, image)
+        del fin_arr
         if str(legacy(quality)).startswith("preview"):         # image = превʼю, final = фінал (як і раніше)
             return {"ui": ui, "result": (out_prev, play, fin)}
         return {"ui": ui, "result": (fin, float(fps), fin)}
@@ -172,7 +247,7 @@ class DepthLookVideo:
         except Exception:
             pass
 
-    def _render(self, image, depth, grade, fps, start_time, output_size, max_side, preview_every, unique_id, hdr, anim, preview):
+    def _render(self, image, depth, grade, fps, start_time, output_size, max_side, preview_every, unique_id, hdr, anim, preview_side, preview):
         g = grade
         params_from_grade(g)                                   # ранній зрозумілий виняток, якщо підключили не те
         stage(unique_id, "read", n=int(image.shape[0]))
@@ -182,7 +257,7 @@ class DepthLookVideo:
             frames = frames[::step]
             if dep.shape[0] > 1:
                 dep = dep[::step]
-        out_size = PREVIEW_SIDE if preview else parse_output_size(output_size)
+        out_size = preview_side if preview else parse_output_size(output_size)
         ms = 0 if preview else int(max_side or 0)
         for w in check_inputs(frames, dep, ms, out_size):
             print("[DepthLookVideo] ⚠ " + w)
@@ -216,7 +291,7 @@ class DepthLookVideo:
             except Exception as e:
                 print("[DepthLookVideo] preview strip not written: %s" % e)
         if preview:
-            watermark(arr, "PREVIEW %d, every %d - set quality=final" % (PREVIEW_SIDE, step))
+            watermark(arr, "PREVIEW %d, every %d - set quality=final" % (preview_side, step))
         if hdr_lin:                                            # стрічка вище - з сигналу (HLG дивиться і як SDR)
             for i in range(arr.shape[0]):
                 arr[i] = C.hlg_decode(arr[i])
