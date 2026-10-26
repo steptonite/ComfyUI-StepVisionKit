@@ -356,6 +356,33 @@ def _gradient_map_pos(t, stops):
     return out
 
 
+def shape_stops(stops, point=0.5, squeeze=0.0, hue=0.0, tone=0.0, n=65):
+    """Форма градієнта навколо точки point (0 = ближнє ... 1 = найдальше): squeeze стискає перехід кольорів у вузьку ділянку
+    глибини біля точки (градієнт сильніше проявляється на пласкій ділянці, напр. небі), hue (°) і tone (-1..1) зсувають колір
+    у самій точці (плавно згасає за ±0.2). Усе 0 -> ті самі stops (вихід без змін). Інакше -> n рівномірних стопів."""
+    if not (squeeze > 0 or hue or tone):
+        return stops
+    import colorsys
+    u = np.linspace(0.0, 1.0, n)
+    t = u
+    if squeeze > 0:                                   # нормована логістика: f(0)=0, f(1)=1, найкрутіша в точці
+        k = 16.0 * float(squeeze)
+        sg = lambda x: 1.0 / (1.0 + np.exp(-k * (x - point)))
+        t = (sg(u) - sg(0.0)) / max(sg(1.0) - sg(0.0), 1e-9)
+    cols = _gradient_map_pos(t.astype(np.float32), stops).astype(np.float64)
+    w = np.exp(-((u - point) / 0.2) ** 2)
+    out = []
+    for i in range(n):
+        c = cols[i]
+        if hue:
+            h, s_, v = colorsys.rgb_to_hsv(*c)
+            c = np.array(colorsys.hsv_to_rgb((h + hue / 360.0 * w[i]) % 1.0, s_, v))
+        if tone:
+            c = c + tone * w[i] * (1 - c) if tone > 0 else c * (1 + tone * w[i])
+        out.append((float(u[i]), tuple(float(x) for x in np.clip(c, 0, 1))))
+    return out
+
+
 def _line_kernel_oneside(length, angle_deg):
     """Однобічний лінійний ядро (від центру в бік кута) — для шлейфу (drag)."""
     L = int(max(2, round(length)))
@@ -1016,13 +1043,14 @@ def depth_look_lens(img, depth, *, cache=None,
                     haze_drift=0.0, trail_wobble=0.0,
                     # анімація градієнта: grad_mode 0 static 1 camera 2 drift 3 shimmer 4 depth-walk 5 wave; grad_amount=0 або mode 0 = як без неї
                     grad_mode=0, grad_speed=0.25, grad_phase=0.0, grad_loop=0.0, grad_amount=1.0,
-                    grad_angle=90.0, grad_wavelength=0.5, grad_amp=0.15, grad_offset_x=0.0, grad_offset_y=0.0):
+                    grad_angle=90.0, grad_wavelength=0.5, grad_amp=0.15, grad_offset_x=0.0, grad_offset_y=0.0,
+                    gradient_point=0.5, gradient_squeeze=0.0, gradient_hue=0.0, gradient_tone=0.0):
     img = _unit(img)                                          # без копій кадру, якщо вже float32 0..1 (далі нічого не пишемо в img на місці)
     d = _unit(depth)
     H, W = d.shape
     HL = max(H, W)                                            # радіуси - частки довгої сторони (портрет: = H)
     time = float(time)
-    stops = gradient_stops or LENS_STOPS
+    stops = shape_stops(gradient_stops or LENS_STOPS, gradient_point, gradient_squeeze, gradient_hue, gradient_tone)
     own_cache = cache is None                                 # свій кеш (фінальний рендер): шар звільняємо одразу після вжитку
     if own_cache:
         cache = prepare_lens(img, d, focus=focus, n_layers=n_layers, r_min=r_min, r_max=r_max,

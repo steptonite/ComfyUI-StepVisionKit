@@ -694,7 +694,7 @@ def depth_look_lens_t(img, depth, noise=None, **kw):
     _, H, W = img0.shape
     HL = max(H, W)
     time = float(g.time)
-    stops = g.gradient_stops or _L.LENS_STOPS
+    stops = _L.shape_stops(g.gradient_stops or _L.LENS_STOPS, g.gradient_point, g.gradient_squeeze, g.gradient_hue, g.gradient_tone)
     stretch_steps, stretch_opacity = g.stretch_steps, g.stretch_opacity
 
     # ---------- prepare_lens (шари глибини)
