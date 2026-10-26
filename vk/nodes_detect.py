@@ -18,7 +18,7 @@ class VKDetect:
         models = sorted(f for f in os.listdir(d) if f.endswith(".pt")) if os.path.isdir(d) else []
         return {
             "required": {
-                "images": ("IMAGE", {"tooltip": "frames to detect on"}),
+                "images": ("IMAGE", {"tooltip": "Frames to detect on — from Load Video · Pro, Load Image or any image node"}),
                 "model_name": (models or ["yolo11n.pt"], {"tooltip": "Files in models/yolov8. yolo11n.pt is the small fast one."}),
                 "device": (["auto", "mps", "cpu", "cuda"], {"default": "auto",
                            "tooltip": "auto picks cuda on a rented NVIDIA box and mps on a Mac."}),

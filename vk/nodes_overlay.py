@@ -85,9 +85,9 @@ class VKOverlayOnBoxes:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE", {"tooltip": "Video frames the graphic is stamped onto."}),
-                "overlay": ("IMAGE", {"tooltip": "Your own graphic — a generated HUD frame, a sticker, an icon. One image, or a batch (see source_mode)."}),
-                "boxes": (any_type, {"tooltip": "Boxes from Detect Objects or Select Box."}),
+                "images": ("IMAGE", {"tooltip": "Video frames the graphic is stamped onto — from Load Video · Pro or any image node."}),
+                "overlay": ("IMAGE", {"tooltip": "Your own graphic — the IMAGE output of Load Image: a generated HUD frame, a sticker, an icon. One image, or a batch (see source_mode)."}),
+                "boxes": (any_type, {"tooltip": "Boxes — the boxes output of Detect Objects or Select Box (or bounding_box of YOLO Detect)."}),
                 "fit": (FIT, {"default": "nine_slice", "tooltip": "How the graphic is resized to the box. nine_slice keeps the corners sharp and stretches only the edges — use it for frames and brackets. stretch distorts. contain/cover keep the aspect ratio. fixed_scale ignores the box size."}),
                 "corner": ("INT", {"default": 24, "min": 1, "max": 512, "tooltip": "nine_slice only: how many pixels at each corner of your graphic must NOT stretch."}),
                 "scale": ("FLOAT", {"default": 1.0, "min": 0.05, "max": 8.0, "step": 0.05, "tooltip": "Extra size multiplier applied after fit."}),

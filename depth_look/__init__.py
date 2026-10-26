@@ -47,8 +47,8 @@ class DepthLook:
         presets = look_params.list_presets()
         return {
             "required": {
-                "image": ("IMAGE", {"tooltip": "Frames (B,H,W,3)."}),
-                "depth": ("IMAGE", {"tooltip": "Depth map: one for the whole batch or one per frame. Bright = near."}),
+                "image": ("IMAGE", {"tooltip": "Frames to apply the look to (B,H,W,3) — from Load Video · Pro, Load Image or any image node."}),
+                "depth": ("IMAGE", {"tooltip": "Depth map, bright = near: one for the whole batch or one per frame — from Depth Grade, Depth Receiver or Video Depth · DA3 stream."}),
                 "preset": (presets, {"default": DEFAULT_PRESET if DEFAULT_PRESET in presets else presets[0],
                                      "tooltip": "Preset from look_proto/presets. If grade is connected, it is used instead of the preset."}),
                 "clean_depth": ("BOOLEAN", {"default": True, "tooltip": "Raw depth is cleaned up (the frame is the guide). Turn off if the depth is already clean 0..1."}),
@@ -57,7 +57,7 @@ class DepthLook:
             # порядок: дані -> грейд -> розмір/якість -> службове. fps/start_time прибрано зі статики -
             # widgets_values старих workflow (11 значень) мігрує js у onConfigure
             "optional": {
-                "grade": (GRADE_TYPE, {"tooltip": "Grade from another Depth Look node. It is the base; tuner edits/overrides are applied on top, and with no edits it passes through."}),
+                "grade": (GRADE_TYPE, {"tooltip": "Grade from the grade output of another Depth Look node (Full or Simple). It is the base; tuner edits/overrides are applied on top, and with no edits it passes through."}),
                 "output_size": (OUTPUT_SIZES, {"default": SIZE_ORIGINAL, "tooltip": "Final frame size (long side, px). The first option keeps the input size. Only applies in the full-render mode; the tuner preview does not depend on it."}),
                 "max_side": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 8, "tooltip": "Working resolution: the look is computed on a frame with this long side and then upscaled to the final size. 0 = compute directly at final size. For long clips on 8 GB machines."}),
                 "depth_levels": (["clip", "frame"], {"default": "clip", "tooltip": "clip - shared depth levels across the whole clip (no flicker); frame - per-frame stretch. Only with clean_depth."}),

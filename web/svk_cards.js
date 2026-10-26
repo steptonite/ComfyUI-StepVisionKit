@@ -87,7 +87,7 @@ function build(node, key, specs) {
     if (more) root.append(more);
     scrollHint(root);
     root.sync = () => { ctl.forEach(c => c.sync()); more?.sync(); prev?.draw(); };
-    return { root, minH: (prev ? PREVIEW_H + ROW_H : 0) + main.length * ROW_H + (more ? ROW_H : 0) + CARD_PAD };
+    return { root, minH: (prev ? PREVIEW_H + ROW_H + 20 : 0) + main.length * ROW_H + (more ? ROW_H : 0) + CARD_PAD };
 }
 
 function hideRepresented(node, specs) {

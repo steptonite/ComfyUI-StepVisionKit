@@ -12,7 +12,7 @@ class VKSelectBox:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boxes": (any_type, {"tooltip": "Boxes from any detector."}),
+                "boxes": (any_type, {"tooltip": "Boxes from Detect Objects (boxes output) or any detector."}),
                 "mode": (MODE, {"default": "largest", "tooltip": "track_id is the only mode that stays on the SAME object through a video. index re-shuffles whenever the sort order changes."}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 200, "tooltip": "For mode=index. Read the #N printed on the preview from Draw Boxes."}),
                 "track_id": ("INT", {"default": 1, "min": 0, "max": 100000, "tooltip": "For mode=track_id. Read the id:N printed on the preview."}),
@@ -24,7 +24,7 @@ class VKSelectBox:
                 "on_missing": (ON_MISSING, {"default": "previous", "tooltip": "frame with no box: previous = repeat the last box, full_frame = whole frame, empty = no box (SAM2 fails on an empty frame)"}),
             },
             "optional": {
-                "image": ("IMAGE", {"tooltip": "Connect the frames so boxes get clipped to the frame edges."}),
+                "image": ("IMAGE", {"tooltip": "Optional: the frames the boxes were found on (Load Video · Pro) so boxes get clipped to the frame edges."}),
             },
         }
 
@@ -62,11 +62,11 @@ class VKBoxesToBBOX:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boxes": (any_type, {"tooltip": "boxes from any detector"}),
+                "boxes": (any_type, {"tooltip": "Boxes from Detect Objects, Select Box or any detector (RT-DETR, SAM3, MediaPipe, YOLO)"}),
                 "format_in": (FORMATS, {"default": "auto", "tooltip": "box layout of the input: auto detects it; xyxy = corners, xywh_topleft / xywh_center = size from the top-left corner / centre"}),
                 "on_missing": (ON_MISSING, {"default": "previous", "tooltip": "frame with no box: previous = repeat the last box, full_frame = whole frame, empty = no box (SAM2 fails on an empty frame)"}),
             },
-            "optional": {"image": ("IMAGE", {"tooltip": "connect the frames so boxes get clipped to the frame edges"})},
+            "optional": {"image": ("IMAGE", {"tooltip": "Optional: the frames the boxes were found on (Load Video · Pro) so boxes get clipped to the frame edges"})},
         }
 
     RETURN_TYPES = ("BBOX", "STRING")

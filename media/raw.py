@@ -91,7 +91,8 @@ class SVKLoadRAW:
 
     RETURN_TYPES = ("IMAGE", "STRING")
     RETURN_NAMES = ("image", "info")
-    OUTPUT_TOOLTIPS = ("float RGB, values above 1.0 are kept in linear mode", "file, size and LibRaw levels")
+    OUTPUT_TOOLTIPS = ("Developed photo, float RGB (values above 1.0 kept in linear mode) → Depth Look, Camera Realism, Save Image · HDR or any image node",
+                       "File, size and LibRaw levels → Preview Any. Safe to leave unconnected")
     FUNCTION = "load"
     CATEGORY = "StepVisionKit/IO"
 

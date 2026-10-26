@@ -18,8 +18,8 @@ class VKDrawBoxes:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE", {"tooltip": "frames to draw on"}),
-                "boxes": (any_type, {"tooltip": "boxes from Detect Objects or Select Box"}),
+                "images": ("IMAGE", {"tooltip": "Frames to draw on — the same video the boxes were found on (Load Video · Pro)"}),
+                "boxes": (any_type, {"tooltip": "Boxes — the boxes output of Detect Objects or Select Box (or the bounding_box output of YOLO Detect)"}),
                 "style": (STYLE, {"default": "corner_brackets", "tooltip": "Shape of the box. none = labels and trails only."}),
                 "color": ("STRING", {"default": "#FFFFFF", "tooltip": "Line and text colour, hex."}),
                 "thickness": ("INT", {"default": 2, "min": 1, "max": 16, "tooltip": "line width, px"}),

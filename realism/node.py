@@ -6,8 +6,8 @@ from . import preview
 from .engine import apply_realism
 
 _TIP = {
-    "image": "Image or batch of frames (a render, a generation, a video). Put this node last, right before Save.",
-    "depth": "Optional depth map (bright = near), one for the whole batch or one per frame. Enables aerial haze and near detail.",
+    "image": "Image or batch of frames (a render, a generation, a video) — from Load Video · Pro, Depth Look or any image node. Put this node last, right before Save.",
+    "depth": "Optional depth map (bright = near), one for the whole batch or one per frame — from Depth Grade or Depth Receiver. Enables aerial haze and near detail.",
     "profile": "Camera look: picks a ready-made set of all settings. Custom uses the sliders under «more»: moving a slider switches to Custom.",
     "strength": "Master strength 0..1: scales every effect strength of the profile (1 = the profile exactly, 0 = nothing is computed).",
     "seed": "Noise seed. Noise is new on every frame; the fixed sensor pattern depends only on the seed.",

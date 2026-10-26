@@ -450,7 +450,7 @@ class SVKDepthGrade:
         F = "FLOAT"
         return {
             "required": {
-                "depth": ("IMAGE", {"tooltip": "depth map: output of DA3Render or any depth map"}),
+                "depth": ("IMAGE", {"tooltip": "Depth map — from Depth Receiver, Video Depth · DA3 stream, DA3Render or any depth IMAGE"}),
                 "depth_is": (["near is white", "far is white (raw)"], {"default": "near is white",
                              "tooltip": "regular depth map = near is bright. 'far is white' — raw DA3 (raw mode), where values are distances"}),
                 "look": (["V2 volume", "linear"], {"default": "V2 volume",
@@ -492,7 +492,7 @@ class SVKDepthGrade:
                                  "tooltip": "VIDEO: what tone jump counts as real motion rather than flicker. Lower = no trails but weaker suppression; higher = stronger suppression, risk of trailing behind motion"}),
             },
             "optional": {
-                "motion_guide": ("IMAGE", {"tooltip": "VIDEO: connect your OWN original video (the same frames). Motion is then computed from the picture rather than from depth — more accurate, fewer trails"}),
+                "motion_guide": ("IMAGE", {"tooltip": "VIDEO: connect your OWN original video (the same frames, e.g. from Load Video · Pro). Motion is then computed from the picture rather than from depth — more accurate, fewer trails"}),
             },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
@@ -561,7 +561,7 @@ class SVKDepthGradeView:
 
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"depth": ("IMAGE", {"tooltip": "depth output of the Depth Grade node"})},
+        return {"required": {"depth": ("IMAGE", {"tooltip": "The depth output of Depth Grade — passed on unchanged"})},
                 "hidden": {"unique_id": "UNIQUE_ID"}}
 
     RETURN_TYPES = ("IMAGE",)
@@ -583,7 +583,7 @@ class SVKDepthGradeVideoView:
     @classmethod
     def INPUT_TYPES(cls):
         return {
-            "required": {"depth": ("IMAGE", {"tooltip": "depth output of the Depth Grade node"})},
+            "required": {"depth": ("IMAGE", {"tooltip": "The depth output of Depth Grade — passed on unchanged"})},
             "optional": {"fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 120.0, "step": 1.0,
                                            "tooltip": "preview playback speed"})},
             "hidden": {"unique_id": "UNIQUE_ID"},

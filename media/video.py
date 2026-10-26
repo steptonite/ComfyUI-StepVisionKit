@@ -115,8 +115,11 @@ class SVKLoadVideoPro:
 
     RETURN_TYPES = ("IMAGE", "MASK", "FLOAT", "INT", "STRING")
     RETURN_NAMES = ("images", "alpha", "fps", "frame_count", "info")
-    OUTPUT_TOOLTIPS = ("16-bit precision float frames", "alpha channel, 1 = opaque (ones when the file has none)",
-                       "source frame rate divided by every_nth", "frames loaded", "codec, pixel format, color tags")
+    OUTPUT_TOOLTIPS = ("Video frames, 16-bit float → YOLO Detect, Depth Look, Camera Realism or any image node",
+                       "Alpha, 1 = opaque (all ones if the file has none) → alpha of Save Video · HDR or Join Image With Alpha",
+                       "Source frame rate ÷ every_nth → fps_in of Depth Look · Video, fps of Save Video · HDR or Video Combine",
+                       "Number of frames loaded → any INT input or Preview Any",
+                       "Codec, pixel format, color tags → Preview Any. Safe to leave unconnected")
     FUNCTION = "load"
     CATEGORY = "StepVisionKit/IO"
 
@@ -266,7 +269,7 @@ class SVKSaveVideoHDR:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "images": ("IMAGE", {"tooltip": "frames to write"}),
+            "images": ("IMAGE", {"tooltip": "Frames to write — from Depth Look · Video (final), Camera Realism or any image node"}),
             "filename_prefix": ("STRING", {"default": "svk/video", "tooltip": "file name prefix; a/b makes subfolder a"}),
             "format": (list(VIDEO_FORMATS), {"default": "ProRes 422 HQ",
                        "tooltip": "ProRes/DNxHR = editing masters (.mov); HEVC 10-bit = delivery (.mp4, plays HDR on Apple devices); EXR = linear frames for grading/compositing"}),
@@ -278,7 +281,7 @@ class SVKSaveVideoHDR:
                                        "HLG / PQ (as encoded) = Load Video (Pro) 'as encoded' from an HDR file, also after Depth Look - "
                                        "written back untouched when transfer matches, so highlights survive"}),
         }, "optional": {
-            "alpha": ("MASK", {"tooltip": "alpha for ProRes 4444 / XQ and EXR, 1 = opaque"}),
+            "alpha": ("MASK", {"tooltip": "Optional alpha for ProRes 4444 / XQ and EXR, 1 = opaque — e.g. alpha of Load Video · Pro or composite_alpha of HUD Sprite"}),
             "folder": ("STRING", {"default": "", "tooltip": "where to save; empty = ComfyUI output"}),
             "hevc_crf": ("INT", {"default": 16, "min": 0, "max": 51, "tooltip": "HEVC quality: lower = better and bigger; 12–18 is visually lossless"}),
             "max_nits": ("INT", {"default": 1000, "min": 203, "max": 10000, "step": 1,

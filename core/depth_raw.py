@@ -86,7 +86,7 @@ class SVKRawDepthSave:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "da3_geometry": ("DA3_GEOMETRY", {"tooltip": "output of DA3Inference"}),
+            "da3_geometry": ("DA3_GEOMETRY", {"tooltip": "Raw DA3 geometry — the output of DA3Inference (Depth Anything 3 pack)"}),
             "name": ("STRING", {"default": "depth", "tooltip": "prefix of the new subfolder: name_00001, name_00002…; a/b/name makes subfolders a/b"}),
             "folder": ("STRING", {"default": "", "tooltip": "where to save; empty = output/svk_raw"}),
         }}
@@ -191,7 +191,7 @@ class SVKDepthReceiver:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "da3_geometry": ("DA3_GEOMETRY", {"tooltip": "DA3Inference or Raw Load"}),
+            "da3_geometry": ("DA3_GEOMETRY", {"tooltip": "Raw DA3 geometry — from DA3Inference (Depth Anything 3 pack) or Raw Depth Load"}),
             "sky_to_far": ("BOOLEAN", {"default": True,
                                        "tooltip": "Mono/Metric models: sky pixels go to the far end and do not stretch the range"}),
         }}
@@ -226,7 +226,7 @@ class SVKSaveDepth16:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "images": ("IMAGE", {"tooltip": "depth images to save"}),
+            "images": ("IMAGE", {"tooltip": "Depth images to save — the depth output of Depth Grade or Depth Receiver"}),
             "filename_prefix": ("STRING", {"default": "depth16/depth", "tooltip": "file name prefix; a/b makes subfolder a"}),
             "format": (["png 16-bit", "exr float32"], {"default": "png 16-bit", "tooltip": "png 16-bit = 65536 levels, opens anywhere; exr float32 = exact depth for compositing"}),
             "folder": ("STRING", {"default": "", "tooltip": "where to save; empty = ComfyUI output"}),

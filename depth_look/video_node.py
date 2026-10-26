@@ -136,9 +136,9 @@ class DepthLookVideo:
         global _DEF
         _DEF = _DEF or look_params.defaults()
         req = {
-            "image": ("IMAGE", {"tooltip": "Video frames (B,H,W,3)."}),
-            "depth": ("IMAGE", {"tooltip": "Depth: one per frame (or one for the whole clip). Bright = near."}),
-            "grade": (GRADE_TYPE, {"tooltip": "Grade from a static node (Depth Look) or Depth Look · Simple. This node adds the animation below."}),
+            "image": ("IMAGE", {"tooltip": "Video frames (B,H,W,3) — from Load Video · Pro or any image node."}),
+            "depth": ("IMAGE", {"tooltip": "Depth, bright = near: one per frame (or one for the whole clip) — from Depth Grade, Depth Receiver or Video Depth · DA3 stream."}),
+            "grade": (GRADE_TYPE, {"tooltip": "The grade output of Depth Look · Full or Depth Look · Simple. This node adds the animation below."}),
             "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 0.01, "tooltip": "Video frame rate: frame i gets the time start_time + i/fps."}),
             "start_time": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 100000.0, "step": 0.01, "tooltip": "At which second to start the animation clock."}),
         }
@@ -156,7 +156,7 @@ class DepthLookVideo:
             "preview_every": ("INT", {"default": 3, "min": 1, "max": 60, "step": 1, "tooltip": "Preview only: take every Nth frame. To watch at real speed, set the playback rate to fps/N (second output)."}),
         })
         opt = {"fps_in": ("FLOAT", {"forceInput": True, "min": 1.0, "max": 240.0, "step": 0.01,
-                                    "tooltip": "Frame rate from another node (e.g. fps from Video Info / Load Video). When connected, it replaces the fps field."})}
+                                    "tooltip": "Frame rate — connect the fps output of Load Video · Pro. When connected, it replaces the fps field."})}
         for key, kind, d, lo, hi, step, label in depth_motion.SPEC:     # «Рух по глибині» (depth_motion.py): сили за замовч. 0
             tip = "Depth motion · " + label
             if isinstance(kind, list):

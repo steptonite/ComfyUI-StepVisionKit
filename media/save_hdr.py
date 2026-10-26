@@ -46,14 +46,14 @@ class SVKSaveImageHDR:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "images": ("IMAGE", {"tooltip": "images to save"}),
+            "images": ("IMAGE", {"tooltip": "Images to save — from Load RAW, Camera Realism, Depth Look or any image node"}),
             "filename_prefix": ("STRING", {"default": "svk/image", "tooltip": "file name prefix; a/b makes subfolder a"}),
             "format": (FORMATS, {"default": "exr half",
                        "tooltip": "exr half = 16-bit float, standard for grading and compositing; exr float = 32-bit; png 16-bit = 65536 levels, display sRGB"}),
             "input_curve": (["linear", "sRGB"], {"default": "linear",
                             "tooltip": "what the incoming image is: linear (Load RAW linear, HDR decoders) or sRGB (regular ComfyUI images)"}),
         }, "optional": {
-            "mask": ("MASK", {"tooltip": "written as alpha"}),
+            "mask": ("MASK", {"tooltip": "Optional alpha, written as the alpha channel — e.g. alpha of Load Video · Pro or composite_alpha of HUD Sprite"}),
             "folder": ("STRING", {"default": "", "tooltip": "where to save; empty = ComfyUI output"}),
             "exr_compression": (list(EXR_COMP), {"default": "zip", "tooltip": "zip and piz are lossless; dwaa is lossy and small"}),
         }}

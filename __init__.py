@@ -103,4 +103,11 @@ _SUB.update({k: "Realism" for k in RL_NODES})
 for _key, _cls in NODE_CLASS_MAPPINGS.items():
     _cls.CATEGORY = f"StepVisionKit/{_SUB.get(_key, 'misc')}"
 
+# Підказки до виходів («що несе → куди підключити») для нод, у яких своїх OUTPUT_TOOLTIPS нема.
+from .core.socket_help import OUTPUT_TOOLTIPS as _OUT_TIPS
+for _key, _tips in _OUT_TIPS.items():
+    _cls = NODE_CLASS_MAPPINGS.get(_key)
+    if _cls is not None and not getattr(_cls, "OUTPUT_TOOLTIPS", None):
+        _cls.OUTPUT_TOOLTIPS = tuple(_tips)
+
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]

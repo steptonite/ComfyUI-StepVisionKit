@@ -269,3 +269,5 @@
 .svk-yolo-bar { display: flex; align-items: center; gap: 8px; min-height: 18px; font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-dim); }
 .svk-yolo-bar input[type=range] { flex: 0 0 96px; accent-color: var(--svk-accent); }
 .svk-yolo-bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svk-yolo-out { font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 16px; }
+.svk-yolo-out.is-empty { color: var(--svk-dim); }

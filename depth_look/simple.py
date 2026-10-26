@@ -64,8 +64,8 @@ class DepthLookSimple:
     def INPUT_TYPES(cls):
         presets = look_params.list_presets()
         req = {
-            "image": ("IMAGE", {"tooltip": "A frame or a batch of frames."}),
-            "depth": ("IMAGE", {"tooltip": "Depth map: one for the whole batch or one per frame. Bright = near."}),
+            "image": ("IMAGE", {"tooltip": "Frames to apply the look to — from Load Video · Pro, Load Image or any image node."}),
+            "depth": ("IMAGE", {"tooltip": "Depth map, bright = near: one for the whole batch or one per frame — from Depth Grade, Depth Receiver or Video Depth · DA3 stream."}),
             "preset": (presets, {"default": DEFAULT_PRESET if DEFAULT_PRESET in presets else presets[0],
                                  "tooltip": "Ready-made look. Below, each effect group can be switched off or strengthened/weakened."}),
         }

@@ -1,6 +1,7 @@
 // Превʼю YOLO у картці: кадри з останнього Run і всі бокси детектора. Поріг, класи, сортування, вибір і кількість
 // перераховуються тут за віджетами ноди (та сама логіка, що sort_frame / select_frame у vk/boxes.py), без нового прогону.
-// Клік по боксу в YOLO Detect обирає саме цей обʼєкт: track_id, якщо є id, інакше index.
+// Клік по боксу в YOLO Detect обирає саме цей обʼєкт: track_id, якщо є id, інакше index; клік повз бокси - знову всі.
+// Під кадром рядок «на виходи піде: …» - те саме, що підуть bounding_box і bbox_for_sam2 після Run.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { el, W, markChanged } from "./svk_ui.js";
@@ -13,6 +14,7 @@ const FIELDS = {
 };
 export const PREVIEW_H = 210;
 const ACCENT = "#e0a458", DIM = "rgba(232,230,227,.4)", INK = "#1a1208";
+const PREVIEW_OUT = 2;          // індекс виходу preview у LexYOLODetect (порожній без make_preview)
 
 const area = b => (b.x2 - b.x1) * (b.y2 - b.y1);
 const NO_ID = 1 << 30;
@@ -68,11 +70,32 @@ export function yoloPreview(node, key) {
     scrub.type = "range"; scrub.min = 0; scrub.step = 1; scrub.value = 0;
     const note = el("span");
     bar.append(scrub, note);
-    root.append(cv, bar);
-    cv.title = F.select ? T("Click a box to pass on exactly this object") : T("Boxes from the last Run; the highlighted ones go to the outputs");
+    const out = el("div", "svk-yolo-out");
+    root.append(cv, bar, out);
+    const hint = F.select ? T("Click a box to pass on exactly this object, click empty space to pass on all")
+                          : T("Boxes from the last Run; the highlighted ones go to the outputs");
+    cv.title = hint;
     if (F.select) cv.style.cursor = "pointer";
 
     let data = null, at = 0, img = null, hits = [];
+    const desc = (b, j) => `#${j} ${b.label}${b.id >= 0 ? " id:" + b.id : ""} ${b.score.toFixed(2)}`;
+
+    // вихід preview без make_preview - картинка 1×1; підпис сокета каже про це, імʼя виходу не міняється
+    function previewSlot() {
+        const o = F.select && node.outputs?.[PREVIEW_OUT];
+        if (!o) return;
+        const lb = W(node, "make_preview")?.value ? null : T("preview (off)");
+        if ((o.label ?? null) !== lb) { o.label = lb ?? undefined; node.setDirtyCanvas?.(true, true); }
+    }
+
+    function outLine(ranked, kept) {
+        const list = ranked.map((b, j) => [b, j]).filter(([b]) => kept.has(b));
+        out.classList.toggle("is-empty", !list.length);
+        if (!list.length) { out.textContent = T("Nothing goes to the outputs: threshold, classes or selection dropped every box"); return; }
+        const all = F.select && W(node, "select")?.value === "all";
+        const names = list.slice(0, 3).map(([b, j]) => desc(b, j).replace(/ [\d.]+$/, "")).join(", ") + (list.length > 3 ? " …" : "");
+        out.textContent = `${T("To the outputs")}: ${all ? T("all") + " " + list.length + " · " : ""}${names}`;
+    }
 
     function load() {
         const s = data.shots[at];
@@ -90,7 +113,9 @@ export function yoloPreview(node, key) {
         g.setTransform(dpr, 0, 0, dpr, 0, 0);
         g.clearRect(0, 0, cw, ch);
         hits = [];
+        previewSlot();
         if (!data || !img?.complete || !img.naturalWidth) {
+            out.textContent = "";
             g.fillStyle = DIM; g.font = "12px system-ui, sans-serif"; g.textAlign = "center";
             g.fillText(data ? T("loading…") : T("Run the node to see the boxes"), cw / 2, ch / 2);
             note.textContent = "";
@@ -101,30 +126,43 @@ export function yoloPreview(node, key) {
         const shot = data.shots[at];
         const { ranked, kept, low } = live(node, F, data, shot.boxes);
         g.font = "10px ui-monospace, Menlo, monospace"; g.textAlign = "left"; g.textBaseline = "top";
+        const tags = [];               // на боксі лише номер; клас, id і впевненість - у підказці під курсором
+        const free = r => !tags.some(q => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h);
         ranked.forEach((b, j) => {
             const x = ox + b.x1 * s, y = oy + b.y1 * s, w = (b.x2 - b.x1) * s, h = (b.y2 - b.y1) * s, on = kept.has(b);
             hits.push({ x, y, w, h, b, j });
             g.strokeStyle = on ? ACCENT : DIM; g.lineWidth = on ? 2 : 1;
             g.strokeRect(x, y, w, h);
-            const t = `#${j} ${b.label}${b.id >= 0 ? " id:" + b.id : ""} ${b.score.toFixed(2)}`;
-            const tw = g.measureText(t).width + 6;
+            const t = "#" + j, tw = g.measureText(t).width + 6;
+            const r = [{ x, y: Math.max(0, y - 13), w: tw, h: 13 }, { x, y, w: tw, h: 13 }].find(free);   // над боксом, інакше всередині
+            if (!r && !on) return;
+            const q = r || { x, y, w: tw, h: 13 };
+            tags.push(q);
             g.fillStyle = on ? ACCENT : "rgba(14,14,16,.7)";
-            g.fillRect(x, Math.max(0, y - 13), tw, 13);
+            g.fillRect(q.x, q.y, q.w, q.h);
             g.fillStyle = on ? INK : "#e8e6e3";
-            g.fillText(t, x + 3, Math.max(0, y - 13) + 2);
+            g.fillText(t, q.x + 3, q.y + 2);
         });
+        outLine(ranked, kept);
         note.textContent = `${T("frame")} ${shot.frame + 1} · ${T("found")} ${ranked.length} · ${T("passed on")} ${kept.size}`
             + (low ? " · " + T("threshold below the Run: run again to see more") : "");
     }
 
-    cv.onclick = (e) => {
-        if (!F.select || !hits.length) return;
+    // вкладені бокси: найменший під курсором
+    function under(e) {
         const r = cv.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
         const inside = hits.filter(h => px >= h.x && px <= h.x + h.w && py >= h.y && py <= h.y + h.h);
-        if (!inside.length) return;
-        const { b, j } = inside.reduce((a, c) => (c.w * c.h < a.w * a.h ? c : a));   // вкладені бокси: найменший
-        if (b.id >= 0) { setWidget(node, "select", "track_id"); setWidget(node, "pick", b.id); }
-        else { setWidget(node, "select", "index"); setWidget(node, "pick", j); }
+        return inside.length ? inside.reduce((a, c) => (c.w * c.h < a.w * a.h ? c : a)) : null;
+    }
+    cv.onmousemove = (e) => { const h = under(e); cv.title = h ? desc(h.b, h.j) + "\n" + hint : hint; };
+    cv.onclick = (e) => {
+        if (!F.select || !hits.length) return;
+        const h = under(e);
+        if (!h) {
+            if (!["index", "track_id"].includes(W(node, "select")?.value)) return;
+            setWidget(node, "select", "all");
+        } else if (h.b.id >= 0) { setWidget(node, "select", "track_id"); setWidget(node, "pick", h.b.id); }
+        else { setWidget(node, "select", "index"); setWidget(node, "pick", h.j); }
         markChanged();
         node.__svkCard?.sync();
         draw();

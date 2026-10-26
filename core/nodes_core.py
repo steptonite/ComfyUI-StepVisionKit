@@ -25,7 +25,7 @@ class LexBoxesToBBOX:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boxes": (any_type, {"tooltip": "BOUNDING_BOX (core), BOXES (ComfyUI-YOLO) or BBOX"}),
+                "boxes": (any_type, {"tooltip": "Boxes from YOLO Detect, Detect Objects, Select Box or any detector (BOUNDING_BOX, BOXES or BBOX)"}),
                 "mode": (["largest", "all", "index"], {"default": "largest",
                          "tooltip": "largest = the biggest box in the frame, CLASS IS IGNORED (saves you on CG renders where YOLO says 'kite')"}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 64, "tooltip": "box number for mode=index"}),
@@ -34,7 +34,7 @@ class LexBoxesToBBOX:
                 "on_miss": (["previous", "full_frame", "empty"], {"default": "previous",
                             "tooltip": "SAM2 fails if a frame has no box — keep 'previous'"}),
             },
-            "optional": {"image": ("IMAGE", {"tooltip": "clamp boxes to the frame bounds"})},
+            "optional": {"image": ("IMAGE", {"tooltip": "Optional: the frames the boxes were found on (Load Video · Pro) — boxes get clamped to the frame bounds"})},
         }
 
     DESCRIPTION = "Turns detector boxes into one BBOX per frame for SAM2."
@@ -76,8 +76,8 @@ class LexHUDBoxes:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "images": ("IMAGE", {"tooltip": "frames to draw on"}),
-                "boxes": (any_type, {"tooltip": "BOUNDING_BOX / BOXES / BBOX from a detector"}),
+                "images": ("IMAGE", {"tooltip": "Frames to draw on — the same video the boxes were found on (Load Video · Pro)"}),
+                "boxes": (any_type, {"tooltip": "Boxes from YOLO Detect (bounding_box output), Select Box or any detector (BOUNDING_BOX / BOXES / BBOX)"}),
                 "style": (["corners", "solid", "round"], {"default": "corners", "tooltip": "corners = brackets on the corners, solid = full rectangle, round = rounded rectangle"}),
                 "thickness": ("INT", {"default": 2, "min": 1, "max": 12, "tooltip": "line width, px"}),
                 "corner_len": ("INT", {"default": 24, "min": 4, "max": 200, "tooltip": "corners style: length of each bracket arm, px"}),
@@ -143,7 +143,7 @@ class LexYOLODetect:
         models = sorted([f for f in os.listdir(d) if f.endswith(".pt")]) if os.path.isdir(d) else []
         return {
             "required": {
-                "images": ("IMAGE", {"tooltip": "frames to detect on"}),
+                "images": ("IMAGE", {"tooltip": "Frames to detect on — from Load Video · Pro, Load Image or any image node"}),
                 "model_name": (models or ["yolo11n.pt"], {"tooltip": "files in models/yolov8; yolo11n.pt is the small fast one"}),
                 "device": (["auto", "mps", "cpu", "cuda"], {"default": "auto",
                            "tooltip": "auto = picks cuda on a rented NVIDIA box and mps on a Mac. A hard-coded 'mps' in a saved workflow will fail on someone else's machine"}),

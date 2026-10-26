@@ -57,7 +57,7 @@ class LexDepthCurve:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "depth": ("IMAGE", {"tooltip": "output of DA3Render (or any depth-map IMAGE)"}),
+                "depth": ("IMAGE", {"tooltip": "Depth map — output of DA3Render, Depth Receiver or any depth IMAGE"}),
                 "source": (["near_is_white", "raw_distance"], {"default": "near_is_white",
                            "tooltip": "near_is_white = a regular depth map where near is bright (DA3Render v2_style / min_max, ControlNet depth). raw_distance = DA3Render in 'raw' mode, where values are distances and far is larger"}),
                 "mode": (["disparity", "gamma", "none"], {"default": "disparity",

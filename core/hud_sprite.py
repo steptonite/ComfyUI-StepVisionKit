@@ -138,7 +138,7 @@ class LexHUDSprite:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "boxes": (any_type, {"tooltip": "BOUNDING_BOX / BOXES / BBOX — output of LexYOLODetect"}),
+                "boxes": (any_type, {"tooltip": "Boxes — the bounding_box output of YOLO Detect (or Detect Objects / Select Box)"}),
                 "mode": (["largest", "index", "all"], {"default": "largest", "tooltip": "largest = the biggest box only, index = the box number below, all = a frame on every box"}),
                 "index": ("INT", {"default": 0, "min": 0, "max": 64, "tooltip": "box number for mode=index"}),
                 "margin_pct": ("FLOAT", {"default": 25.0, "min": -50.0, "max": 400.0, "step": 1.0,
@@ -176,9 +176,9 @@ class LexHUDSprite:
                                   "tooltip": "A white FILL of the YOLO rectangle (the box itself, not the HUD frame), black around it — exactly the area that hole=box cuts out.\nWhy: pass it on as a mask — cut the face out of another layer, put your own solid under it, feed SAM2 or Cut By Mask, or do a local correction on the face only.\nIf it is not connected anywhere, keep it False: another +1.7 GB per 200 FullHD frames"}),
             },
             "optional": {
-                "images": ("IMAGE", {"tooltip": "background video. Without it only the HUD on transparent is returned"}),
-                "hud_image": ("IMAGE", {"tooltip": "custom frame. Batch >1 = animated HUD (looped over frames)"}),
-                "hud_mask": ("MASK", {"tooltip": "alpha of the custom frame (MASK from Load Image)"}),
+                "images": ("IMAGE", {"tooltip": "Background video — from Load Video · Pro or any image node. Without it only the HUD on transparent is returned"}),
+                "hud_image": ("IMAGE", {"tooltip": "Your HUD frame — the IMAGE output of Load Image. Batch >1 = animated HUD (looped over frames)"}),
+                "hud_mask": ("MASK", {"tooltip": "Alpha of the HUD frame — the MASK output of the same Load Image"}),
             },
         }
 
