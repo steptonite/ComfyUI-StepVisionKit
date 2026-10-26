@@ -2,6 +2,7 @@
 import numpy as np
 
 from . import params as P
+from . import preview
 from .engine import apply_realism
 
 _TIP = {
@@ -35,6 +36,7 @@ class SVKCameraRealism:
                                  "tooltip": _TIP["seed"]}),
             },
             "optional": opt,
+            "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
     RETURN_TYPES = ("IMAGE",)
@@ -42,7 +44,7 @@ class SVKCameraRealism:
     FUNCTION = "run"
     CATEGORY = "StepVisionKit/Realism"
 
-    def run(self, image, profile, strength, seed, depth=None, **sliders):
+    def run(self, image, profile, strength, seed, depth=None, unique_id=None, **sliders):
         import torch
         frames = image.detach().cpu().numpy()[..., :3]
         dep = None
@@ -51,10 +53,19 @@ class SVKCameraRealism:
             dep = dep.mean(axis=-1) if dep.ndim == 4 else dep
         custom = {k: v for k, v in sliders.items() if k in P.NAMES}
         p = P.resolve(profile, strength, custom)
-        out = apply_realism(frames, dep, p, seed=int(seed), frame_offset=int(sliders.get("frame_offset", 0)))
+        off = int(sliders.get("frame_offset", 0))
+        out = apply_realism(frames, dep, p, seed=int(seed), frame_offset=off)
+        ui = []
+        if unique_id is not None:                  # кадри для превʼю й лупи на картці
+            try:
+                ui = [preview.store(unique_id, frames, dep, off)]
+            except Exception as e:   # noqa: BLE001 - превʼю не має валити рендер
+                print("[CameraRealism] preview cache: %r" % e)
         if np.shares_memory(out, frames):          # нічого не активно: рушій віддав вхід як є
-            return (image,)
-        return (torch.from_numpy(np.ascontiguousarray(out)).to(image.dtype),)
+            res = image
+        else:
+            res = torch.from_numpy(np.ascontiguousarray(out)).to(image.dtype)
+        return {"ui": {"svk_realism": ui}, "result": (res,)}
 
 
 NODES = {"SVKCameraRealism": SVKCameraRealism}

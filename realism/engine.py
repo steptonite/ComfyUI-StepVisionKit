@@ -329,7 +329,7 @@ def apply_realism(frames, depth, params, seed=0, frame_offset=0):
     do_isp = _on(p, *_ISP)
     do_phone = _on(p, *_PHONE)
     do_tone = _on(p, *_TONE)
-    do_sig = _on(p, "halation", "film_grain", "dust", "ghost_flare", "line_skip", "chroma_blotch", "banding", "isp_blocks")
+    do_sig = _on(p, "og_amount", "halation", "film_grain", "dust", "ghost_flare", "line_skip", "chroma_blotch", "banding", "isp_blocks")
     do_geo = _on(p, "distortion", "chroma_ab") or do_shake or do_weave
     if not (do_depth or do_bokeh or do_optics or do_video or do_sensor or do_bayer or do_isp or do_phone or do_tone or do_sig):
         return frames
@@ -398,6 +398,8 @@ def apply_realism(frames, depth, params, seed=0, frame_offset=0):
             f = S.halation(f, p["halation"])
         if p["film_grain"] > 1e-6:
             f = S.film_grain(f, p["film_grain"], np.random.default_rng([seed & 0xFFFFFFFF, 6001, fi]))
+        if p["og_amount"] > 1e-6:
+            f = S.own_grain(f, p, seed, fi)
         if do_sensor:
             rng = np.random.default_rng([seed & 0xFFFFFFFF, 5001, fi])
             f = _sensor(f, p, rng, seed)

@@ -234,3 +234,28 @@
 /* ---- рядок керування під кадром/тюнером */
 .svk-bar { display: flex; align-items: center; gap: 8px; }
 .svk-bar .grow { flex: 1; }
+
+/* ---- Camera Realism: превʼю з крупняком (web/camera_realism.js) */
+.svk-rl-view { position: relative; height: 190px; flex: 0 0 auto; border-radius: var(--svk-r-ctl); background: var(--svk-bg); overflow: hidden; cursor: crosshair; }
+.svk-rl-view > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.svk-rl-view.is-busy::after { content: ""; position: absolute; left: 0; top: 0; height: 2px; width: 40%; background: var(--svk-accent); animation: svk-rl-run 1s linear infinite; }
+@keyframes svk-rl-run { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.svk-rl-mark { position: absolute; display: none; border: 1px solid var(--svk-accent); box-shadow: 0 0 0 1px rgba(0, 0, 0, .55); pointer-events: none; }
+.svk-rl-mark.is-pin { border-width: 2px; }
+.svk-rl-tag { position: absolute; left: 6px; top: 6px; font: 500 10px/1 var(--svk-mono); color: var(--svk-text); background: rgba(14, 14, 16, .72); padding: 3px 5px; border-radius: 4px; pointer-events: none; }
+.svk-rl-bar { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.svk-rl-bar .sp { flex: 1; }
+.svk-rl-bar .fc { font: 10px/1 var(--svk-mono); color: var(--svk-dim); min-width: 44px; }
+.svk-rl-bar .svk-btn svg { width: 14px; height: 14px; display: block; }
+.svk-rl-bar .svk-btn.is-on { color: var(--svk-accent); }
+.svk-rl-zoom { display: inline-flex; border: 1px solid var(--svk-line); border-radius: var(--svk-r-sm); overflow: hidden; }
+.svk-rl-zoom button { font: 500 10px/1 var(--svk-mono); color: var(--svk-dim); background: transparent; border: 0; padding: 5px 7px; cursor: pointer; }
+.svk-rl-zoom button.is-on { color: var(--svk-accent-ink); background: var(--svk-accent); }
+.svk-rl-close { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; flex: 0 0 auto; }
+.svk-rl-close .bx { position: relative; aspect-ratio: 1; background: var(--svk-bg); border-radius: var(--svk-r-sm); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.svk-rl-close img { image-rendering: pixelated; display: block; flex: none; }
+.svk-chip.is-user .x { order: 3; flex: none; color: var(--svk-dim); padding: 0 2px; font-size: 13px; line-height: 1; }
+.svk-chip.is-user .x:hover, .svk-chip.is-arm .x { color: var(--svk-danger); }
+.svk-rl-save { display: flex; gap: 6px; flex: 0 0 auto; }
+.svk-rl-save input { flex: 1; min-width: 0; font: var(--svk-fs-ctl) var(--svk-font); color: var(--svk-text); background: var(--svk-raise); border: 1px solid var(--svk-line); border-radius: var(--svk-r-ctl); padding: 6px 8px; }
+.svk-rl-save input.is-bad { border-color: var(--svk-danger); }

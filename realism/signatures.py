@@ -271,3 +271,38 @@ def banding(f, s):
     levels = 255.0 - 205.0 * min(s, 1.0)
     q = np.round(f * levels) / levels
     return f + (q - f) * w
+
+
+def own_grain(f, p, seed, fi):
+    """Власне зерно з повзунків «Own grain»: розмір у px кадру 1000 px, грудкуватість, мʼякість, кольоровість (синій шар
+    окремого розміру), відгук по тінях/середніх/світлих і частка зерна, що міняється щокадру (0 = прилипле до екрана)."""
+    H, W = f.shape[:2]
+    px = max(0.3, p["og_size"] * max(H, W) / 1000.0)
+    c, soft = float(np.clip(p["og_clump"], 0, 1)), float(np.clip(p["og_softness"], 0, 1))
+    anim = float(np.clip(p["og_animate"], 0, 1))
+    s = seed & 0xFFFFFFFF
+
+    def layer(rng, size):
+        n = (1.0 - c) * _noise(rng, H, W, 0.5 * px * size) + c * _noise(rng, H, W, 2.0 * px * size)
+        n /= math.hypot(1.0 - c, c)
+        if soft > 0.02:                              # мʼякість гасить і край, і частину контрасту зерна
+            n = cv2.GaussianBlur(n, (0, 0), 0.8 * soft * px * size)
+            n /= max(float(n.std()), 1e-6) ** 0.5
+        return n
+
+    def field(tag, size):
+        dyn = layer(np.random.default_rng([s, 6201, tag, fi]), size) if anim > 1e-3 else 0.0
+        st = layer(np.random.default_rng([s, 6202, tag]), size) if anim < 1.0 - 1e-3 else 0.0
+        return (anim * dyn + (1.0 - anim) * st) / math.hypot(anim, 1.0 - anim)
+
+    col = float(np.clip(p["og_colour"], 0, 1))
+    mono = field(0, 1.0)
+    if col < 0.01:
+        n = mono[..., None]
+    else:
+        k = math.hypot(1.0 - col, col)
+        n = np.stack([((1.0 - col) * mono + col * field(1 + i, sz)) / k
+                      for i, sz in enumerate((1.0, 0.9, float(p["og_blue"])))], axis=-1)
+    y = np.clip(_luma(f), 0.0, 1.0)
+    w = p["og_shadows"] * (1.0 - y) ** 2 + p["og_mids"] * 4.0 * y * (1.0 - y) + p["og_highlights"] * y * y
+    return f + (0.08 * p["og_amount"]) * w[..., None] * n

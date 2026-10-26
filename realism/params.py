@@ -97,12 +97,38 @@ SPEC = [
      "Rows shift in proportion to the shake speed (jelly skew). Needs hand shake above 0."),
     ("motion_blur", 0.0, 1.0, 0.01, "Video", "motion blur",
      "Shutter blur along real motion between frames: 0.5 = 180° shutter. Skipped for a single still frame."),
+    # власне зерно: ручне, поверх будь-якого профілю; профіль його не перезаписує, майстер-сила не множить
+    ("og_amount", 0.0, 1.0, 0.01, "Own grain", "own grain",
+     "Your own grain on top of any profile. The profile does not overwrite it and the master strength does not scale it. 0 = off."),
+    ("og_size", 0.3, 6.0, 0.05, "Own grain", "grain size",
+     "Grain diameter in pixels of a 1000 px wide frame: it scales with resolution, so 4K looks like 1080p."),
+    ("og_clump", 0.0, 1.0, 0.01, "Own grain", "clumping",
+     "Loose/clumpy grain: 0 = even fine dots, 1 = grains gather into coarse clusters (pushed film)."),
+    ("og_softness", 0.0, 1.0, 0.01, "Own grain", "softness",
+     "0 = crisp grain edges (sharp scan), 1 = soft, smeared grain (print, soft lens)."),
+    ("og_colour", 0.0, 1.0, 0.01, "Own grain", "colour",
+     "0 = monochrome grain, 1 = every colour layer has its own grain (colour negative)."),
+    ("og_blue", 0.5, 2.5, 0.05, "Own grain", "blue layer size",
+     "Size of the blue layer grain relative to red and green (real film: about 1.4). Works when colour > 0."),
+    ("og_shadows", 0.0, 2.0, 0.01, "Own grain", "in shadows",
+     "Grain amount in dark tones (1 = as in mid-tones)."),
+    ("og_mids", 0.0, 2.0, 0.01, "Own grain", "in mid-tones",
+     "Grain amount in mid-tones."),
+    ("og_highlights", 0.0, 2.0, 0.01, "Own grain", "in highlights",
+     "Grain amount in bright tones (film: low, a digital grain plug-in: about 1)."),
+    ("og_animate", 0.0, 1.0, 0.01, "Own grain", "changes per frame",
+     "Video: 1 = new grain on every frame (film), 0 = the same grain stuck to the screen (a texture overlay)."),
+    ("og_replace", 0, 1, 1, "Own grain", "replace camera noise",
+     "1 = while own grain is on, the profile's sensor noise and film grain are turned off; 0 = own grain is added on top.", "i"),
     ("frame_offset", 0, 1000000000, 1, "Video", "first frame number",
      "Number of this batch's first frame within the whole clip. Set it when a clip is processed in chunks so shake and flicker continue seamlessly.", "i"),
 ]
 NAMES = [s[0] for s in SPEC]
-GROUP_ORDER = ["Sensor", "Bayer", "Camera processing", "Optics", "Depth", "Tone & colour", "Film", "Phone", "Old video", "Video"]
+GROUP_ORDER = ["Sensor", "Bayer", "Camera processing", "Optics", "Depth", "Tone & colour", "Film", "Phone", "Old video", "Own grain", "Video"]
 RUNTIME = {"frame_offset"}            # не частина профілю, не масштабується майстер-силою
+# власне зерно: не частина профілю (вибір профілю його не чіпає), завжди з повзунків, майстер-сила не множить
+OWN = tuple(s[0] for s in SPEC if s[4] == "Own grain")
+NOISE_KEYS = ("noise_luma", "noise_chroma", "film_grain")   # що вимикає og_replace
 
 # параметри-«сили»: їх множить майстер-сила; решта (iso, розмір зерна, радіус, темп, кадр) - ні
 STRENGTH_KEYS = ("noise_luma", "noise_chroma", "fixed_pattern", "bayer_amount", "isp_denoise", "isp_sharpen", "isp_blocks",
@@ -114,7 +140,9 @@ STRENGTH_KEYS = ("noise_luma", "noise_chroma", "fixed_pattern", "bayer_amount", 
 
 # нейтрально: усі сили 0 (нічого не рахується), решта - середні значення
 NEUTRAL = {s[0]: 0.0 for s in SPEC}
-NEUTRAL.update({"iso": 800, "noise_size": 0.25, "isp_sharpen_radius": 1.2, "shake_speed": 1.0, "frame_offset": 0})
+NEUTRAL.update({"iso": 800, "noise_size": 0.25, "isp_sharpen_radius": 1.2, "shake_speed": 1.0, "frame_offset": 0,
+                "og_size": 1.2, "og_clump": 0.35, "og_softness": 0.3, "og_colour": 0.25, "og_blue": 1.4,
+                "og_shadows": 1.0, "og_mids": 1.0, "og_highlights": 0.4, "og_animate": 1.0, "og_replace": 0})
 
 # значення профілів при майстер-силі 1. «Сила» 0.5 (типова) дає рівно половину кожної сили.
 PROFILES = {
@@ -160,7 +188,7 @@ PROFILE_NAMES = list(PROFILES) + [PROFILE_CUSTOM]
 
 def profile_values(name):
     """Повний набір значень профілю (всі ключі, крім службових) - для ноди й для JS."""
-    base = {k: v for k, v in NEUTRAL.items() if k not in RUNTIME}
+    base = {k: v for k, v in NEUTRAL.items() if k not in RUNTIME and k not in OWN}
     base.update(PROFILES.get(name, {}))
     return base
 
@@ -176,5 +204,9 @@ def resolve(profile, strength, custom=None):
         vals = {k: custom.get(k, WIDGET_DEFAULTS[k]) for k in NAMES if k not in RUNTIME}
     else:
         vals = profile_values(profile if profile in PROFILES else DEFAULT_PROFILE)
+    vals.update({k: custom.get(k, NEUTRAL[k]) for k in OWN})
     s = min(max(float(strength), 0.0), 1.0)
-    return {k: (float(v) * s if k in STRENGTH_KEYS else v) for k, v in vals.items()}
+    out = {k: (float(v) * s if k in STRENGTH_KEYS else v) for k, v in vals.items()}
+    if out["og_amount"] > 1e-6 and int(out["og_replace"]) >= 1:
+        out.update({k: 0.0 for k in NOISE_KEYS})
+    return out

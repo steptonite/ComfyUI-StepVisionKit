@@ -34,8 +34,8 @@ def inputs_of(py, cls):
 def shown_in(js):
     src = js.read_text()
     names = set(re.findall(r'control\(node,\s*"(\w+)"', src))
-    m = re.search(r"const MORE = \[(.*?)\];", src, re.S)
-    if m: names |= set(re.findall(r'\["(\w+)"', m.group(1)))
+    for m in re.finditer(r"const (?:MORE|OWN) = \[(.*?)\];", src, re.S):
+        names |= set(re.findall(r'\["(\w+)"', m.group(1)))
     return names
 
 bad = []

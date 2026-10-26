@@ -25,3 +25,4 @@ depth_look/renders/
 *.bak-*
 # Depth Look · відео: користувацькі пресети руху/анімації (вбудовані живуть у коді)
 depth_look/video_presets/
+realism/user_presets/
