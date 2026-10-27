@@ -2,27 +2,54 @@
 
 # StepVisionKit
 
-Detection, tracking, HUD compositing and depth curves for **video** in ComfyUI.
-Written for Mac/MPS, also runs on CUDA (`device = auto`).
+A video toolkit for ComfyUI that takes footage all the way to the final file:
+**pro input** (RAW photo, video, HDR sequences) → **objects** (YOLO with tracking, click-to-pick, SAM2 boxes) →
+**depth** (DA3 depth for a whole clip, grading without flicker) → **look** (lens blur, palette, haze, grain by depth) →
+**camera realism** (sensor noise, ISP, optics) → **HDR output** (EXR, 16-bit PNG, ProRes, HEVC 10-bit).
+Mac (MPS) and CUDA.
 
-Menu category: **`StepVisionKit`** → `Detect` · `HUD` · `Depth`.
+Every node has one card: a preview on top, the 3–5 main settings, the rest under «more».
+Menu category: **`StepVisionKit`** → `IO` · `Detect` · `HUD` · `Depth` · `Realism`.
+
+## Chains: what goes after what
+
+```
+A. Object → mask (cut a person out)
+   Load Video · Pro ─images→ YOLO Detect (click the person) ─bbox_for_sam2→ Sam2Segmentation ─mask→ Cut By Mask → Save Video · HDR
+
+B. HUD frame over an object
+   Load Video · Pro ─images→ YOLO Detect ─bounding_box→ HUD Sprite (your PNG frame) ─composite→ Save Video · HDR
+                                                       ├→ Draw Boxes · HUD (corners, labels, trails)
+                                                       └→ Overlay On Boxes (a picture on the object)
+
+C. Depth of a video
+   Load DA3 Model ─da3_model→ Video Depth · DA3 stream ─depth→ Depth Grade (frame and video preview in the card) ─depth→
+        Depth Look · Video · Camera Realism · Save Depth · 16-bit / EXR · HUD Sprite
+   Compute once, grade later without DA3:
+   DA3Inference ─da3_geometry→ Raw Depth Save · EXR   …later…   Raw Depth Load · EXR → Depth Receiver ─depth→ Depth Grade
+
+D. A look on a photo → the same look on video
+   Load RAW · photo ─image→ Depth Look · Full (+ depth from C) ─grade→ Depth Look · Video (+ clip frames and depth)
+
+E. Render → «shot on a camera»
+   any frames ─image→ Camera Realism (+ depth from Depth Grade, optional) ─image→ Save Video · HDR
+```
+
+YOLO Detect gives `bbox_for_sam2` itself; `Boxes → BBOX` is only for other detectors.
 
 ## What's inside
 
-| node | purpose |
-|---|---|
-| `YOLO Detect` | ultralytics called directly, returns boxes in two formats at once. No tracking — fast |
-| `Detect Objects · YOLO` | the same + **ByteTrack**: returns a stable `track_id` through the whole video |
-| `Select Box` | pick ONE object — by `track_id`, index, point or class |
-| `Boxes → BBOX · SAM2` | convert any box format to `BBOX` for SAM2 |
-| `HUD Boxes · corners` | a corner-bracket frame drawn in code |
-| `HUD Sprite · PNG frame` | **your own PNG frame** follows the box; 9-slice corners, a cutout in the video, separate alpha |
-| `Overlay On Boxes` | your own graphic on EVERY box, selectable by `track_id` |
-| `Cut By Mask` | cut by a mask to black/white/transparent/blur/color, batched |
-| `Depth Curve · DA3 → V2` | Depth Anything 3 → V2 look: Levels, clarity, deband. Does not run a model |
-| `Depth Grade` and `Depth Grade View` | depth grading with anti-flicker, plus frame/video views for calibration |
-| `Depth Receiver`, `Raw Depth Save` / `Load`, `Save Depth · 16-bit / EXR` | raw DA3 depth to float depth, EXR/16-bit I/O |
-| `Depth Look · Full / Simple / Video` | lens blur by depth, palette, silhouette, haze, trail, halation, grain (see [depth_look/README.md](depth_look/README.md)) |
+| group | nodes | what for |
+|---|---|---|
+| IO | `Load RAW · photo`, `Load Video · Pro`, `Load Image Sequence · HDR`, `Save Video · HDR`, `Save Image · HDR` | camera RAW and pro video in, linear or display curve; EXR / 16-bit / ProRes / HEVC 10-bit out |
+| Detect | `YOLO Detect`, `Detect Objects · YOLO`, `Select Box`, `Boxes → BBOX · SAM2` | boxes with a preview in the card (threshold, classes and count change live, a click picks the object); `Detect Objects` adds ByteTrack with a stable `track_id`, `Select Box` picks one by `track_id`, point or class |
+| HUD | `HUD Sprite · PNG frame`, `HUD Boxes · corners`, `Draw Boxes · HUD`, `Overlay On Boxes`, `Cut By Mask` | your own PNG frame follows the box (9-slice, cutout, separate alpha); drawing and cutting by mask |
+| Depth | `Video Depth · DA3 stream`, `Depth Grade · anti-flicker`, `Depth Curve · DA3 → V2`, `Depth Receiver · raw DA3`, `Raw Depth Save / Load · EXR`, `Save Depth · 16-bit / EXR` | DA3 depth for a long clip within RAM, grading with eyedroppers and curves inside the Depth Grade card, depth I/O |
+| Look | `Depth Look · Full / Simple / Video` | lens blur by depth, palette, silhouette, haze, trail, halation, grain; tuner in the node, `auto_run` or «Render final» (see [depth_look/README.md](depth_look/README.md)) |
+| Realism | `Camera Realism` | camera profiles: sensor noise, Bayer, ISP, optics, haze by depth; close-up loupe, `auto_run` or «Render» |
+
+`Depth Grade View · Frame / Video` and `Depth Grade · Live` are kept only so old workflows open; the views now live inside the Depth Grade card.
+**Settings → StepVisionKit → Cards**: hide previews in nodes, YOLO box colour and labels.
 
 ## Installation
 

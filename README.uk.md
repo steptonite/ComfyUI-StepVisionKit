@@ -2,24 +2,54 @@
 
 # StepVisionKit
 
-Детекція, трекінг, HUD-композ і крива глибини для **відео** в ComfyUI.
-Писався під Mac/MPS, працює й на CUDA (`device = auto`).
+Відео-набір для ComfyUI, що веде матеріал аж до фінального файлу:
+**професійний вхід** (RAW-фото, відео, HDR-секвенції) → **обʼєкти** (YOLO з трекінгом, вибір кліком, бокси для SAM2) →
+**глибина** (DA3 на весь кліп, грейд без мерехтіння) → **лук** (розмиття за глибиною, палітра, серпанок, зерно) →
+**реалізм камери** (шум сенсора, ISP, оптика) → **HDR-вихід** (EXR, 16-bit PNG, ProRes, HEVC 10-bit).
+Mac (MPS) і CUDA.
 
-Категорія в меню: **`StepVisionKit`** → `Detect` · `HUD` · `Depth`.
+У кожної ноди одна картка: превʼю зверху, 3–5 головних налаштувань, решта під «ще».
+Категорія в меню: **`StepVisionKit`** → `IO` · `Detect` · `HUD` · `Depth` · `Realism`.
+
+## Ланцюжки: що за чим іде
+
+```
+А. Обʼєкт → маска (вирізати людину)
+   Load Video · Pro ─images→ YOLO Detect (клік по людині) ─bbox_for_sam2→ Sam2Segmentation ─mask→ Cut By Mask → Save Video · HDR
+
+Б. HUD-рамка над обʼєктом
+   Load Video · Pro ─images→ YOLO Detect ─bounding_box→ HUD Sprite (своя PNG-рамка) ─composite→ Save Video · HDR
+                                                       ├→ Draw Boxes · HUD (кутики, підписи, сліди)
+                                                       └→ Overlay On Boxes (картинка на обʼєкт)
+
+В. Глибина відео
+   Load DA3 Model ─da3_model→ Video Depth · DA3 stream ─depth→ Depth Grade (кадр і відео-превʼю в картці) ─depth→
+        Depth Look · Video · Camera Realism · Save Depth · 16-bit / EXR · HUD Sprite
+   Порахувати раз і грейдити далі без DA3:
+   DA3Inference ─da3_geometry→ Raw Depth Save · EXR   …потім…   Raw Depth Load · EXR → Depth Receiver ─depth→ Depth Grade
+
+Г. Лук на фото → той самий лук на відео
+   Load RAW · photo ─image→ Depth Look · Full (+ глибина з В) ─grade→ Depth Look · Video (+ кадри й глибина кліпу)
+
+Ґ. Рендер → «знято камерою»
+   будь-які кадри ─image→ Camera Realism (+ глибина з Depth Grade, необовʼязково) ─image→ Save Video · HDR
+```
+
+YOLO Detect сам віддає `bbox_for_sam2`; `Boxes → BBOX` потрібна лише для чужих детекторів.
 
 ## Що всередині
 
-| нода | нащо |
-|---|---|
-| `YOLO Detect` | ultralytics напряму, віддає бокси одразу у двох форматах. Без трекінгу — швидко |
-| `Detect Objects · YOLO` | те саме + **ByteTrack**: віддає стабільний `track_id` через усе відео |
-| `Select Box` | вибрати ОДИН об'єкт — по `track_id`, індексу, точці або класу |
-| `Boxes → BBOX` | звести будь-який формат боксів до `BBOX` для SAM2 |
-| `HUD Boxes` | рамка з кутів, малюється кодом |
-| `HUD Sprite` | 🥇 **своя PNG-рамка** їде за боксом, 9-slice кути, дірка у відео, окрема альфа |
-| `Overlay On Boxes` | своя графіка на КОЖЕН бокс, вибір по `track_id` |
-| `Cut By Mask` | вирізати по масці на чорне/біле/прозоре/блюр/колір, батчем |
-| `Depth Curve` | 🥇 Depth Anything 3 → вигляд V2: Levels, clarity, deband. Модель не запускає |
+| група | ноди | нащо |
+|---|---|---|
+| IO | `Load RAW · photo`, `Load Video · Pro`, `Load Image Sequence · HDR`, `Save Video · HDR`, `Save Image · HDR` | RAW з камери і професійне відео на вхід, лінійна або дисплейна крива; EXR / 16-bit / ProRes / HEVC 10-bit на вихід |
+| Detect | `YOLO Detect`, `Detect Objects · YOLO`, `Select Box`, `Boxes → BBOX · SAM2` | бокси з превʼю в картці (поріг, класи й кількість міняються наживо, клік обирає обʼєкт); `Detect Objects` додає ByteTrack зі сталим `track_id`, `Select Box` бере один за `track_id`, точкою чи класом |
+| HUD | `HUD Sprite · PNG frame`, `HUD Boxes · corners`, `Draw Boxes · HUD`, `Overlay On Boxes`, `Cut By Mask` | своя PNG-рамка їде за боксом (9-slice, дірка у відео, окрема альфа); малювання й вирізання по масці |
+| Depth | `Video Depth · DA3 stream`, `Depth Grade · anti-flicker`, `Depth Curve · DA3 → V2`, `Depth Receiver · raw DA3`, `Raw Depth Save / Load · EXR`, `Save Depth · 16-bit / EXR` | глибина DA3 для довгого кліпу в межах RAM, грейд піпетками й кривими в картці Depth Grade, запис і читання глибини |
+| Look | `Depth Look · Full / Simple / Video` | розмиття за глибиною, палітра, силует, серпанок, шлейф, ореол, зерно; тюнер у ноді, `auto_run` або «Render final» (див. [depth_look/README.md](depth_look/README.md)) |
+| Realism | `Camera Realism` | профілі камер: шум сенсора, байєр, ISP, оптика, серпанок за глибиною; лупа крупняку, `auto_run` або «Render» |
+
+`Depth Grade View · Frame / Video` і `Depth Grade · Live` лишились, лише щоб відкривались старі workflow; вигляди тепер живуть у картці Depth Grade.
+**Settings → StepVisionKit → Cards**: сховати превʼю в нодах, колір і підписи боксів YOLO.
 
 ## Встановлення
 
