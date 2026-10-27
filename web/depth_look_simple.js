@@ -4,7 +4,7 @@
 // Також тут: стрічка кадрів-превʼю відео-ноди і єдиний колір карток трьох нод. Стилі й токени - svk_ui.css.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { ICON, presetLabel, control, morePanel, moreSummary, keepWheel, onWheel, fitToNode, scrollHint, stageLine, snapUI, restoreUI, migrateLegacyValues } from "./svk_ui.js";
+import { ICON, presetLabel, control, morePanel, moreSummary, keepWheel, onWheel, fitToNode, scrollHint, stageLine, snapUI, restoreUI, migrateLegacyValues, typeIn } from "./svk_ui.js";
 import { T } from "./svk_i18n.js";
 
 const SIMPLE = "DepthLookSimple";
@@ -81,6 +81,7 @@ function buildSimple(node) {
         setW(node, "look_mix", v); markChanged(); paintMix(S);
     });
     S.mixRange.addEventListener("dblclick", () => { S.mixRange.value = 1; S.mixRange.dispatchEvent(new Event("input")); });
+    typeIn(S.mixNum, v => { S.mixRange.value = v; S.mixRange.dispatchEvent(new Event("input")); }, 0, 1, 100);
 
     // плитки
     const tilesCap = el("div", "svk-cap", "<b>" + T("Look") + "</b>");

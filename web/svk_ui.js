@@ -93,6 +93,31 @@ export function migrateLegacyValues(node) {
     }
 }
 
+// клік по числу - вписати значення вручну (27.10: вписувати можна всюди).
+// Enter/вихід із поля - прийняти, Esc - скасувати; apply отримує число в межах [lo, hi] (scale - у тих одиницях, що на екрані, напр. % = 100)
+export function typeIn(val, apply, lo, hi, scale = 1) {
+    val.style.cursor = "text";
+    val.addEventListener("click", ev => {
+        ev.stopPropagation();
+        if (!val.isConnected) return;
+        const inp = el("input", "svk-num"); inp.type = "text"; inp.inputMode = "decimal";
+        inp.value = val.textContent.replace(/[^\d.,\-]/g, "");
+        Object.assign(inp.style, { width: Math.max(4, val.textContent.length + 2) + "ch", textAlign: "right", padding: "0 2px",
+                                   background: "transparent", border: "1px solid currentColor", borderRadius: "3px", outline: "none" });
+        let done = false;
+        const finish = ok => {
+            if (done) return; done = true;
+            const x = Number(inp.value.trim().replace(",", ".")) / scale;
+            inp.replaceWith(val);
+            if (ok && inp.value.trim() !== "" && Number.isFinite(x)) apply(clamp(x, lo, hi));
+        };
+        inp.onkeydown = e => { e.stopPropagation(); if (e.key === "Enter") finish(true); else if (e.key === "Escape") finish(false); };
+        inp.onblur = () => finish(true);
+        for (const k of ["pointerdown", "mousedown", "dblclick", "click"]) inp.addEventListener(k, e => e.stopPropagation());
+        val.replaceWith(inp); inp.focus(); inp.select();
+    });
+}
+
 // ---- контроли, привʼязані до нативного віджета (його значення йде у workflow і в Run)
 // spec - рядок INPUT_TYPES з object_info: [тип | список, {min,max,step,tooltip,default}]
 export function control(node, name, spec, label, opts = {}) {
@@ -147,13 +172,14 @@ export function control(node, name, spec, label, opts = {}) {
             row.append(el("span", "t", label), num);
             sync = () => { num.value = get() ?? ""; };
         } else {
-            row = el("div", "svk-sl"); row.title = tip;
+            row = el("div", "svk-sl"); row.title = tip + "\n" + T("click the number to type a value");
             const hd = el("div", "hd"); const t = el("span", "t", label); const val = el("span", "svk-num");
             hd.append(t, val);
             const r = el("input", "svk-range"); r.type = "range"; r.min = lo; r.max = hi; r.step = step;
             const paint = v => { r.value = v; r.style.setProperty("--p", ((v - lo) / (hi - lo || 1)) * 100 + "%"); val.textContent = (opts.fmt ? opts.fmt(v) : Number(v).toFixed(dec)); };
             r.addEventListener("input", () => { const v = isInt ? Math.round(Number(r.value)) : Number(r.value); paint(v); set(v); });
             t.addEventListener("dblclick", () => { if (o.default !== undefined) { set(o.default); paint(o.default); } });
+            typeIn(val, v => { if (isInt) v = clamp(Math.round((v - lo) / step) * step + lo, lo, hi); set(v); sync(); }, lo, hi);
             row.append(hd, r);
             sync = () => paint(Number(get() ?? lo));
         }

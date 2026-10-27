@@ -9,8 +9,10 @@ depth_look/tests/depth_stream_check.py).
   depth_lr.f32 / sky_lr.f32 — сирий вихід моделі на її роздільності (518×294 для 16:9), float32, кадр за кадром;
                               перерваний прохід продовжується з останнього записаного кадру;
   depth_<H>x<W>_<sky>.npy   — нормалізована глибина, як у Receiver (near = 1), float32, mmap; це вихід ноди.
-Ключ = файл (шлях, розмір, mtime) + діапазон кадрів + масштаб + модель + роздільність + пристрій. Той самий ключ →
+Ключ = файл (шлях, розмір, mtime) або відбиток кадрів із входу images + діапазон кадрів + масштаб + модель + роздільність + пристрій. Той самий ключ →
 DA3 не рахується, модель навіть не вантажиться.
+Вхід images (27.10.2026, автор: «не зручно що файл треба в ній обирати»): кадри з будь-якого завантажувача.
+Файл лишився запасним шляхом, бо тільки він не тримає кліп у RAM (1080p, 676 кадрів як IMAGE ≈ 16.8 ГБ).
 Анти-мерехтіння і рівні тут свідомо немає: це Depth Grade. Так грейд крутиться без перерахунку DA3.
 """
 import hashlib
@@ -33,6 +35,7 @@ from ..media import video as V
 from ..media import color as C
 
 CACHE_DIR = "svk_depth_cache"
+NO_FILE = "(images input)"  # перший пункт списку файлів: глибина з входу images, файл не читається
 VERSION = 1                 # змінити, якщо зміниться математика кадру: старі кеші стануть промахом
 SKY_T = 0.3                 # поріг неба, як у Receiver і preprocess.compute_non_sky_mask
 
@@ -79,6 +82,39 @@ def _frames(p, s, start_frame, frame_count, every_nth, max_width, skip=0):
             if k == 0:
                 err.seek(0)
                 raise RuntimeError(f"Video Depth: no frames decoded from {p}. {err.read().decode(errors='ignore').strip()[-300:]}")
+
+
+def _file_frames(p, s, start_frame, frame_count, every_nth, max_width, output_curve, gamut):
+    """Джерело кадрів «файл»: ffmpeg + крива/гамут як у Load Video Pro. Повертає frames(skip) -> генератор."""
+    tr = s.get("color_transfer", "")
+
+    def frames(skip=0):
+        for rgb in _frames(p, s, start_frame, frame_count, every_nth, max_width, skip=skip):
+            if output_curve == "linear":                       # як Load Video Pro, покадрово
+                rgb = V.to_linear(rgb, tr)
+                if gamut != "keep source" and s.get("color_primaries") == "bt2020":
+                    rgb = C.apply_matrix(rgb, C.M2020_TO_709)
+            yield rgb
+    return frames
+
+
+def _image_frames(images, start_frame, frame_count, every_nth):
+    """Джерело кадрів «вхід images»: зріз кліпу, який уже лежить у RAM (кадри не копіюються, лише читаються)."""
+    sel = images[int(start_frame)::int(every_nth)]
+    if frame_count:
+        sel = sel[:int(frame_count)]
+
+    def frames(skip=0):
+        for i in range(skip, sel.shape[0]):
+            yield sel[i].float().cpu().numpy()
+    return sel, frames
+
+
+def _images_sig(sel):
+    """Відбиток кліпу з входу без хешу всіх пікселів: форма + кожен 16-й піксель кожного кадру."""
+    h = hashlib.sha1(f"{tuple(sel.shape)}|{sel.dtype}".encode())
+    h.update(np.ascontiguousarray(sel[:, ::16, ::16, :].float().cpu().numpy()).tobytes())
+    return h.hexdigest()[:16]
 
 
 def _prefetch(gen, depth=3):
@@ -130,9 +166,10 @@ def _batches(gen, b):
 
 
 class SVKVideoDepthStream:
-    DESCRIPTION = ("Depth for a whole video without holding the clip in RAM: frames are decoded, scaled and run through "
-                   "Depth Anything 3 one by one, the result is a float32 depth on disk (mmap). Same output as "
-                   "Load Video Pro → Image Scale By → Run DA3 → Depth Receiver. Cached: the same file and settings "
+    DESCRIPTION = ("Depth for a whole video. Input: frames on 'images' (from any loader) or a video file picked here. "
+                   "With a file the clip never sits in RAM: frames are decoded, scaled and run through Depth Anything 3 "
+                   "one by one - use it for long or 2K clips. Same output as "
+                   "Load Video Pro → Image Scale By → Run DA3 → Depth Receiver. Cached: the same frames and settings "
                    "do not run DA3 again. Runs where ComfyUI runs: CUDA, Apple MPS or CPU. Temporal flicker and levels "
                    "are not touched here: put Depth Grade (grade + anti-flicker) after this node - it re-grades without re-running DA3.")
 
@@ -140,7 +177,10 @@ class SVKVideoDepthStream:
     def INPUT_TYPES(cls):
         return {"required": {
             "da3_model": ("DA3_MODEL", {"tooltip": "Load Depth Anything 3 (Mono-Large gives the sky mask)"}),
-            "file": (V._video_files(), {"tooltip": "video from ComfyUI/input - the same one Load Video Pro reads"}),
+            "file": ([NO_FILE] + V._video_files(), {"default": NO_FILE,
+                     "tooltip": "(images input) = depth of the frames on 'images'. A file instead streams the video from "
+                                "ComfyUI/input frame by frame: RAM stays ~0.5 GB at any length (a 1080p clip loaded as images "
+                                "takes ~3 GB per 100 frames)"}),
             "start_frame": ("INT", {"default": 0, "min": 0, "max": 10_000_000, "tooltip": "first frame to read"}),
             "frame_count": ("INT", {"default": 0, "min": 0, "max": 100_000, "tooltip": "0 = to the end; RAM does not grow with it"}),
             "pre_scale": ("FLOAT", {"default": 0.5, "min": 0.05, "max": 1.0, "step": 0.05,
@@ -150,13 +190,16 @@ class SVKVideoDepthStream:
             "sky_to_far": ("BOOLEAN", {"default": True, "tooltip": "as in Depth Receiver: sky goes far and does not stretch the range"}),
             "reuse_cache": ("BOOLEAN", {"default": True, "tooltip": "off = run DA3 again and overwrite the cache"}),
             "batch": ("INT", {"default": 1, "min": 1, "max": 64,
-                              "tooltip": "frames per DA3 pass. 1 = exactly the old Run DA3 result. 8 was ~13% faster on an RTX 3060 "
+                              "tooltip": "ceiling of frames per DA3 pass (no Meta Batch node needed: with a file the clip is never "
+                                         "loaded whole). 1 = exactly the old Run DA3 result. 8 was ~13% faster on an RTX 3060 "
                                          "(decode, not GPU, is the limit); depth then differs by fp16 rounding (<=0.004, "
                                          "rare sky-edge pixels flip). Costs VRAM. Keep 1 on an 8 GB Mac"}),
             "ram_budget_gb": ("FLOAT", {"default": 2.0, "min": 0.0, "max": 256.0, "step": 0.5,
                                         "tooltip": "max RAM for the output depth. If the clip fits, depth stays in RAM (fastest); "
                                                    "if not, it goes to a file on disk (mmap). 0 = always disk. Raw DA3 cache is on disk anyway (~1 MB/frame)"}),
         }, "optional": {
+            "images": ("IMAGE", {"tooltip": "video frames from any loader; used when 'file' is (images input). "
+                                            "start/count/every Nth slice them; curve and gamut are the loader's"}),
             "path": ("STRING", {"default": "", "tooltip": "absolute path to a video; overrides 'file' when set"}),
             "every_nth": ("INT", {"default": 1, "min": 1, "max": 1000, "tooltip": "take every N-th frame; 1 = all"}),
             "max_width": ("INT", {"default": 0, "min": 0, "max": 16384, "step": 2, "tooltip": "as in Load Video Pro"}),
@@ -176,6 +219,8 @@ class SVKVideoDepthStream:
 
     @classmethod
     def IS_CHANGED(cls, file, path="", reuse_cache=True, **kw):
+        if file == NO_FILE and not path.strip():
+            return f"images|{reuse_cache}"                     # кадри з входу: перерахунок і так іде за графом
         p = V._path(file, path)
         try:
             st = os.stat(p)
@@ -185,23 +230,40 @@ class SVKVideoDepthStream:
 
     @classmethod
     def VALIDATE_INPUTS(cls, file, path="", **kw):
+        if file == NO_FILE and not path.strip():
+            return True                                        # чи підключено images, видно лише в run
         p = V._path(file, path)
         return True if os.path.isfile(p) else f"Video Depth: file not found: {p}"
 
     def run(self, da3_model, file, start_frame, frame_count, pre_scale, resolution, sky_to_far, reuse_cache,
-            batch=1, ram_budget_gb=2.0, path="", every_nth=1, max_width=0, output_curve="as encoded", gamut="keep source",
-            scale_method="area", resize_method="upper_bound_resize", cache_folder=""):
-        p = V._path(file, path)
-        s = V.probe(p)
-        st = os.stat(p)
+            batch=1, ram_budget_gb=2.0, images=None, path="", every_nth=1, max_width=0, output_curve="as encoded",
+            gamut="keep source", scale_method="area", resize_method="upper_bound_resize", cache_folder=""):
         device = mm.get_torch_device()
-        key_src = {"v": VERSION, "file": p, "size": st.st_size, "mtime": st.st_mtime_ns, "start": int(start_frame),
-                   "count": int(frame_count), "nth": int(every_nth), "maxw": int(max_width), "curve": output_curve,
-                   "gamut": gamut, "pre_scale": float(pre_scale), "scale_method": scale_method, "res": int(resolution),
+        key_src = {"v": VERSION, "start": int(start_frame), "count": int(frame_count), "nth": int(every_nth),
+                   "pre_scale": float(pre_scale), "scale_method": scale_method, "res": int(resolution),
                    "resize": resize_method, "model": _model_sig(da3_model), "device": device.type, "batch": int(batch),
                    "torch": torch.__version__.split("+")[0]}
+        if file == NO_FILE and not path.strip():
+            if images is None:
+                raise ValueError("Video Depth: connect frames to 'images' or pick a video in 'file'.")
+            sel, frames = _image_frames(images, start_frame, frame_count, every_nth)
+            if sel.shape[0] == 0:
+                raise ValueError(f"Video Depth: no frames on 'images' after start {start_frame} / every {every_nth}.")
+            key_src["images"] = _images_sig(sel)
+            name, est = "images", int(sel.shape[0])
+        else:
+            p = V._path(file, path)
+            s = V.probe(p)
+            st = os.stat(p)
+            key_src.update({"file": p, "size": st.st_size, "mtime": st.st_mtime_ns, "maxw": int(max_width),
+                            "curve": output_curve, "gamut": gamut})
+            frames = _file_frames(p, s, start_frame, frame_count, every_nth, max_width, output_curve, gamut)
+            name = os.path.splitext(os.path.basename(p))[0][:40]
+            est = max(0, (int(s.get("frames") or 0) - int(start_frame) + int(every_nth) - 1) // int(every_nth))
+            if frame_count:
+                est = min(est, int(frame_count)) if est else int(frame_count)
         key = hashlib.sha1(json.dumps(key_src, sort_keys=True).encode()).hexdigest()[:16]
-        d = os.path.join(_cache_root(cache_folder), f"{os.path.splitext(os.path.basename(p))[0][:40]}_{key}")
+        d = os.path.join(_cache_root(cache_folder), f"{name}_{key}")
         os.makedirs(d, exist_ok=True)
         meta_p = os.path.join(d, "meta.json")
         meta = {}
@@ -214,8 +276,8 @@ class SVKVideoDepthStream:
         meta["key"] = key_src
 
         if not meta.get("done"):
-            self._infer(da3_model, p, s, d, meta, meta_p, device, start_frame, frame_count, every_nth, max_width,
-                        output_curve, gamut, pre_scale, scale_method, resolution, resize_method, int(batch))
+            self._infer(da3_model, frames, est, d, meta, meta_p, device, pre_scale, scale_method, resolution,
+                        resize_method, int(batch))
         out = self._normalize(d, meta, meta_p, device, sky_to_far, ram_budget_gb)
         n = out.shape[0]
         where = "RAM" if isinstance(out, torch.Tensor) else "disk mmap"
@@ -226,12 +288,11 @@ class SVKVideoDepthStream:
         return (t.unsqueeze(-1).expand(-1, -1, -1, 3), n, info)
 
     # ---------------------------------------------------------------- прохід 1: DA3 кадр за кадром → сирий кеш
-    def _infer(self, model, p, s, d, meta, meta_p, device, start_frame, frame_count, every_nth, max_width,
-               output_curve, gamut, pre_scale, scale_method, resolution, resize_method, batch=1):
+    def _infer(self, model, frames, est, d, meta, meta_p, device, pre_scale, scale_method, resolution,
+               resize_method, batch=1):
         mm.load_model_gpu(model)
         diffusion = model.model.diffusion_model
         dtype = diffusion.dtype if diffusion.dtype is not None else torch.float32
-        tr = s.get("color_transfer", "")
         files = {"depth": os.path.join(d, "depth_lr.f32"), "sky": os.path.join(d, "sky_lr.f32")}
         done = 0
         if meta.get("lr_h"):                                   # продовження перерваного проходу
@@ -244,22 +305,14 @@ class SVKVideoDepthStream:
                         fh.truncate(done * fb)
             if done:
                 print(f"[SVK Video Depth] resuming after {done} cached frame(s)")
-        est = max(0, (int(s.get("frames") or 0) - int(start_frame) + int(every_nth) - 1) // int(every_nth))
-        if frame_count:
-            est = min(est, int(frame_count)) if est else int(frame_count)
         pbar = comfy.utils.ProgressBar(max(est, 1))
         fhs = {}
         n = done
         acc = None if done else {}                            # межі кліпу на льоту: [ground lo, hi, all lo, hi] на пристрої
         try:
             last = n
-            for rgbs in _batches(_prefetch(_frames(p, s, start_frame, frame_count, every_nth, max_width, skip=done),
-                                           max(3, batch + 1)), batch):
+            for rgbs in _batches(_prefetch(frames(skip=done), max(3, batch + 1)), batch):
                 mm.throw_exception_if_processing_interrupted()
-                if output_curve == "linear":                   # як Load Video Pro, покадрово
-                    rgbs = [V.to_linear(rgb, tr) for rgb in rgbs]
-                    if gamut != "keep source" and s.get("color_primaries") == "bt2020":
-                        rgbs = [C.apply_matrix(rgb, C.M2020_TO_709) for rgb in rgbs]
                 x = torch.from_numpy(np.stack(rgbs))                            # (B,H,W,3), як IMAGE з Load Video Pro
                 if pre_scale != 1.0:                                            # як ImageScaleBy.upscale
                     smp = x.movedim(-1, 1)
