@@ -269,10 +269,12 @@
 .svk-yolo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 /* висоту кадру ставить yolo_preview.js за шириною картки (27.10.2026: було 210px на будь-якій ширині) */
 .svk-yolo canvas { display: block; width: 100%; height: 190px; border-radius: var(--svk-r-ctl); background: var(--svk-bg); touch-action: none; }
-.svk-yolo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 18px; font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-dim); }
-.svk-yolo-bar input[type=range] { flex: 0 0 96px; accent-color: var(--svk-accent); }
-.svk-yolo-bar > span { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.svk-yolo-zoom { flex: none; margin-left: auto; }
+/* рядок 1: повзунок кадру на всю ширину + наближення праворуч; рядок 2: кадр · знайдено · далі */
+.svk-yolo-bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; min-height: 18px; font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-dim); }
+.svk-yolo-bar input[type=range] { width: 100%; min-width: 0; margin: 0; accent-color: var(--svk-accent); }
+.svk-yolo-bar > span { grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svk-yolo-bar.one > span { grid-column: 1; grid-row: 1; }
+.svk-yolo-zoom { grid-column: 2; grid-row: 1; }
 .svk-yolo-zoom button { padding: 3px 7px; font-size: 11px; }
 .svk-yolo-outrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .svk-yolo-outrow .svk-yolo-out { flex: 1 1 auto; min-width: 0; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }

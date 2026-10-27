@@ -466,7 +466,11 @@ function buildTop(node, specs, onChange) {
         bar.append(c.row); ctl.push(c);
     }
     // гейт рендеру: превʼю йде завжди, фінал - за кнопкою (одноразовий токен) або з галочкою auto
-    const gate = el("div", "svk-bar"); gate.style.cssText = "flex-basis:100%;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap";
+    // два рівні рядки: превʼю (авто + розмір) і фінал (авто + кнопка); кнопка й поля праворуч в обох
+    const gate = el("div"); gate.style.cssText = "flex-basis:100%;display:flex;flex-direction:column;gap:6px";
+    const pvRow = el("div", "svk-bar"), finRow = el("div", "svk-bar");
+    pvRow.style.minHeight = finRow.style.minHeight = "26px";
+    gate.append(pvRow, finRow);
     const rb = el("button", "svk-btn primary", ICON.play + " " + T("Render final")); rb.type = "button";
     rb.style.cssText = "display:inline-flex;align-items:center;gap:6px;flex:none;padding:3px 12px;font-size:12px";   // компактна, справа - не на всю ширину
     rb.title = T("Renders the final once with the current settings and passes it to the connected nodes (Video Combine / Save). A normal run only renders the preview.");
@@ -481,23 +485,23 @@ function buildTop(node, specs, onChange) {
     };
     ap.append(apc, document.createTextNode(T("Auto preview")));
     ctl.push({ sync: () => { apc.checked = autoOn(node); } });
-    gate.append(ap);
+    pvRow.append(ap);
     if (specs.preview_side && W(node, "preview_side")) {         // роздільність превʼю: компактний select між «Auto preview» і «Render final»
         const c = control(node, "preview_side", specs.preview_side, T("Preview"), { onChange, tip: T("Preview size (long side)") + ", px" });
         c.row.style.cssText = "flex:none;gap:5px"; c.row.querySelector("select").style.width = "62px";
-        gate.append(c.row); ctl.push(c);
+        pvRow.append(c.row); ctl.push(c);
     }
-    gate.append(rb);
     if (specs.auto_render && W(node, "auto_render")) {
         const c = control(node, "auto_render", specs.auto_render, T("Auto"), { onChange });
-        c.row.style.flex = "none"; gate.append(c.row); ctl.push(c);
-    }
+        c.row.style.cssText = "flex:none;margin-right:auto"; finRow.append(c.row); ctl.push(c);
+    } else rb.style.marginLeft = "auto";
+    finRow.append(rb);
     bar.style.flexWrap = "wrap"; bar.append(gate);
     const paintFps = () => {
         const linked = fpsLinked(node);
         if (fpsRow) { fpsRow.style.opacity = linked ? ".4" : ""; fpsRow.style.pointerEvents = linked ? "none" : ""; fpsRow.title = linked ? T("fps comes from the connected input") : fpsTip; }
     };
-    return { bar, ctl, fpsRow, fpsTip, paintFps };
+    return { bar, gate, ctl, fpsRow, fpsTip, paintFps };
 }
 // ---- іменовані пресети руху/анімації відео-ноди (сервер: depth_look/video_presets.py). Зберігається все, що є в нативних віджетах
 // (сервер лишає лише ключі руху й анімації; fps, розмір, якість, службові поля не входять).
@@ -686,7 +690,7 @@ function setupVideo(node, specs) {
     V.fpsRow = top.fpsRow; V.fpsTip = top.fpsTip;
     V.fullBtn = el("button", "svk-ibtn", ICON.full); V.fullBtn.type = "button"; V.fullBtn.title = T("full screen (Esc — back)");
     V.fullBtn.onclick = () => openVideoFull(V);
-    bar.append(V.fullBtn);
+    bar.insertBefore(V.fullBtn, top.gate);          // ⤢ у рядку fps / превʼю-фінал, а не окремим рядком
     V.specs = specs;
     const M = buildMotion(node, specs, refresh);
     V.more = M.more;

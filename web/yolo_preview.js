@@ -96,7 +96,7 @@ export function yoloPreview(node, key) {
         zoom.append(b);
         return [z, b];
     });
-    bar.append(scrub, note, zoom);
+    bar.append(scrub, zoom, note);
     const outRow = el("div", "svk-yolo-outrow");
     const out = el("div", "svk-yolo-out");
     const clear = el("button", "svk-btn ghost svk-yolo-clear", T("clear pick")); clear.type = "button";
@@ -284,6 +284,7 @@ export function yoloPreview(node, key) {
             at = Math.max(0, Math.min(at, d.shots.length - 1));
             scrub.max = d.shots.length - 1; scrub.value = at;
             scrub.style.display = d.shots.length > 1 ? "" : "none";
+            bar.classList.toggle("one", d.shots.length <= 1);       // один кадр: підпис займає місце повзунка
             if (d.shots.length) load(); else draw();
         },
     };
