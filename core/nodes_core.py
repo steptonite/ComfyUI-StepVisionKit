@@ -20,6 +20,7 @@ from ..vk.boxes import ON_MISSING, SORT_BY  # спільні списки з VK-
 
 class LexBoxesToBBOX:
     """Будь-які бокси -> BBOX для kijai Sam2Segmentation (по одному списку на кадр)."""
+    DEPRECATED = True   # сховано з меню 27.10.2026, старі воркфлоу відкриваються; замість неї: YOLO Detect (bbox_for_sam2) або Select Box
 
     @classmethod
     def INPUT_TYPES(cls):

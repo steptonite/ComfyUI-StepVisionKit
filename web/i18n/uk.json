@@ -2331,6 +2331,8 @@
     "a picked id that is missing in a frame keeps its previous box (If no box = previous)": "обраний id, якого нема на кадрі, тримає свою попередню рамку («Якщо рамки нема» = previous)",
     "click to drop": "клік — зняти",
     "click to pick": "клік — обрати",
-    "click the number to type a value": "клік по числу — вписати значення"
+    "click the number to type a value": "клік по числу — вписати значення",
+    "Frame · eyedroppers and curves": "Кадр · піпетки й криві",
+    "Run the node once, then pick black, white and the hero with eyedroppers and watch the curves. Sliders above follow": "Один раз запусти ноду (Run), далі піпетками обери чорне, біле й героя та дивись криві. Повзунки вище підлаштуються самі"
   }
 }

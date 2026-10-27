@@ -7,6 +7,7 @@ from .boxes import (ON_MISSING, SORT_BY, fill_missing, preview_frames, preview_p
 
 
 class VKDetect:
+    DEPRECATED = True   # сховано з меню 27.10.2026, старі воркфлоу відкриваються; замість неї: YOLO Detect
     _cache = {}
 
     @classmethod

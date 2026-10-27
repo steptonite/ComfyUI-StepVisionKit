@@ -52,6 +52,7 @@ def _edge_base(v, rad):
 
 class LexDepthCurve:
     """Перегнати депсмеп у V2-подібний вигляд (disparity) або покрутити гаму."""
+    DEPRECATED = True   # сховано з меню 27.10.2026, старі воркфлоу відкриваються; замість неї: Depth Grade (look = V2 volume, з дефолтами |Δ| ≤ 0.0014)
 
     @classmethod
     def INPUT_TYPES(cls):

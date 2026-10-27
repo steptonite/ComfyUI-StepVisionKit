@@ -16,7 +16,8 @@ import { T } from "./svk_i18n.js";
 //    входом depth до виходу depth ноди A (наскрізний вихід, як у SaveImage); тягаєш повзунки A —
 //    тут миттєво видно зміну, без перегенерації.
 //  • SVKDepthGradeLive — застаріла, поводиться як A.
-// Відео-прев'ю (живе, без Run) — окрема нода: depth_grade_video.js.
+//  View · кадр і View · відео сховані з меню (DEPRECATED): обидві панелі тепер розгортками в картці A
+//  (frameSection тут, videoSection у depth_grade_video.js). Ноди лишились, щоб відкривались старі воркфлоу.
 // Тонова математика — depth_grade_math.js; спільні кнопки, пресети, реєстр — depth_grade_ui.js.
 // Розкладка від розмірів САМОГО root (ResizeObserver): картинка вписується contain,
 // висота ноди не залежить від вмісту — немає петлі «вміст росте → нода росте».
@@ -49,9 +50,10 @@ function prevOf(A) {
 }
 
 class ViewPanel {
-    constructor(node) {
+    constructor(node, opts = {}) {
         ensureStyles();
         this.node = node;
+        this.embedded = !!opts.embedded;   // у картці самої Depth Grade: джерело - ця нода, розмір ноди не чіпаємо
         this.A = null;           // нода-джерело (SVKDepthGrade)
         this.raw = undefined;    // ідентичність payload, з якого зроблено prev
         this.sig = "";           // остання сигнатура тонових значень A
@@ -157,7 +159,7 @@ class ViewPanel {
     }
 
     // ── джерело: вхід depth → (reroute…) → нода A
-    source() { return findSource(this.node); }
+    source() { return this.embedded ? this.node : findSource(this.node); }
 
     // ── повзунки ноди A як джерело правди
     widget(name) { return widgetOf(this.A, name); }
@@ -246,6 +248,7 @@ class ViewPanel {
 
     // одноразово (на кожну пропорцію кадру, у самій ноді): картинка вписується в ≤ AUTO_MAXH
     autoSize(p) {
+        if (this.embedded) return;
         const node = this.node;
         const ar = p.w / p.h;
         const key = Math.round(ar * 100) / 100;
@@ -492,6 +495,33 @@ function registerView(nodeType) {
         this.__svkView = null;
         return onRemoved?.apply(this, arguments);
     };
+}
+
+// Кадр (піпетки, криві, до/після) у картці Depth Grade - та сама панель, що в ноді View · кадр, без окремої ноди.
+// Панель живе, лише поки розгортка відкрита.
+export const FRAME_H = 440;
+export function frameSection(node) {
+    const det = document.createElement("details");
+    det.className = "svk-more svk-dg-frame";
+    const sum = document.createElement("summary");
+    sum.innerHTML = `<span>${T("Frame · eyedroppers and curves")}</span>`;
+    sum.title = T("Run the node once, then pick black, white and the hero with eyedroppers and watch the curves. Sliders above follow");
+    const host = h("div", `height:${FRAME_H}px;margin-top:${GAP}px`);
+    det.append(sum, host);
+    let panel = null, restoring = false;
+    const open = () => { if (panel) return; panel = new ViewPanel(node, { embedded: true }); host.append(panel.root); panel.layout(); };
+    const close = () => { panel?.dispose(); panel?.root.remove(); panel = null; };
+    det.addEventListener("toggle", () => {
+        det.open ? open() : close();
+        node.properties ??= {};
+        node.properties.svkFrameOpen = det.open;
+        if (restoring) { restoring = false; return; }          // розмір ноди з workflow вже враховує відкриту панель
+        node.setSize([node.size[0], Math.max(80, node.size[1] + (det.open ? FRAME_H : -FRAME_H))]);
+        node.setDirtyCanvas?.(true, true);
+    });
+    const restore = () => { if (node.properties?.svkFrameOpen && !det.open) { restoring = true; det.open = true; } };
+    restore();
+    return { root: det, restore, extraH: () => (det.open ? FRAME_H : 0), dispose: close };
 }
 
 app.registerExtension({

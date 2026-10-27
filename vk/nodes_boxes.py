@@ -57,6 +57,7 @@ class VKSelectBox:
 
 class VKBoxesToBBOX:
     """Thin adapter: any box type -> BBOX for SAM2. For detectors other than VKDetect."""
+    DEPRECATED = True   # сховано з меню 27.10.2026, старі воркфлоу відкриваються; замість неї: Select Box
 
     @classmethod
     def INPUT_TYPES(cls):

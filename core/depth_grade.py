@@ -556,6 +556,7 @@ class SVKDepthGrade:
 class SVKDepthGradeView:
     """Калібрування кадру. Під'єднай вхід до виходу depth ноди Depth Grade: вихід віддає той самий депс далі,
     тож ланцюжок не рветься. Панель у ноді — піпетки, До/після і криві пишуть у повзунки Depth Grade."""
+    DEPRECATED = True   # сховано з меню 27.10.2026, старі воркфлоу відкриваються; замість неї: розгортка «Кадр» у картці Depth Grade
     DESCRIPTION = ("Frame calibration: connect to the depth output of the Depth Grade node. The input passes through unchanged, "
                    "so the chain is not broken. Eyedroppers and curves write to the same Depth Grade sliders.")
 
@@ -576,6 +577,7 @@ class SVKDepthGradeView:
 
 class SVKDepthGradeVideoView:
     """Живе прев'ю відео: фрагмент кліпу перераховується сам при зміні повзунків Depth Grade."""
+    DEPRECATED = True   # сховано з меню 27.10.2026, старі воркфлоу відкриваються; замість неї: розгортка «Відео-превʼю» у картці Depth Grade
     DESCRIPTION = ("Live video preview: connect to the depth output of the Depth Grade node and press Run once — "
                    "after that the preview recomputes by itself when sliders change, at reduced size. "
                    "Clarity, texture and smooth_banding look weaker at small size — Run gives the exact result.")
@@ -602,6 +604,7 @@ class SVKDepthGradeVideoView:
 class SVKDepthGradeLive(SVKDepthGrade):
     """Стара назва (16.10.2026): пульт переїхав у SVKDepthGradeView. Лишено, щоб
     збережені воркфлоу не червоніли; у пошуку не видно."""
+    DEPRECATED = True   # сховано з меню 27.10.2026, старі воркфлоу відкриваються; замість неї: Depth Grade
     DEPRECATED = True
 
 

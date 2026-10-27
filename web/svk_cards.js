@@ -7,6 +7,7 @@ import { api } from "../../scripts/api.js";
 import { T, LANG, DICT } from "./svk_i18n.js";
 import { yoloPreview, PREVIEW_H } from "./yolo_preview.js";
 import { videoSection } from "./depth_grade_video.js";
+import { frameSection } from "./depth_grade_live.js";
 
 const CSS_URL = new URL("./svk_ui.css", import.meta.url).href;
 const NODE_COLOR = "#2a2a2f", NODE_BG = "#151518";      // = --svk-line / --svk-card
@@ -44,7 +45,7 @@ const MAIN = {
 // превʼю над керуваннями: кадр із боксами останнього Run; вужче MIN_W кнопки наближення й рядок «на виходи» не влазять (як Camera Realism, 0f10619)
 const PREVIEW = { LexYOLODetect: yoloPreview, VKDetect: yoloPreview };
 // розгортка під головними керуваннями: відео-превʼю Depth Grade (окрема нода View · відео лишається для старих workflow)
-const EXTRA = { SVKDepthGrade: videoSection };
+const EXTRA = { SVKDepthGrade: [frameSection, videoSection] };
 // віджети, які картка веде сама (вибір кліком у превʼю): сховані, у «ще» не йдуть, але в workflow зберігаються
 const OWN = { LexYOLODetect: ["picked"] };
 // лише колір ноди: власний UI або превʼю картинок під віджетами, картку поверх них не ставимо; Live - стара, лишається як була
@@ -87,14 +88,20 @@ function build(node, key, specs) {
         } else root.append(c.row);
         ctl.push(c);
     }
-    const extra = EXTRA[key]?.(node);
-    if (extra) { root.append(extra.root); root.extra = extra; }
+    const parts = (EXTRA[key] || []).map(f => f(node));
+    parts.forEach(p => root.append(p.root));
+    const extra = parts.length ? {
+        restore: () => parts.forEach(p => p.restore()),
+        extraH: () => parts.reduce((s, p) => s + p.extraH(), 0),
+        dispose: () => parts.forEach(p => p.dispose()),
+    } : null;
+    root.extra = extra;
     const rest = names.filter(n => !main.includes(n));
     const more = rest.length ? morePanel(node, specs, rest.map(n => { const { seg, ...o } = opts(node, n, specs[n]); return [n, label(key, n), o]; })) : null;
     if (more) root.append(more);
     scrollHint(root);
     root.sync = () => { ctl.forEach(c => c.sync()); more?.sync(); prev?.draw(); };
-    const minH = (prev ? PREVIEW_H + ROW_H + 20 : 0) + main.length * ROW_H + (more ? ROW_H : 0) + (extra ? ROW_H : 0) + CARD_PAD;
+    const minH = (prev ? PREVIEW_H + ROW_H + 20 : 0) + main.length * ROW_H + (more ? ROW_H : 0) + parts.length * ROW_H + CARD_PAD;
     return { root, minH: () => minH + (extra?.extraH() || 0) };
 }
 
