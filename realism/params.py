@@ -17,7 +17,8 @@ SPEC = [
      "Colour noise: softer and blotchier than luma noise, mostly in the shadows. 0 = off."),
     ("noise_size", 0.0, 1.0, 0.01, "Sensor", "grain size",
      "0 = pixel-sharp noise, 1 = coarse clumps (film grain)."),
-    ("iso", 100, 25600, 100, "Sensor", "ISO",
+    # від 50: базове ISO айфона = 50, калібрований профіль iPhone стоїть саме на ньому (27.10.2026)
+    ("iso", 50, 25600, 50, "Sensor", "ISO",
      "Virtual ISO: raises both noise types relative to ISO 800. Has no effect when both noise sliders are 0.", "i"),
     ("fixed_pattern", 0.0, 1.0, 0.01, "Sensor", "fixed pattern",
      "Faint fixed sensor pattern (rows, columns, per-pixel gain). Identical on every frame of the clip. 0 = off."),
@@ -198,6 +199,8 @@ for _name, _fn in (("iPhone", "iphone.json"), ("DSLR 2012", "dslr2012.json")):
     with open(os.path.join(os.path.dirname(__file__), "calib", _fn), encoding="utf-8") as _f:
         _cal = json.load(_f)
     PROFILES[_name].update({k: _cal["iso"] if k == "iso" else _cal["values"][k] for k in CALIBRATED})
+    # ISO із замірів (64, 80, 125...) - до кроку й меж повзунка, інакше Comfy відхиляє запуск
+    PROFILES[_name]["iso"] = min(max(int(round(PROFILES[_name]["iso"] / 50.0)) * 50, 50), 25600)
 PROFILE_NAMES = list(PROFILES) + [PROFILE_CUSTOM]
 
 
