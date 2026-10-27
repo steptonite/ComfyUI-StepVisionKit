@@ -13,6 +13,7 @@ const CUSTOM = "Custom";
 const CSS_URL = new URL("./svk_ui.css", import.meta.url).href;
 const NODE_COLOR = "#2a2a2f", NODE_BG = "#151518";      // = --svk-line / --svk-card
 const MIN_H = 600;
+const MIN_W = 300;
 const PV_SIZE = 512, FPS = 24, DEBOUNCE = 420, LOUPE_THROTTLE = 120, ZOOMS = [1, 2, 4];
 
 (function injectCss() {
@@ -355,6 +356,8 @@ function setup(node, specs) {
     const ctl = W(node, "control_after_generate");         // seed тут детермінований: після Run не міняється
     if (ctl) ctl.value = "fixed";
     node.setSize([360, MIN_H + 140]);
+    const computeSize = node.computeSize;     // вужче MIN_W кнопки камер і повзунки не влазять: це мінімум, по який полотно дає стягнути ноду
+    node.computeSize = function () { const r = computeSize.apply(this, arguments); r[0] = Math.max(r[0], MIN_W); return r; };
     fitToNode(node, S.root);
     node.color = NODE_COLOR; node.bgcolor = NODE_BG;
     syncAll(S);
@@ -397,6 +400,7 @@ app.registerExtension({
                 const p = W(this, "profile")?.value;
                 if (p && p !== CUSTOM) fillFromProfile(S, p);       // збережені значення повзунків могли відстати від профілю
                 syncAll(S);
+                if (this.size[0] < MIN_W) this.setSize([MIN_W, this.size[1]]);     // воркфлоу зі стягнутою вужче нодою
             }
             this.color = NODE_COLOR; this.bgcolor = NODE_BG;
             return r;

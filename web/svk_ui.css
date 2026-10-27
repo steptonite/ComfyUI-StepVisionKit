@@ -225,7 +225,8 @@
 .svk-scroll[data-below="1"] > .svk-below { display: inline-flex; }
 
 /* ---- адаптив: картка - контейнер; вузька нода -> щільніше, широка -> плитки й кадр більші */
-.svk-card { container-type: inline-size; min-width: 280px; }
+/* без min-width: картка ширша за ноду вилазила за рамку (27.10.2026); найменшу ширину тримає сама нода (camera_realism.js MIN_W) */
+.svk-card { container-type: inline-size; min-width: 0; }
 @container (max-width: 320px) {
   .svk-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .svk-tile .th { width: 76px; height: 76px; }
