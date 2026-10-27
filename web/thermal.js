@@ -100,7 +100,6 @@ const SETTINGS = [
     {
         id: BADGE_SETTING, name: T("Show temperature badge"),
         category: [CAT, SUB, T("Badge")], type: "boolean", defaultValue: true,
-        tooltip: T("Display only, in the screen corner. The overheat pause works without the badge too."),
         onChange: (v) => { showBadge = v !== false; render(); },
     },
     {

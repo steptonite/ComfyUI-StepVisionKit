@@ -16,17 +16,14 @@ const FIELDS = {
 };
 export const PREVIEW_H = 190;   // найменша висота кадру; далі він росте з шириною ноди
 const DIM = "rgba(232,230,227,.4)";
-// налаштування паку (Settings → StepVisionKit → Cards): колір боксів, підписи, відкинуті бокси
-export const YOLO_SETTINGS = { color: "StepVisionKit.YoloBoxColor", labels: "StepVisionKit.YoloLabels", others: "StepVisionKit.YoloShowOthers" };
-function setting(id, def) {
-    try { return app.extensionManager?.setting?.get(id) ?? app.ui?.settings?.getSettingValue(id) ?? def; } catch (_) { return def; }
-}
-function look() {
-    let hex = String(setting(YOLO_SETTINGS.color, "e0a458")).replace(/^#/, "");
-    if (!/^[0-9a-f]{6}$/i.test(hex)) hex = "e0a458";
-    const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
-    return { accent: "#" + hex, tint: `rgba(${r},${g},${b},.16)`, ink: r * .299 + g * .587 + b * .114 > 140 ? "#1a1208" : "#f4f2ef",
-             labels: setting(YOLO_SETTINGS.labels, "number"), others: setting(YOLO_SETTINGS.others, true) !== false };
+// вигляд превʼю живе в самій ноді (node.properties.svkYolo) і йде у workflow
+const LOOK = { color: "#e0a458", labels: "number", others: true };
+function look(node) {
+    const p = { ...LOOK, ...node.properties?.svkYolo };
+    const hex = /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : LOOK.color;
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+    return { accent: hex, tint: `rgba(${r},${g},${b},.16)`, ink: r * .299 + g * .587 + b * .114 > 140 ? "#1a1208" : "#f4f2ef",
+             labels: p.labels, others: p.others !== false };
 }
 const PREVIEW_OUT = 2;          // індекс виходу preview у LexYOLODetect (порожній без make_preview)
 const ZOOMS = [1, 2, 4], ZMAX = 8, DRAG = 4;
@@ -114,7 +111,24 @@ export function yoloPreview(node, key) {
     const clear = el("button", "svk-btn ghost svk-yolo-clear", T("clear pick")); clear.type = "button";
     clear.title = T("forget the clicked boxes: Select and Max boxes decide again");
     outRow.append(out, clear);
-    root.append(cv, bar, outRow);
+    // вигляд боксів: колір, підписи, відкинуті
+    const opt = el("div", "svk-yolo-opt");
+    const sw = el("input"); sw.type = "color"; sw.title = T("box colour");
+    sw.oninput = () => setLook({ color: sw.value });
+    const lab = el("div", "svk-seg"); lab.title = T("what is written on a box; hovering a box shows everything");
+    const labs = [["number", "#"], ["class", T("class")], ["none", T("none")]].map(([v, t]) => {
+        const b = el("button", null, t); b.type = "button";
+        b.onclick = () => setLook({ labels: v });
+        lab.append(b); return [v, b];
+    });
+    const oth = el("label"); oth.title = T("frames around boxes that do not go to the outputs; hidden ones stay clickable");
+    const ocb = el("input"); ocb.type = "checkbox";
+    ocb.onchange = () => setLook({ others: ocb.checked });
+    oth.append(ocb, T("dropped"));
+    opt.append(sw, lab, oth);
+    function setLook(v) { node.properties ??= {}; node.properties.svkYolo = { ...LOOK, ...node.properties.svkYolo, ...v }; markChanged(); draw(); }
+    function syncLook(L) { sw.value = L.accent; for (const [v, b] of labs) b.classList.toggle("is-on", v === L.labels); ocb.checked = L.others; }
+    root.append(cv, bar, opt, outRow);
     const hint = F.picked ? T("Click a box to pick it, click again to drop it; you can pick several. Picked boxes go to the outputs and follow their id through the video")
                           : T("Boxes from the last Run; the highlighted ones go to the outputs");
     cv.title = hint;
@@ -179,6 +193,7 @@ export function yoloPreview(node, key) {
     }
 
     function draw() {
+        syncLook(look(node));
         const dpr = window.devicePixelRatio || 1;
         const [cw, ch] = size();
         lastW = cw;
@@ -204,7 +219,7 @@ export function yoloPreview(node, key) {
         g.font = "10px ui-monospace, Menlo, monospace"; g.textAlign = "left"; g.textBaseline = "top";
         const tags = [];               // на боксі номер (обраний кліком - з ✓ і id); решта - у підказці під курсором
         const free = r => !tags.some(q => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h);
-        const L = look();
+        const L = look(node);
         const order = ranked.map((b, j) => [b, j]).sort(([a], [b]) => kept.has(a) - kept.has(b));   // обрані малюються зверху
         for (const [b, j] of order) {
             const x = ox + b.x1 * s, y = oy + b.y1 * s, w = (b.x2 - b.x1) * s, h = (b.y2 - b.y1) * s, on = kept.has(b);

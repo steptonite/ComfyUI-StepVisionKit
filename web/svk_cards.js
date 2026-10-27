@@ -5,7 +5,7 @@ import { app } from "../../scripts/app.js";
 import { el, W, control, morePanel, keepWheel, fitToNode, scrollHint, hideWidget } from "./svk_ui.js";
 import { api } from "../../scripts/api.js";
 import { T, LANG, DICT } from "./svk_i18n.js";
-import { yoloPreview, PREVIEW_H, YOLO_SETTINGS } from "./yolo_preview.js";
+import { yoloPreview, PREVIEW_H } from "./yolo_preview.js";
 import { videoSection } from "./depth_grade_video.js";
 import { frameSection } from "./depth_grade_live.js";
 
@@ -82,14 +82,13 @@ function build(node, key, specs) {
     if (prev) { node.__svkPreview = prev; root.append(prev.root); }
     const parts = (EXTRA[key] || []).map(f => f(node));
     parts.forEach(p => root.append(p.root));
-    // відкрили розгортку - нода росте на її висоту; закрили - вертається до висоти, що була до відкриття
+    // відкрили розгортку - нода росте на її висоту; закрили - меншає рівно на неї, у будь-якому порядку
     root.addEventListener("toggle", (e) => {
         const d = e.target;
         if (!parts.some(p => p.root === d)) return;
         if (d.dataset.restoring) { delete d.dataset.restoring; return; }      // розмір із workflow уже з відкритою панеллю
         const st = d.lastElementChild.style, add = parseFloat(st.height) + parseFloat(st.marginTop || 0);    // панель має фіксовану висоту
-        if (d.open) { d.before = node.size[1]; node.setSize([node.size[0], node.size[1] + add]); }
-        else { node.setSize([node.size[0], Math.max(node.computeSize()[1], d.before ?? node.size[1] - add)]); d.before = null; }
+        node.setSize([node.size[0], d.open ? node.size[1] + add : Math.max(node.computeSize()[1], node.size[1] - add)]);
         node.setDirtyCanvas?.(true, true);
     }, true);
     const ctl = [];
@@ -114,8 +113,8 @@ function build(node, key, specs) {
     scrollHint(root);
     root.previews = [prev?.root, ...parts.map(p => p.root)].filter(Boolean);
     root.sync = () => { ctl.forEach(c => c.sync()); more?.sync(); prev?.draw(); };
-    const minH = (prev ? PREVIEW_H + ROW_H + 20 : 0) + main.length * ROW_H + (more ? ROW_H : 0) + parts.length * ROW_H + CARD_PAD;
-    const pvH = (prev ? PREVIEW_H + ROW_H + 20 : 0) + parts.length * ROW_H;
+    const minH = (prev ? PREVIEW_H + 2 * ROW_H + 20 : 0) + main.length * ROW_H + (more ? ROW_H : 0) + parts.length * ROW_H + CARD_PAD;
+    const pvH = (prev ? PREVIEW_H + 2 * ROW_H + 20 : 0) + parts.length * ROW_H;
     return { root, minH: () => minH + (extra?.extraH() || 0) - (root.dataset.pv === "off" ? pvH : 0) };
 }
 
@@ -140,8 +139,6 @@ function showPreviews(node, on) {
     node.setDirtyCanvas?.(true, true);
 }
 
-function redrawYolo() { for (const n of app.graph?._nodes || []) n.__svkPreview?.draw(); }
-
 function hideRepresented(node, specs) {
     for (const w of node.widgets || []) if (w.name !== "svk_card" && specs[w.name]) hideWidget(w);
 }
@@ -154,33 +151,7 @@ app.registerExtension({
         category: ["StepVisionKit", "Cards", "Show previews in nodes"],
         type: "boolean",
         defaultValue: true,
-        tooltip: "Box preview in YOLO Detect, Frame and Video in Depth Grade. Off: only the controls stay, the node gets shorter.",
         onChange: (v) => { for (const n of app.graph?._nodes || []) showPreviews(n, v !== false); },
-    }, {
-        id: YOLO_SETTINGS.color,
-        name: "YOLO preview: box colour",
-        category: ["StepVisionKit", "Cards", "YOLO box colour"],
-        type: "color",
-        defaultValue: "e0a458",
-        tooltip: "Colour of the boxes that go to the outputs",
-        onChange: redrawYolo,
-    }, {
-        id: YOLO_SETTINGS.labels,
-        name: "YOLO preview: box labels",
-        category: ["StepVisionKit", "Cards", "YOLO box labels"],
-        type: "combo",
-        defaultValue: "number",
-        options: [{ text: "Number", value: "number" }, { text: "Number, class, confidence", value: "class" }, { text: "None", value: "none" }],
-        tooltip: "What is written on a box. Hovering a box always shows everything",
-        onChange: redrawYolo,
-    }, {
-        id: YOLO_SETTINGS.others,
-        name: "YOLO preview: show dropped boxes",
-        category: ["StepVisionKit", "Cards", "YOLO dropped boxes"],
-        type: "boolean",
-        defaultValue: true,
-        tooltip: "Dim frames around boxes that do not go to the outputs; they stay clickable when hidden",
-        onChange: redrawYolo,
     }],
     setup() {
         // Nodes 2.0 не викликає onExecuted, тож превʼю бере вивід із події виконання

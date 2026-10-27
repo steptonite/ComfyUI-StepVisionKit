@@ -283,3 +283,8 @@
 .svk-yolo-out.is-empty { color: var(--svk-dim); }
 /* налаштування «Show previews in nodes» вимкнене (svk_cards.js) */
 .svk-card[data-pv="off"] > .svk-yolo, .svk-card[data-pv="off"] > .svk-dg-frame, .svk-card[data-pv="off"] > .svk-dg-video { display: none; }
+.svk-yolo-opt { display: flex; align-items: center; gap: 8px; min-width: 0; font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-dim); }
+.svk-yolo-opt input[type=color] { width: 26px; height: 22px; padding: 0; border: 1px solid var(--svk-line); border-radius: var(--svk-r-sm); background: none; cursor: pointer; }
+.svk-yolo-opt .svk-seg button { padding: 4px 8px; font-size: 11px; }
+.svk-yolo-opt label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.svk-yolo-opt input[type=checkbox] { accent-color: var(--svk-accent); margin: 0; }

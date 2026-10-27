@@ -57,7 +57,6 @@ app.registerExtension({
             { text: "Українська", value: "uk" },
             { text: "Auto (same as ComfyUI)", value: "auto" },
         ],
-        tooltip: "Language of StepVisionKit nodes only; the rest of ComfyUI keeps its own language. Reload the page to apply.",
         onChange: (v) => {
             if (!v || v === LANG || (v === "auto" && readLang() === LANG)) return;
             app.extensionManager?.toast?.add({ severity: "info", summary: "StepVisionKit: reload the page to switch node language", life: 5000 });
