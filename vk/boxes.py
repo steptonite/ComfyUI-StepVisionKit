@@ -160,6 +160,34 @@ def select_frame(f, mode, index=0, track_id=1, point=(0, 0), class_filter=""):
     return f
 
 
+def parse_picked(s):
+    """'id:3, #0' -> ['id:3', '#0']: вибір кліком у картці YOLO (id:N - обʼєкт трекера, #N - місце в рейтингу кадру)"""
+    out = []
+    for t in str(s or "").split(","):
+        t = t.strip()
+        if ((t.startswith("id:") and t[3:].isdigit()) or (t.startswith("#") and t[1:].isdigit())) and t not in out:
+            out.append(t)
+    return out
+
+
+def pick_frame(f, keys, last, on_missing="previous"):
+    """Бокси, обрані кліком, у порядку keys: той самий обʼєкт щокадру на тому самому місці (SAM2 бере їх за номером).
+    id, якого на кадрі нема, при on_missing=previous бере свій останній бокс із last."""
+    out = []
+    for k in keys:
+        if k.startswith("id:"):
+            hit = next((b for b in f if b["id"] == int(k[3:])), None)
+        else:
+            j = int(k[1:])
+            hit = f[j] if j < len(f) else None
+        if hit is None and on_missing == "previous":
+            hit = last.get(k)
+        if hit is not None:
+            last[k] = hit
+            out.append(hit)
+    return out
+
+
 PREVIEW_SHOTS = 8
 
 
@@ -182,7 +210,7 @@ def preview_payload(shots, w, h, conf, uid):
     out = []
     for i, rgb, boxes in shots:
         im = Image.fromarray(rgb)
-        im.thumbnail((640, 640))
+        im.thumbnail((1280, 1280))      # картка наближає кадр до 4×: 640 там уже мило
         name = "svk_yolo_%s_%d.jpg" % (str(uid).replace(":", "_"), i)
         im.save(os.path.join(tmp, name), quality=85)
         out.append({"frame": i, "filename": name, "subfolder": "", "type": "temp",

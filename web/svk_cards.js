@@ -10,7 +10,7 @@ import { videoSection } from "./depth_grade_video.js";
 
 const CSS_URL = new URL("./svk_ui.css", import.meta.url).href;
 const NODE_COLOR = "#2a2a2f", NODE_BG = "#151518";      // = --svk-line / --svk-card
-const START_W = 340, ROW_H = 40, CARD_PAD = 24;
+const START_W = 340, MIN_W = 300, ROW_H = 40, CARD_PAD = 24;
 
 (function injectCss() {
     if (document.getElementById("svk-ui-css")) return;
@@ -41,10 +41,12 @@ const MAIN = {
     SVKRawDepthSave: null,           // null - усі віджети на видноті (їх ≤3)
     SVKDepthReceiver: null,
 };
-// превʼю над керуваннями: кадр із боксами останнього Run
+// превʼю над керуваннями: кадр із боксами останнього Run; вужче MIN_W кнопки наближення й рядок «на виходи» не влазять (як Camera Realism, 0f10619)
 const PREVIEW = { LexYOLODetect: yoloPreview, VKDetect: yoloPreview };
 // розгортка під головними керуваннями: відео-превʼю Depth Grade (окрема нода View · відео лишається для старих workflow)
 const EXTRA = { SVKDepthGrade: videoSection };
+// віджети, які картка веде сама (вибір кліком у превʼю): сховані, у «ще» не йдуть, але в workflow зберігаються
+const OWN = { LexYOLODetect: ["picked"] };
 // лише колір ноди: власний UI або превʼю картинок під віджетами, картку поверх них не ставимо; Live - стара, лишається як була
 const COLOR_ONLY = ["SVKSaveImageHDR", "SVKSaveDepth16", "SVKRawDepthLoad", "SVKDepthGradeLive", "SVKDepthGradeView", "SVKDepthGradeVideoView"];
 const COLOR_FIELDS = new Set(["color", "tint", "key_color"]);
@@ -69,7 +71,7 @@ function opts(node, name, spec) {
 }
 
 function build(node, key, specs) {
-    const names = (node.widgets || []).map(w => w.name).filter(n => specs[n]);
+    const names = (node.widgets || []).map(w => w.name).filter(n => specs[n] && !OWN[key]?.includes(n));
     const main = (MAIN[key] || names).filter(n => names.includes(n));
     const root = el("div", "svk-card svk-scroll");
     keepWheel(root);
@@ -127,6 +129,10 @@ app.registerExtension({
             hideRepresented(this, specs);
             const changed = this.onWidgetChanged;     // віджет змінили не з картки (скидання, пресет у Depth Grade View) -> оновити картку
             this.onWidgetChanged = function () { const r = changed?.apply(this, arguments); root.sync(); return r; };
+            if (PREVIEW[key]) {
+                const computeSize = this.computeSize;
+                this.computeSize = function () { const r = computeSize.apply(this, arguments); r[0] = Math.max(r[0], MIN_W); return r; };
+            }
             const sz = this.computeSize();
             this.setSize([Math.max(START_W, sz[0]), sz[1]]);
             fitToNode(this, root);
@@ -139,6 +145,7 @@ app.registerExtension({
             const r = onConfigure?.apply(this, arguments);
             this.color = NODE_COLOR; this.bgcolor = NODE_BG;
             if (this.__svkCard) { hideRepresented(this, specs); this.__svkCard.sync(); this.__svkCard.extra?.restore(); }  // значення з workflow -> картка
+            if (this.__svkCard && PREVIEW[key] && this.size[0] < MIN_W) this.setSize([MIN_W, this.size[1]]);     // воркфлоу зі стягнутою вужче нодою
             return r;
         };
     },

@@ -265,10 +265,17 @@
 .svk-rl-save input { flex: 1; min-width: 0; font: var(--svk-fs-ctl) var(--svk-font); color: var(--svk-text); background: var(--svk-raise); border: 1px solid var(--svk-line); border-radius: var(--svk-r-ctl); padding: 6px 8px; }
 .svk-rl-save input.is-bad { border-color: var(--svk-danger); }
 /* превʼю YOLO в картці (yolo_preview.js) */
-.svk-yolo { display: grid; gap: 6px; }
-.svk-yolo canvas { display: block; width: 100%; height: 210px; border-radius: var(--svk-r-ctl); background: var(--svk-bg); }
-.svk-yolo-bar { display: flex; align-items: center; gap: 8px; min-height: 18px; font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-dim); }
+/* minmax(0): інакше полотно тримає ширину попереднього малювання і на вузькій ноді вилазить за картку */
+.svk-yolo { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+/* висоту кадру ставить yolo_preview.js за шириною картки (27.10.2026: було 210px на будь-якій ширині) */
+.svk-yolo canvas { display: block; width: 100%; height: 190px; border-radius: var(--svk-r-ctl); background: var(--svk-bg); touch-action: none; }
+.svk-yolo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 18px; font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-dim); }
 .svk-yolo-bar input[type=range] { flex: 0 0 96px; accent-color: var(--svk-accent); }
-.svk-yolo-bar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svk-yolo-bar > span { flex: 1 1 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svk-yolo-zoom { flex: none; margin-left: auto; }
+.svk-yolo-zoom button { padding: 3px 7px; font-size: 11px; }
+.svk-yolo-outrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.svk-yolo-outrow .svk-yolo-out { flex: 1 1 auto; min-width: 0; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.svk-yolo-clear { flex: none; font-size: 11px; }
 .svk-yolo-out { font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 16px; }
 .svk-yolo-out.is-empty { color: var(--svk-dim); }

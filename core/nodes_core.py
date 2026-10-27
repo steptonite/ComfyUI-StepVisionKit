@@ -172,6 +172,10 @@ class LexYOLODetect:
                 "make_preview": ("BOOLEAN", {"default": False,
                                  "tooltip": "Warning: the preview is a FULL second copy of all frames in RAM (200 FullHD frames ≈ 5 GB). Enable it on 1-2 frames to read #N and id:N, then disable it for the real run"}),
             },
+            "optional": {
+                "picked": ("STRING", {"default": "",
+                           "tooltip": "boxes picked by clicking in the card preview: id:N follows a tracked object through the whole clip, #N takes place N in each frame's ranking. Not empty = select and max_boxes are ignored"}),
+            },
             "hidden": {"unique_id": "UNIQUE_ID"},
         }
 
@@ -183,13 +187,13 @@ class LexYOLODetect:
 
     def detect(self, images, model_name, device, conf, imgsz, class_filter, max_boxes,
                on_miss="previous", make_preview=False, track=True, smooth=0.0,
-               sort_by="area", select="all", pick=0, point_x=0, point_y=0, pad=0, unique_id=None):
+               sort_by="area", select="all", pick=0, point_x=0, point_y=0, pad=0, picked="", unique_id=None):
         import os
         import folder_paths
         import torch
         from ultralytics import YOLO
-        from ..vk.boxes import (fill_missing, pad_and_clip, preview_frames, preview_payload, select_frame,
-                                sort_frame, to_bbox, to_core)
+        from ..vk.boxes import (fill_missing, pad_and_clip, parse_picked, pick_frame, preview_frames, preview_payload,
+                                select_frame, sort_frame, to_bbox, to_core)
 
         if device == "auto":
             device = ("cuda" if torch.cuda.is_available()
@@ -213,6 +217,7 @@ class LexYOLODetect:
         mode = "nearest_to_point" if select == "center" else select
         point = (W / 2.0, H / 2.0) if select == "center" else (float(point_x), float(point_y))
         a = float(smooth)
+        chosen, last = parse_picked(picked), {}
 
         frames, ranked, ids, seen = [], [], set(), 0
         carry = {}
@@ -248,7 +253,10 @@ class LexYOLODetect:
                                 (" id:%d" % b["id"]) if b["id"] >= 0 else ""))
                            for j, b in enumerate(f[:10])])
 
-            f = select_frame(f, mode, index=pick, track_id=pick, point=point)[:max_boxes]
+            if chosen:          # клік у картці важить більше за select / max_boxes
+                f = pick_frame(f, chosen, last, on_miss)
+            else:
+                f = select_frame(f, mode, index=pick, track_id=pick, point=point)[:max_boxes]
             f = pad_and_clip(f, pad, W, H)
 
             if a > 0.0:
@@ -268,6 +276,8 @@ class LexYOLODetect:
         n = min((len(fr) for fr in bbox), default=0)
         labels = sorted({b["label"] for fr in frames for b in fr})
         arg = " (%d)" % pick if select in ("index", "track_id") else ""
+        if chosen:
+            select, arg = "clicked", " (%s)" % ", ".join(chosen)
         trk = "ByteTrack" if track else "OFF (raw YOLO)"
         sm = " + smoothing %.2f" % a if a > 0 else ""
         tail = "" if make_preview else " · preview OFF (RAM)"
@@ -277,7 +287,8 @@ class LexYOLODetect:
                    sorted(ids) if ids else "—", ", ".join(labels) or "—", tail))
         print(f"[LexYOLODetect] {info}")
         if make_preview:
-            (prev_img,) = LexHUDBoxes().draw(images, to_core(ranked) if ranked else core,
+            # без вибору кліком - увесь рейтинг з номерами, щоб було по чому обрати; з вибором - те, що пішло на виходи
+            (prev_img,) = LexHUDBoxes().draw(images, core if chosen or not ranked else to_core(ranked),
                                              "corners", 2, 28, "#00FF9C", True, "auto")
         else:
             prev_img = torch.zeros(1, 1, 1, 3)
