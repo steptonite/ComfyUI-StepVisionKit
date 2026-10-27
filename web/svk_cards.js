@@ -44,7 +44,7 @@ const MAIN = {
 };
 // превʼю над керуваннями: кадр із боксами останнього Run; вужче MIN_W кнопки наближення й рядок «на виходи» не влазять (як Camera Realism, 0f10619)
 const PREVIEW = { LexYOLODetect: yoloPreview, VKDetect: yoloPreview };
-// розгортка під головними керуваннями: відео-превʼю Depth Grade (окрема нода View · відео лишається для старих workflow)
+// розгортки над керуваннями: кадр і відео Depth Grade (окрема нода View · відео лишається для старих workflow)
 const EXTRA = { SVKDepthGrade: [frameSection, videoSection] };
 // віджети, які картка веде сама (вибір кліком у превʼю): сховані, у «ще» не йдуть, але в workflow зберігаються
 const OWN = { LexYOLODetect: ["picked"] };
@@ -78,6 +78,18 @@ function build(node, key, specs) {
     keepWheel(root);
     const prev = PREVIEW[key]?.(node, key);
     if (prev) { node.__svkPreview = prev; root.append(prev.root); }
+    const parts = (EXTRA[key] || []).map(f => f(node));
+    parts.forEach(p => root.append(p.root));
+    // відкрили розгортку - нода росте на її висоту; закрили - вертається до висоти, що була до відкриття
+    root.addEventListener("toggle", (e) => {
+        const d = e.target;
+        if (!parts.some(p => p.root === d)) return;
+        if (d.dataset.restoring) { delete d.dataset.restoring; return; }      // розмір із workflow уже з відкритою панеллю
+        const st = d.lastElementChild.style, add = parseFloat(st.height) + parseFloat(st.marginTop || 0);    // панель має фіксовану висоту
+        if (d.open) { d.before = node.size[1]; node.setSize([node.size[0], node.size[1] + add]); }
+        else { node.setSize([node.size[0], Math.max(node.computeSize()[1], d.before ?? node.size[1] - add)]); d.before = null; }
+        node.setDirtyCanvas?.(true, true);
+    }, true);
     const ctl = [];
     for (const n of main) {
         const lb = label(key, n), o = opts(node, n, specs[n]);
@@ -88,8 +100,6 @@ function build(node, key, specs) {
         } else root.append(c.row);
         ctl.push(c);
     }
-    const parts = (EXTRA[key] || []).map(f => f(node));
-    parts.forEach(p => root.append(p.root));
     const extra = parts.length ? {
         restore: () => parts.forEach(p => p.restore()),
         extraH: () => parts.reduce((s, p) => s + p.extraH(), 0),

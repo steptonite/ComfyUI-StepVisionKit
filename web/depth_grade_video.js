@@ -877,18 +877,15 @@ export function videoSection(node) {
     sum.title = T("Plays a piece of the clip with the current sliders. Run the node once, then it recomputes by itself");
     const host = h("div", `height:${EMBED_H}px;margin-top:${GAP}px`);
     det.append(sum, host);
-    let panel = null, restoring = false;
+    let panel = null;
     const open = () => { if (panel) return; panel = new VideoPanel(node, { embedded: true }); host.append(panel.root); panel.layout(); };
     const close = () => { panel?.dispose(); panel?.root.remove(); panel = null; };
     det.addEventListener("toggle", () => {
         det.open ? open() : close();
         node.properties ??= {};
         node.properties.svkVideoOpen = det.open;
-        if (restoring) { restoring = false; return; }          // розмір ноди з workflow вже враховує відкриту панель
-        node.setSize([node.size[0], Math.max(80, node.size[1] + (det.open ? EMBED_H : -EMBED_H))]);
-        node.setDirtyCanvas?.(true, true);
     });
-    const restore = () => { if (node.properties?.svkVideoOpen && !det.open) { restoring = true; det.open = true; } };
+    const restore = () => { if (node.properties?.svkVideoOpen && !det.open) { det.dataset.restoring = "1"; det.open = true; } };
     restore();
     return { root: det, restore, extraH: () => (det.open ? EMBED_H : 0), dispose: close };
 }

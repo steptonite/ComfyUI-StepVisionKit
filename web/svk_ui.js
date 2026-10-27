@@ -199,7 +199,9 @@ export function morePanel(node, specs, items) {
         body.append(c.row); ctl.push(c);
     }
     det.append(moreSummary(ctl.length), body);
-    det.sync = () => ctl.forEach(c => c.sync());
+    // розгорнуте «ще» зберігається у workflow; відкриваємо в sync, бо properties приходять після створення ноди
+    det.addEventListener("toggle", () => { node.properties ??= {}; node.properties.svkMoreOpen = det.open; });
+    det.sync = () => { if (node.properties?.svkMoreOpen && !det.open) det.open = true; ctl.forEach(c => c.sync()); };
     return det;
 }
 

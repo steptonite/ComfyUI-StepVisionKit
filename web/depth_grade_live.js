@@ -508,18 +508,15 @@ export function frameSection(node) {
     sum.title = T("Run the node once, then pick black, white and the hero with eyedroppers and watch the curves. Sliders above follow");
     const host = h("div", `height:${FRAME_H}px;margin-top:${GAP}px`);
     det.append(sum, host);
-    let panel = null, restoring = false;
+    let panel = null;
     const open = () => { if (panel) return; panel = new ViewPanel(node, { embedded: true }); host.append(panel.root); panel.layout(); };
     const close = () => { panel?.dispose(); panel?.root.remove(); panel = null; };
     det.addEventListener("toggle", () => {
         det.open ? open() : close();
         node.properties ??= {};
         node.properties.svkFrameOpen = det.open;
-        if (restoring) { restoring = false; return; }          // розмір ноди з workflow вже враховує відкриту панель
-        node.setSize([node.size[0], Math.max(80, node.size[1] + (det.open ? FRAME_H : -FRAME_H))]);
-        node.setDirtyCanvas?.(true, true);
     });
-    const restore = () => { if (node.properties?.svkFrameOpen && !det.open) { restoring = true; det.open = true; } };
+    const restore = () => { if (node.properties?.svkFrameOpen && !det.open) { det.dataset.restoring = "1"; det.open = true; } };
     restore();
     return { root: det, restore, extraH: () => (det.open ? FRAME_H : 0), dispose: close };
 }
