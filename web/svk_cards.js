@@ -5,7 +5,7 @@ import { app } from "../../scripts/app.js";
 import { el, W, control, morePanel, keepWheel, fitToNode, scrollHint, hideWidget } from "./svk_ui.js";
 import { api } from "../../scripts/api.js";
 import { T, LANG, DICT } from "./svk_i18n.js";
-import { yoloPreview, PREVIEW_H } from "./yolo_preview.js";
+import { yoloPreview, PREVIEW_H, YOLO_SETTINGS } from "./yolo_preview.js";
 import { videoSection } from "./depth_grade_video.js";
 import { frameSection } from "./depth_grade_live.js";
 
@@ -140,6 +140,8 @@ function showPreviews(node, on) {
     node.setDirtyCanvas?.(true, true);
 }
 
+function redrawYolo() { for (const n of app.graph?._nodes || []) n.__svkPreview?.draw(); }
+
 function hideRepresented(node, specs) {
     for (const w of node.widgets || []) if (w.name !== "svk_card" && specs[w.name]) hideWidget(w);
 }
@@ -154,6 +156,31 @@ app.registerExtension({
         defaultValue: true,
         tooltip: "Box preview in YOLO Detect, Frame and Video in Depth Grade. Off: only the controls stay, the node gets shorter.",
         onChange: (v) => { for (const n of app.graph?._nodes || []) showPreviews(n, v !== false); },
+    }, {
+        id: YOLO_SETTINGS.color,
+        name: "YOLO preview: box colour",
+        category: ["StepVisionKit", "Cards", "YOLO box colour"],
+        type: "color",
+        defaultValue: "e0a458",
+        tooltip: "Colour of the boxes that go to the outputs",
+        onChange: redrawYolo,
+    }, {
+        id: YOLO_SETTINGS.labels,
+        name: "YOLO preview: box labels",
+        category: ["StepVisionKit", "Cards", "YOLO box labels"],
+        type: "combo",
+        defaultValue: "number",
+        options: [{ text: "Number", value: "number" }, { text: "Number, class, confidence", value: "class" }, { text: "None", value: "none" }],
+        tooltip: "What is written on a box. Hovering a box always shows everything",
+        onChange: redrawYolo,
+    }, {
+        id: YOLO_SETTINGS.others,
+        name: "YOLO preview: show dropped boxes",
+        category: ["StepVisionKit", "Cards", "YOLO dropped boxes"],
+        type: "boolean",
+        defaultValue: true,
+        tooltip: "Dim frames around boxes that do not go to the outputs; they stay clickable when hidden",
+        onChange: redrawYolo,
     }],
     setup() {
         // Nodes 2.0 не викликає onExecuted, тож превʼю бере вивід із події виконання

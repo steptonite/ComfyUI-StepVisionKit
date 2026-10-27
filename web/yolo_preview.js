@@ -15,7 +15,19 @@ const FIELDS = {
     VKDetect: { conf: "confidence", classes: "classes", sort: "sort_by", max: "max_objects" },
 };
 export const PREVIEW_H = 190;   // найменша висота кадру; далі він росте з шириною ноди
-const ACCENT = "#e0a458", DIM = "rgba(232,230,227,.4)", INK = "#1a1208";
+const DIM = "rgba(232,230,227,.4)";
+// налаштування паку (Settings → StepVisionKit → Cards): колір боксів, підписи, відкинуті бокси
+export const YOLO_SETTINGS = { color: "StepVisionKit.YoloBoxColor", labels: "StepVisionKit.YoloLabels", others: "StepVisionKit.YoloShowOthers" };
+function setting(id, def) {
+    try { return app.extensionManager?.setting?.get(id) ?? app.ui?.settings?.getSettingValue(id) ?? def; } catch (_) { return def; }
+}
+function look() {
+    let hex = String(setting(YOLO_SETTINGS.color, "e0a458")).replace(/^#/, "");
+    if (!/^[0-9a-f]{6}$/i.test(hex)) hex = "e0a458";
+    const [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16));
+    return { accent: "#" + hex, tint: `rgba(${r},${g},${b},.16)`, ink: r * .299 + g * .587 + b * .114 > 140 ? "#1a1208" : "#f4f2ef",
+             labels: setting(YOLO_SETTINGS.labels, "number"), others: setting(YOLO_SETTINGS.others, true) !== false };
+}
 const PREVIEW_OUT = 2;          // індекс виходу preview у LexYOLODetect (порожній без make_preview)
 const ZOOMS = [1, 2, 4], ZMAX = 8, DRAG = 4;
 
@@ -192,22 +204,25 @@ export function yoloPreview(node, key) {
         g.font = "10px ui-monospace, Menlo, monospace"; g.textAlign = "left"; g.textBaseline = "top";
         const tags = [];               // на боксі номер (обраний кліком - з ✓ і id); решта - у підказці під курсором
         const free = r => !tags.some(q => r.x < q.x + q.w && q.x < r.x + r.w && r.y < q.y + q.h && q.y < r.y + r.h);
+        const L = look();
         const order = ranked.map((b, j) => [b, j]).sort(([a], [b]) => kept.has(a) - kept.has(b));   // обрані малюються зверху
         for (const [b, j] of order) {
             const x = ox + b.x1 * s, y = oy + b.y1 * s, w = (b.x2 - b.x1) * s, h = (b.y2 - b.y1) * s, on = kept.has(b);
-            hits.push({ x, y, w, h, b, j });
-            if (on && picked.length) { g.fillStyle = "rgba(224,164,88,.16)"; g.fillRect(x, y, w, h); }
-            g.strokeStyle = on ? ACCENT : DIM; g.lineWidth = on ? (picked.length ? 3 : 2) : 1;
+            hits.push({ x, y, w, h, b, j });           // відкинуті без рамки теж клікаються
+            if (!on && !L.others) continue;
+            if (on && picked.length) { g.fillStyle = L.tint; g.fillRect(x, y, w, h); }
+            g.strokeStyle = on ? L.accent : DIM; g.lineWidth = on ? (picked.length ? 3 : 2) : 1;
             g.strokeRect(x, y, w, h);
-            const t = on && picked.length ? "✓ " + keyOf(b, j) : "#" + j;
+            if (L.labels === "none" && !(on && picked.length)) continue;
+            const t = on && picked.length ? "✓ " + keyOf(b, j) : L.labels === "class" ? `#${j} ${b.label} ${b.score.toFixed(2)}` : "#" + j;
             const tw = g.measureText(t).width + 6;
             const r = [{ x, y: Math.max(0, y - 13), w: tw, h: 13 }, { x, y, w: tw, h: 13 }].find(free);   // над боксом, інакше всередині
             if (!r && !on) continue;
             const q = r || { x, y, w: tw, h: 13 };
             tags.push(q);
-            g.fillStyle = on ? ACCENT : "rgba(14,14,16,.7)";
+            g.fillStyle = on ? L.accent : "rgba(14,14,16,.7)";
             g.fillRect(q.x, q.y, q.w, q.h);
-            g.fillStyle = on ? INK : "#e8e6e3";
+            g.fillStyle = on ? L.ink : "#e8e6e3";
             g.fillText(t, q.x + 3, q.y + 2);
         }
         outLine(ranked, kept, picked);
