@@ -50,6 +50,8 @@ const EXTRA = { SVKDepthGrade: [frameSection, videoSection] };
 const OWN = { LexYOLODetect: ["picked"] };
 // лише колір ноди: власний UI або превʼю картинок під віджетами, картку поверх них не ставимо; Live - стара, лишається як була
 const COLOR_ONLY = ["SVKSaveImageHDR", "SVKSaveDepth16", "SVKRawDepthLoad", "SVKDepthGradeLive", "SVKDepthGradeView", "SVKDepthGradeVideoView"];
+// налаштування паку: превʼю в картках (YOLO, кадр і відео Depth Grade) можна сховати, керування лишаються
+const PV_SETTING = "StepVisionKit.Previews";
 const COLOR_FIELDS = new Set(["color", "tint", "key_color"]);
 // англійські підписи, де імʼя віджета не читається; решта - імʼя без «_»
 const EN = { conf: "Confidence", imgsz: "Image size", model_name: "Model", class_filter: "Classes", format_in: "Box format",
@@ -110,9 +112,32 @@ function build(node, key, specs) {
     const more = rest.length ? morePanel(node, specs, rest.map(n => { const { seg, ...o } = opts(node, n, specs[n]); return [n, label(key, n), o]; })) : null;
     if (more) root.append(more);
     scrollHint(root);
+    root.previews = [prev?.root, ...parts.map(p => p.root)].filter(Boolean);
     root.sync = () => { ctl.forEach(c => c.sync()); more?.sync(); prev?.draw(); };
     const minH = (prev ? PREVIEW_H + ROW_H + 20 : 0) + main.length * ROW_H + (more ? ROW_H : 0) + parts.length * ROW_H + CARD_PAD;
-    return { root, minH: () => minH + (extra?.extraH() || 0) };
+    const pvH = (prev ? PREVIEW_H + ROW_H + 20 : 0) + parts.length * ROW_H;
+    return { root, minH: () => minH + (extra?.extraH() || 0) - (root.dataset.pv === "off" ? pvH : 0) };
+}
+
+function previewsOn() {
+    try { return app.extensionManager?.setting?.get(PV_SETTING) ?? app.ui?.settings?.getSettingValue(PV_SETTING) ?? true; } catch (_) { return true; }
+}
+// сховати / показати превʼю картки; нода міняє висоту рівно на висоту превʼю
+function showPreviews(node, on) {
+    const root = node.__svkCard, pv = root?.previews;
+    if (!pv?.length || (root.dataset.pv !== "off") === on) return;
+    const gap = parseFloat(getComputedStyle(root).rowGap) || 0;
+    const height = () => pv.reduce((s, e) => s + (e.open ? e.firstElementChild.offsetHeight : e.offsetHeight) + gap, 0);  // відкриту розгортку закриваємо окремо
+    if (!on) {
+        pv.forEach(e => { if (e.open) e.open = false; });       // закрита розгортка стискає ноду сама
+        const h = height();
+        root.dataset.pv = "off";
+        node.setSize([node.size[0], Math.max(node.computeSize()[1], node.size[1] - h)]);
+    } else {
+        root.dataset.pv = "";
+        requestAnimationFrame(() => node.setSize([node.size[0], node.size[1] + height()]));
+    }
+    node.setDirtyCanvas?.(true, true);
 }
 
 function hideRepresented(node, specs) {
@@ -121,6 +146,15 @@ function hideRepresented(node, specs) {
 
 app.registerExtension({
     name: "StepVisionKit.Cards",
+    settings: [{
+        id: PV_SETTING,
+        name: "Show previews in nodes",
+        category: ["StepVisionKit", "Cards", "Show previews in nodes"],
+        type: "boolean",
+        defaultValue: true,
+        tooltip: "Box preview in YOLO Detect, Frame and Video in Depth Grade. Off: only the controls stay, the node gets shorter.",
+        onChange: (v) => { for (const n of app.graph?._nodes || []) showPreviews(n, v !== false); },
+    }],
     setup() {
         // Nodes 2.0 не викликає onExecuted, тож превʼю бере вивід із події виконання
         api.addEventListener("executed", (ev) => {
@@ -150,6 +184,7 @@ app.registerExtension({
                 const computeSize = this.computeSize;
                 this.computeSize = function () { const r = computeSize.apply(this, arguments); r[0] = Math.max(r[0], MIN_W); return r; };
             }
+            if (!previewsOn() && root.previews.length) root.dataset.pv = "off";     // до першого розміру: нова нода одразу без превʼю
             const sz = this.computeSize();
             this.setSize([Math.max(START_W, sz[0]), sz[1]]);
             fitToNode(this, root);

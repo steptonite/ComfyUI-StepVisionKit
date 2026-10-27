@@ -279,3 +279,5 @@
 .svk-yolo-clear { flex: none; font-size: 11px; }
 .svk-yolo-out { font: var(--svk-fs-cap) var(--svk-mono); color: var(--svk-accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 16px; }
 .svk-yolo-out.is-empty { color: var(--svk-dim); }
+/* налаштування «Show previews in nodes» вимкнене (svk_cards.js) */
+.svk-card[data-pv="off"] > .svk-yolo, .svk-card[data-pv="off"] > .svk-dg-frame, .svk-card[data-pv="off"] > .svk-dg-video { display: none; }
