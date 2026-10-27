@@ -1,5 +1,6 @@
 """Нода SVKCameraRealism: «знято камерою» - сенсорний шум, байєр, ISP, оптика, глибина, тремтіння. Рушій - engine.py (numpy)."""
 import numpy as np
+from comfy_execution.graph_utils import ExecutionBlocker
 
 from . import params as P
 from . import preview
@@ -10,6 +11,7 @@ _TIP = {
     "depth": "Optional depth map (bright = near), one for the whole batch or one per frame — from Depth Grade or Depth Receiver. Enables aerial haze and near detail.",
     "profile": "Camera look: picks a ready-made set of all settings. Custom uses the sliders under «more»: moving a slider switches to Custom.",
     "strength": "Master strength 0..1: scales every effect strength of the profile (1 = the profile exactly, 0 = nothing is computed).",
+    "auto_run": "On: every Run computes the camera look and passes the frames on. Off: Run only refreshes the card preview, the output stays blocked until «Render» on the card.",
     "seed": "Noise seed. Noise is new on every frame; the fixed sensor pattern depends only on the seed.",
 }
 
@@ -25,6 +27,7 @@ class SVKCameraRealism:
             opt[name] = ("INT" if is_int else "FLOAT",
                          {"default": int(d) if is_int else float(d), "min": lo, "max": hi, "step": step,
                           "label": label, "tooltip": tip})
+        opt["auto_run"] = ("BOOLEAN", {"default": True, "tooltip": _TIP["auto_run"]})   # останнім: widgets_values старих workflow лягають по порядку
         return {
             "required": {
                 "image": ("IMAGE", {"tooltip": _TIP["image"]}),
@@ -45,7 +48,7 @@ class SVKCameraRealism:
     FUNCTION = "run"
     CATEGORY = "StepVisionKit/Realism"
 
-    def run(self, image, profile, strength, seed, depth=None, unique_id=None, **sliders):
+    def run(self, image, profile, strength, seed, depth=None, auto_run=True, unique_id=None, **sliders):
         import torch
         frames = image.detach().cpu().numpy()[..., :3]
         dep = None
@@ -53,15 +56,16 @@ class SVKCameraRealism:
             dep = depth.detach().cpu().numpy().astype(np.float32)
             dep = dep.mean(axis=-1) if dep.ndim == 4 else dep
         custom = {k: v for k, v in sliders.items() if k in P.NAMES}
-        p = P.resolve(profile, strength, custom)
         off = int(sliders.get("frame_offset", 0))
-        out = apply_realism(frames, dep, p, seed=int(seed), frame_offset=off)
         ui = []
         if unique_id is not None:                  # кадри для превʼю й лупи на картці
             try:
                 ui = [preview.store(unique_id, frames, dep, off)]
             except Exception as e:   # noqa: BLE001 - превʼю не має валити рендер
                 print("[CameraRealism] preview cache: %r" % e)
+        if not auto_run:                           # без auto_run далі не йде нічого, поки не натиснуть «Render» на картці
+            return {"ui": {"svk_realism": ui}, "result": (ExecutionBlocker(None),)}
+        out = apply_realism(frames, dep, P.resolve(profile, strength, custom), seed=int(seed), frame_offset=off)
         if np.shares_memory(out, frames):          # нічого не активно: рушій віддав вхід як є
             res = image
         else:

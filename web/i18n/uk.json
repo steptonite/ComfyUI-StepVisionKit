@@ -1132,6 +1132,10 @@
         },
         "frame_offset": {
           "tooltip": "Номер першого кадру цього батча в усьому кліпі. Став, коли кліп обробляється шматками, щоб тремтіння й мерехтіння тривали безшовно."
+        },
+        "auto_run": {
+          "label": "Авто",
+          "tooltip": "Увімкнено: кожен Run рахує камеру й передає кадри далі. Вимкнено: Run лише оновлює превʼю в картці, вихід заблоковано, доки не натиснеш «Render» на картці."
         }
       },
       "description": "Робить рендер схожим на зйомку справжньою камерою: шум сенсора, обробка камери, оптика, тон. Обери профіль камери; «ще» відкриває всі налаштування.",
@@ -2313,6 +2317,9 @@
     "click to pick": "клік — обрати",
     "click the number to type a value": "клік по числу — вписати значення",
     "Frame · eyedroppers and curves": "Кадр · піпетки й криві",
-    "Run the node once, then pick black, white and the hero with eyedroppers and watch the curves. Sliders above follow": "Один раз запусти ноду (Run), далі піпетками обери чорне, біле й героя та дивись криві. Повзунки вище підлаштуються самі"
+    "Run the node once, then pick black, white and the hero with eyedroppers and watch the curves. Sliders above follow": "Один раз запусти ноду (Run), далі піпетками обери чорне, біле й героя та дивись криві. Повзунки вище підлаштуються самі",
+    "Render": "Render",
+    "Computes the camera look once and passes the frames on, even with Auto off": "Рахує камеру один раз і передає кадри далі, навіть коли Авто вимкнено",
+    "On: every Run passes the frames on. Off: Run only refreshes the preview": "Увімкнено: кожен Run передає кадри далі. Вимкнено: Run лише оновлює превʼю"
   }
 }

@@ -277,6 +277,15 @@ function buildPreview(S) {
     return [view, bar, close];
 }
 
+async function renderOnce(node) {
+    const w = W(node, "auto_run");
+    if (!w) return;
+    const was = w.value;
+    w.value = true; markChanged();
+    try { await app.queuePrompt(0, 1); } catch (e) { console.warn("[CameraRealism]", e); }
+    w.value = was; markChanged();
+}
+
 function build(node, specs) {
     const S = { node, ctl: [], chips: new Map(), userChips: new Set(), user: {}, userActive: null,
                 profiles: specs.profile?.[1]?.svk_profiles || null,
@@ -314,6 +323,17 @@ function build(node, specs) {
     const strength = control(node, "strength", specs.strength, T("Strength"), { fmt: v => Math.round(v * 100) + "%", onChange: () => schedule(S) });
     const seed = control(node, "seed", specs.seed, T("Seed"), { number: true, onChange: () => schedule(S) });
 
+    // як у Depth Look: без «Авто» Run лише оновлює превʼю, а кадри далі віддає «Render»
+    const runRow = el("div", "svk-bar");
+    const auto = control(node, "auto_run", specs.auto_run, T("Auto"));
+    auto.row.title = T("On: every Run passes the frames on. Off: Run only refreshes the preview");
+    auto.row.classList.add("grow");
+    const render = el("button", "svk-btn primary", T("Render")); render.type = "button";
+    render.title = T("Computes the camera look once and passes the frames on, even with Auto off");
+    render.onclick = () => renderOnce(node);
+    runRow.append(auto.row, render);
+    S.ctl.push(auto);
+
     const own = el("details", "svk-more");
     const ownBody = el("div", "body body-col"), ownBox = el("div", "svk-sub");
     for (const [name, label] of OWN) {
@@ -342,7 +362,7 @@ function build(node, specs) {
     }
     more.append(moreSummary(count), body);
 
-    root.append(...pv, cap, chips, saveRow, strength.row, seed.row, own, more);
+    root.append(...pv, runRow, cap, chips, saveRow, strength.row, seed.row, own, more);
     S.hint = scrollHint(root);
     return S;
 }
