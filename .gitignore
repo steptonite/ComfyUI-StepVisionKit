@@ -26,3 +26,6 @@ depth_look/renders/
 # Depth Look · відео: користувацькі пресети руху/анімації (вбудовані живуть у коді)
 depth_look/video_presets/
 realism/user_presets/
+# робочі нотатки й гейт приватного - лише локально, не в публічний репо
+docs/
+.privacy/
