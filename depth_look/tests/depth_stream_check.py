@@ -109,8 +109,8 @@ def child(a):
             S = imp.import_module("svk.depth_look.depth_stream")
             sm = "bilinear" if a.child == "broken" else "area"
             b = int(a.child[5:]) if a.child.startswith("batch") else 1
-            dep, n, info = S.SVKVideoDepthStream().run(model, "", 0, a.frames, 0.5, 518, True, True, batch=b, ram_budget_gb=a.ram_gb,
-                                                       path=a.video, scale_method=sm, cache_folder=a.cache)
+            dep, n, info = S.SVKVideoDepthStream().run(model, V.SVKLoadVideoPro().load("", 0, a.frames, "as encoded", path=a.video)[0], 0, 0, 0.5, 518, True, True, batch=b, ram_budget_gb=a.ram_gb,
+                                                       scale_method=sm, cache_folder=a.cache)
             print(info)
         secs = time.time() - t1
         out = np.lib.format.open_memmap(a.out, mode="w+", dtype=np.float32, shape=tuple(dep.shape[:3]))

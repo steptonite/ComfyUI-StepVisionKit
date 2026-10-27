@@ -37,7 +37,7 @@ const MAIN = {
     SVKLoadVideoPro: ["file", "start_frame", "frame_count", "output_curve"],
     SVKLoadImageSequence: ["folder", "pattern", "start_frame", "frame_count"],
     SVKSaveVideoHDR: ["filename_prefix", "format", "fps", "transfer"],
-    SVKVideoDepthStream: ["file", "frame_count", "resolution", "batch"],
+    SVKVideoDepthStream: ["frame_count", "resolution", "batch"],
     SVKDepthGrade: ["depth_is", "look", "foreground_pop", "midtones", "deflicker"],
     SVKRawDepthSave: null,           // null - усі віджети на видноті (їх ≤3)
     SVKDepthReceiver: null,
