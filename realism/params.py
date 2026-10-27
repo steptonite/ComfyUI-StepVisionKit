@@ -148,6 +148,9 @@ NEUTRAL.update({"iso": 800, "noise_size": 0.25, "isp_sharpen_radius": 1.2, "shak
                 "og_shadows": 1.0, "og_mids": 1.0, "og_highlights": 0.4, "og_animate": 1.0, "og_replace": 0})
 
 # значення профілів при майстер-силі 1. «Сила» 1 (типова) - рівно профіль, 0.5 - половина кожної сили.
+# v4 (26.10.2026, відгук: усе, крім ARRI, пережарювало, кольорові точки, айфон знищував кадр): ефекти, яких не виміряти
+# на справжніх кадрах (Smart HDR, акварель у тінях, байєр, пропуск рядків, плями, смуги, кліп), зменшено до рівня
+# делікатності ARRI; шум, шумодав, шарп, текстура і блоки - із замірів (calib/*.json)
 PROFILES = {
     # ARRI Alexa 35: дрібний luma-шум, мʼяке плече світлих, теплувата шкіра, без шарпу; затвор 180°
     "ARRI Alexa 35": dict(iso=800, noise_luma=0.35, noise_chroma=0.03, noise_size=0.15, fixed_pattern=0.02,
@@ -155,37 +158,37 @@ PROFILES = {
                           depth_haze=0.15, shake=0.06, highlight_rolloff=0.65, blacks=-0.10, warmth=0.15,
                           saturation=-0.05, skin_hue=-0.10, motion_blur=0.50),
     # RED / Sony Venice: трохи більше шуму, легкий шарп, помірне плече
-    "Cinema digital": dict(iso=800, noise_luma=0.45, noise_chroma=0.06, noise_size=0.20, fixed_pattern=0.04,
-                           bayer_amount=0.25, isp_sharpen=0.15, isp_sharpen_radius=1.0, vignette=0.12, distortion=-0.02,
+    "Cinema digital": dict(iso=800, noise_luma=0.45, noise_chroma=0.03, noise_size=0.20, fixed_pattern=0.04,
+                           bayer_amount=0.10, isp_sharpen=0.08, isp_sharpen_radius=1.0, vignette=0.12, distortion=-0.02,
                            chroma_ab=0.12, corner_softness=0.20, veil=0.08, depth_haze=0.15, depth_detail=0.10,
                            shake=0.10, rolling_shutter=0.15, highlight_rolloff=0.40, saturation=0.05, skin_hue=0.05,
                            motion_blur=0.50),
     # Sony/Canon бездзеркалка: жорсткий кліп, смуги 8 біт, блоки, жовтувата шкіра Sony, rolling shutter
     "Mirrorless": dict(iso=1600, noise_luma=0.45, noise_chroma=0.10, noise_size=0.20, fixed_pattern=0.05,
-                       bayer_amount=0.35, isp_denoise=0.15, isp_sharpen=0.35, isp_sharpen_radius=1.0, isp_blocks=0.20,
+                       bayer_amount=0.10, isp_denoise=0.15, isp_sharpen=0.35, isp_sharpen_radius=1.0, isp_blocks=0.20,
                        vignette=0.20, distortion=0.05, chroma_ab=0.18, corner_softness=0.25, veil=0.05,
                        depth_haze=0.15, depth_detail=0.15, shake=0.20, flicker=0.05, rolling_shutter=0.40,
-                       highlight_clip=0.50, blacks=0.15, warmth=-0.05, saturation=0.10, skin_hue=0.40, banding=0.40,
+                       highlight_clip=0.25, blacks=0.05, warmth=-0.05, saturation=0.05, skin_hue=0.15, banding=0.10,
                        motion_blur=0.35),
     # iPhone: Smart HDR, Deep Fusion, акварель у тінях; короткий затвор. Портретне боке і зелений привид вимкнено (26.10.2026):
     # на справжніх кадрах їх немає, повзунки лишились для ручного вибору
     "iPhone": dict(iso=640, noise_luma=0.25, noise_chroma=0.10, noise_size=0.30, fixed_pattern=0.02,
-                   bayer_amount=0.30, isp_denoise=0.50, isp_sharpen=0.40, isp_sharpen_radius=1.4, isp_blocks=0.25,
-                   vignette=0.08, chroma_ab=0.06, corner_softness=0.15, veil=0.06, depth_detail=0.20,
-                   shake=0.30, flicker=0.05, rolling_shutter=0.50, smart_hdr=0.75, deep_fusion=0.65, shadow_smear=0.60,
-                   blacks=-0.25, warmth=0.10, saturation=0.18, motion_blur=0.15),
+                   bayer_amount=0.0, isp_denoise=0.50, isp_sharpen=0.40, isp_sharpen_radius=1.4, isp_blocks=0.25,
+                   vignette=0.08, chroma_ab=0.06, corner_softness=0.15, veil=0.06, depth_detail=0.05,
+                   shake=0.30, flicker=0.05, rolling_shutter=0.50, smart_hdr=0.15, deep_fusion=0.65, shadow_smear=0.15,
+                   blacks=-0.08, warmth=0.05, saturation=0.08, motion_blur=0.15),
     # дзеркалка 2012 у відео (Canon 5D Mk III / 7D): пропуск рядків, плями в тінях, кліп світлих, вбиті чорні, тепла Canon
     "DSLR 2012": dict(iso=1600, noise_luma=0.30, noise_chroma=0.08, noise_size=0.25, fixed_pattern=0.08,
-                      bayer_amount=0.50, isp_sharpen=0.15, isp_sharpen_radius=1.2, isp_blocks=0.35,
+                      bayer_amount=0.20, isp_sharpen=0.15, isp_sharpen_radius=1.2, isp_blocks=0.35,
                       vignette=0.30, distortion=0.08, chroma_ab=0.30, corner_softness=0.30, veil=0.08,
-                      depth_haze=0.10, shake=0.25, flicker=0.05, rolling_shutter=0.45, line_skip=0.70,
-                      chroma_blotch=0.60, banding=0.35, highlight_clip=0.60, blacks=0.35, warmth=0.25,
-                      saturation=0.10, skin_hue=-0.30, motion_blur=0.50),
+                      depth_haze=0.10, shake=0.25, flicker=0.05, rolling_shutter=0.45, line_skip=0.30,
+                      chroma_blotch=0.20, banding=0.15, highlight_clip=0.30, blacks=0.12, warmth=0.12,
+                      saturation=0.05, skin_hue=-0.12, motion_blur=0.50),
     # 16 мм плівка: зерно емульсії, halation, плече й підняті тіні, gate weave; без цифрового шуму, байєра й шарпу.
     # Пил вимкнено (26.10.2026): білі цятки читаються як брак, а не як плівка
     "16mm film": dict(iso=800, noise_size=0.65, vignette=0.40, distortion=0.04, chroma_ab=0.20,
-                      corner_softness=0.45, veil=0.20, depth_haze=0.20, shake=0.15, flicker=0.30,
-                      film_grain=0.80, halation=0.60, gate_weave=0.60, highlight_rolloff=0.80,
+                      corner_softness=0.45, veil=0.20, depth_haze=0.20, shake=0.15, flicker=0.15,
+                      film_grain=0.50, halation=0.35, gate_weave=0.35, highlight_rolloff=0.80,
                       blacks=-0.20, warmth=0.20, saturation=-0.15, motion_blur=0.50),
 }
 # v3 (26.10.2026): шум і шумодав - із замірів на справжніх кадрах камер (calib/*.json, звідки й як - там само), не на око.

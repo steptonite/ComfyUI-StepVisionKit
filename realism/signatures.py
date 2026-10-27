@@ -174,6 +174,14 @@ def dust(f, s, seed, fi):
 
 
 # ---------------------------------------------------------------- iPhone
+def add_luma(f, dy):
+    """Додати до яскравості без кольорових цяток: світлішання - додаванням (колір не міняється),
+    темнішання - множенням (канали не йдуть нижче нуля, тому не обрізаються по-різному й не дають кольорових крапок)."""
+    y = np.maximum(_luma(f), 1e-4)
+    k = np.where(dy < 0, np.maximum(1.0 + dy / y, 0.0), 1.0)
+    return f * k[..., None] + np.maximum(dy, 0.0)[..., None]
+
+
 def smart_hdr(f, s):
     """Локальний тонмап: тіні підняті, світлі приплющені, ореоли біля контрастних країв (базовий шар - гаусів, без edge-aware)."""
     H, W = f.shape[:2]
@@ -185,7 +193,10 @@ def smart_hdr(f, s):
     L2 = mu + (base - mu) * (1.0 - 0.55 * k) + (L - base) * (1.0 + 0.3 * k)
     y2 = np.exp(L2) - 0.02
     y2 = y2 * (0.92 / max(float(np.percentile(y2, 99.5)), 1e-3)) ** (0.5 * k)
-    return f * (np.clip(y2, 0.0, 1.2) / y)[..., None]
+    # колір тягнемо за яскравістю не повністю (≤×1.3): у тінях повне множення роздувало шум і кольорові плями
+    y2 = np.clip(y2, 0.0, 1.2)
+    c = f - y[..., None]
+    return y2[..., None] + c * np.minimum(y2 / y, 1.3)[..., None]
 
 
 def deep_fusion(f, s):
@@ -194,7 +205,7 @@ def deep_fusion(f, s):
     band = cv2.GaussianBlur(y, (0, 0), 0.7) - cv2.GaussianBlur(y, (0, 0), 2.4)
     tex = cv2.GaussianBlur(np.abs(band), (0, 0), 3.0)
     w = _smooth(tex, 0.004, 0.02)
-    return f + (2.2 * min(s, 1.5) * band * w)[..., None]
+    return add_luma(f, 2.2 * min(s, 1.5) * band * w)
 
 
 def shadow_smear(f, s):

@@ -290,20 +290,20 @@ def _blocks(f, amount):
     return np.stack([R, G, B], axis=-1) / 255.0
 
 
-def _isp(f, p):
-    if p["isp_denoise"] > 1e-6:
-        a = min(p["isp_denoise"], 1.0)
-        src = np.ascontiguousarray(f, dtype=np.float32)
-        bil = cv2.bilateralFilter(src, 5, 0.04 + 0.12 * a, 2.0)
-        if a > 0.6:                                              # сильний шумодав: другий прохід - «віск»
-            bil = cv2.bilateralFilter(bil, 5, 0.04 + 0.12 * a, 2.0)
-        w = min(1.0, 1.2 * a)
-        f = f + (bil - f) * w
-    if p["isp_sharpen"] > 1e-6:
-        y = _luma(f)
-        dy = y - cv2.GaussianBlur(y, (0, 0), max(0.4, p["isp_sharpen_radius"]))
-        f = f + (2.0 * p["isp_sharpen"] * dy)[..., None]
-    return f
+def _denoise(f, p):
+    a = min(p["isp_denoise"], 1.0)
+    src = np.ascontiguousarray(f, dtype=np.float32)
+    bil = cv2.bilateralFilter(src, 5, 0.04 + 0.12 * a, 2.0)
+    if a > 0.6:                                                  # сильний шумодав: другий прохід - «віск»
+        bil = cv2.bilateralFilter(bil, 5, 0.04 + 0.12 * a, 2.0)
+    w = min(1.0, 1.2 * a)
+    return f + (bil - f) * w
+
+
+def _sharpen(f, p):
+    y = _luma(f)
+    dy = y - cv2.GaussianBlur(y, (0, 0), max(0.4, p["isp_sharpen_radius"]))
+    return S.add_luma(f, 2.0 * p["isp_sharpen"] * dy)
 
 
 # ---------------------------------------------------------------- головна
@@ -394,8 +394,23 @@ def apply_realism(frames, depth, params, seed=0, frame_offset=0):
             rg = np.random.default_rng([seed & 0xFFFFFFFF, 7100, fi])
             g = 0.5 * _wobble(seed, 3, fi, 2.0) + 0.5 * float(rg.standard_normal())
             f = f * (1.0 + 0.06 * p["flicker"] * g)
+        # порядок як у камері (v4, 26.10.2026): спершу обробка «чистої» сцени (байєр, HDR, текстура, шарп, тон),
+        # потім шум і шумодав, що його формує. Виміряний на справжніх кадрах шум - це шум ГОТОВОГО кадру;
+        # коли HDR/шарп ішли після шуму, вони множили його в рази і робили кольорові цятки в тінях
         if p["halation"] > 1e-6:
             f = S.halation(f, p["halation"])
+        if do_bayer:
+            f = _bayer(f, p["bayer_amount"])
+        if p["line_skip"] > 1e-6:
+            f = S.line_skip(f, p["line_skip"])
+        if p["smart_hdr"] > 1e-6:
+            f = S.smart_hdr(f, p["smart_hdr"])
+        if p["deep_fusion"] > 1e-6:
+            f = S.deep_fusion(f, p["deep_fusion"])
+        if p["isp_sharpen"] > 1e-6:
+            f = _sharpen(f, p)
+        if do_tone:
+            f = S.tone_colour(f, p)
         if p["film_grain"] > 1e-6:
             f = S.film_grain(f, p["film_grain"], np.random.default_rng([seed & 0xFFFFFFFF, 6001, fi]))
         if p["og_amount"] > 1e-6:
@@ -405,20 +420,10 @@ def apply_realism(frames, depth, params, seed=0, frame_offset=0):
             f = _sensor(f, p, rng, seed)
         if p["chroma_blotch"] > 1e-6:
             f = S.chroma_blotch(f, p["chroma_blotch"], np.random.default_rng([seed & 0xFFFFFFFF, 6101, fi]))
-        if do_bayer:
-            f = _bayer(f, p["bayer_amount"])
-        if p["line_skip"] > 1e-6:
-            f = S.line_skip(f, p["line_skip"])
-        if do_isp:
-            f = _isp(f, p)
+        if p["isp_denoise"] > 1e-6:
+            f = _denoise(f, p)
         if p["shadow_smear"] > 1e-6:
             f = S.shadow_smear(f, p["shadow_smear"])
-        if p["smart_hdr"] > 1e-6:
-            f = S.smart_hdr(f, p["smart_hdr"])
-        if p["deep_fusion"] > 1e-6:
-            f = S.deep_fusion(f, p["deep_fusion"])
-        if do_tone:
-            f = S.tone_colour(f, p)
         if p["banding"] > 1e-6:
             f = S.banding(np.clip(f, 0.0, 1.0), p["banding"])
         if p["isp_blocks"] > 1e-6:
